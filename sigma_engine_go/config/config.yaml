@@ -1,0 +1,123 @@
+# Sigma Detection Engine - Production Configuration
+# This file configures all aspects of the detection engine
+
+# File monitoring configuration
+file_monitoring:
+  # Directory to watch for log files (events from agents)
+  watch_directory: "data/agent_ecs-events"
+  
+  # File pattern to match (glob pattern)
+  file_pattern: "*.jsonl"
+  
+  # Poll interval in milliseconds (how often to check for new files/lines)
+  poll_interval_ms: 100
+  
+  # Maximum file size to monitor (in GB)
+  max_file_size_gb: 1
+
+  # Checkpoint file for persisting read positions across restarts
+  # Prevents duplicate alert generation when reprocessing same events
+  checkpoint_file: "data/checkpoint.json"
+  
+  # How often to save checkpoint (in seconds)
+  checkpoint_interval_seconds: 30
+
+# Event counting configuration
+event_counting:
+  # Time window for counting events (in minutes)
+  window_size_minutes: 5
+  
+  # Alert if event count >= this threshold
+  alert_threshold: 10
+  
+  # Alert if rate >= this threshold (events per minute)
+  rate_threshold_per_minute: 5.0
+
+# Escalation configuration
+escalation:
+  # Escalate if event count > this threshold
+  count_threshold: 100
+  
+  # Escalate if rate > this threshold (events per minute)
+  rate_threshold_per_minute: 10.0
+  
+  # Escalate all critical severity alerts
+  enable_critical_escalation: true
+
+# Detection engine configuration
+detection:
+  # Number of worker goroutines for parallel processing
+  # Set to 0 to use number of CPU cores
+  workers: 0
+  
+  # Batch size for processing events
+  batch_size: 100
+  
+  # Cache size for field resolution and regex
+  cache_size: 10000
+
+  # Minimum confidence required to emit a detection/alert (0.0-1.0)
+  min_confidence: 0.6
+
+  # Apply Sigma "filter*" selections as suppression even if the condition doesn't explicitly include "and not filter"
+  enable_filters: true
+
+  # Optional: reduce confidence when key context (parent/user/cmd) is missing
+  enable_context_validation: true
+
+# Global whitelisting to suppress common legitimate activity (reduces false positives)
+filtering:
+  enable: true
+
+  whitelisted_processes:
+    - 'C:\Windows\System32\svchost.exe'
+    - 'C:\Windows\System32\services.exe'
+    - 'C:\Windows\System32\lsass.exe'
+    - 'C:\Program Files\Microsoft*'
+    - 'C:\Program Files (x86)\Microsoft*'
+    - '*\vscode.exe'
+    - '*\Code.exe'
+    - '*\devenv.exe'
+
+  whitelisted_users:
+    - 'NT AUTHORITY\SYSTEM'
+    - 'NT AUTHORITY\LOCAL SERVICE'
+    - 'NT AUTHORITY\NETWORK SERVICE'
+
+  whitelisted_parent_processes:
+    - 'C:\Windows\explorer.exe'
+    - 'C:\Windows\System32\services.exe'
+
+# Output configuration
+output:
+  # Output file path for alerts (JSONL format)
+  # Will be created if it doesn't exist
+  output_file: "data/alerts.jsonl"
+  
+  # Log level (debug, info, warn, error)
+  log_level: "info"
+
+# Rules configuration
+rules:
+  # Directory containing Sigma rules (use "sigma_rules/rules" if no junction, or "rules" when rules -> sigma_rules)
+  rules_directory: "sigma_rules/rules"
+  
+  # Product whitelist: only load rules for these products (empty = all products)
+  # Default: ["windows"] - only Windows rules for EDR agent
+  product_whitelist:
+    - windows
+
+  # Rule caching (dramatically speeds up startup)
+  cache_file: "cache/sigma_rules.cache"
+  cache_max_age_hours: 24
+
+  # Rule parsing concurrency (I/O bound)
+  parallel_workers: 32
+
+  # Quality filters: relax to accept all Windows process-creation rules (SigmaHQ uses experimental/test and various levels)
+  min_level: "high"
+  allowed_status:
+    - "stable"
+    # - "test"
+  skip_experimental: true
+

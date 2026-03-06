@@ -1,0 +1,36 @@
+title: Bitsadmin Download File From URL
+id: 4d2b3c4d-5e6f-7a8b-9c0d-1e2f3a4b5c6d
+status: stable
+description: |
+    Detects bitsadmin.exe being used to download files from remote URLs.
+    BITS is often abused for stealthy file transfers as it can
+    run in the background and survive reboots.
+author: Detection Engineering Team
+date: 2026/01/03
+references:
+    - https://attack.mitre.org/techniques/T1105/
+    - https://attack.mitre.org/techniques/T1197/
+    - https://lolbas-project.github.io/lolbas/Binaries/Bitsadmin/
+logsource:
+    product: windows
+    category: process_creation
+detection:
+    selection:
+        Image|endswith: '\bitsadmin.exe'
+        CommandLine|contains|all:
+            - '/transfer'
+            - 'http'
+    condition: selection
+fields:
+    - CommandLine
+    - ParentImage
+    - User
+falsepositives:
+    - SCCM/WSUS operations
+    - Legitimate software update mechanisms
+level: high
+tags:
+    - attack.command_and_control
+    - attack.t1105
+    - attack.persistence
+    - attack.t1197

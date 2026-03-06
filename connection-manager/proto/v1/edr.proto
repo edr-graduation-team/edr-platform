@@ -1,0 +1,614 @@
+// EDR Platform - gRPC Service Definition
+// Version: 1.0.0
+// 
+// This file defines the core gRPC services for agent-server communication
+// including event ingestion, heartbeat monitoring, certificate management,
+// and agent registration.
+
+syntax = "proto3";
+
+package edr.v1;
+
+option go_package = "github.com/edr-platform/connection-manager/proto/v1;edrv1";
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/duration.proto";
+import "google/protobuf/empty.proto";
+
+// ============================================================================
+// SERVICE DEFINITION
+// ============================================================================
+
+// EventIngestionService handles all agent-to-server communication
+service EventIngestionService {
+  // StreamEvents - Bidirectional streaming for event ingestion
+  // Agent sends EventBatch messages, server responds with CommandBatch
+  rpc StreamEvents(stream EventBatch) returns (stream CommandBatch) {}
+
+  // Heartbeat - Periodic health check from agent
+  rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse) {}
+
+  // RequestCertificateRenewal - Agent requests new certificate before expiry
+  rpc RequestCertificateRenewal(CertRenewalRequest) returns (CertificateResponse) {}
+
+  // RegisterAgent - Initial agent registration with installation token
+  rpc RegisterAgent(AgentRegistrationRequest) returns (AgentRegistrationResponse) {}
+
+  // SendCommandResult - Agent sends command execution result back to server (C2 feedback)
+  rpc SendCommandResult(CommandResult) returns (google.protobuf.Empty) {}
+}
+
+// ============================================================================
+// EVENT INGESTION MESSAGES
+// ============================================================================
+
+// EventBatch - Container for multiple events sent by agent
+message EventBatch {
+  // Reserved for future use
+  reserved 50 to 60;
+
+  // Unique identifier for this batch (UUID format)
+  string batch_id = 1;
+
+  // Agent that generated this batch
+  string agent_id = 2;
+
+  // When this batch was created
+  google.protobuf.Timestamp timestamp = 3;
+
+  // Compression algorithm used for payload
+  Compression compression = 4;
+
+  // Compressed/serialized events payload
+  bytes payload = 5;
+
+  // Number of events in this batch
+  int32 event_count = 6;
+
+  // Additional metadata (trace_id, correlation_id, etc.)
+  map<string, string> metadata = 7;
+
+  // Checksum for payload integrity verification (SHA256)
+  string checksum = 8;
+}
+
+// Compression algorithms supported
+enum Compression {
+  COMPRESSION_NONE = 0;
+  COMPRESSION_GZIP = 1;
+  COMPRESSION_SNAPPY = 2;
+}
+
+// Event - Individual security event (used when decompressed)
+message Event {
+  // Reserved for future use
+  reserved 100 to 110;
+
+  // Unique event identifier
+  string event_id = 1;
+
+  // Event timestamp
+  google.protobuf.Timestamp timestamp = 2;
+
+  // Event type discriminator
+  oneof event_type {
+    ProcessEvent process = 10;
+    NetworkEvent network = 11;
+    FileEvent file = 12;
+    RegistryEvent registry = 13;
+    DnsEvent dns = 14;
+    AuthEvent auth = 15;
+    DriverEvent driver = 16;
+    ImageLoadEvent image_load = 17;
+    PipeEvent pipe = 18;
+    WmiEvent wmi = 19;
+    ClipboardEvent clipboard = 20;
+  }
+
+  // Severity level
+  Severity severity = 30;
+
+  // Source information
+  EventSource source = 31;
+
+  // Raw event data (for custom parsing)
+  string raw_data = 32;
+}
+
+// Severity levels
+enum Severity {
+  SEVERITY_UNKNOWN = 0;
+  SEVERITY_LOW = 1;
+  SEVERITY_MEDIUM = 2;
+  SEVERITY_HIGH = 3;
+  SEVERITY_CRITICAL = 4;
+}
+
+// EventSource - Origin of the event
+message EventSource {
+  string hostname = 1;
+  string ip_address = 2;
+  string os_type = 3;
+  string os_version = 4;
+  string agent_version = 5;
+}
+
+// ============================================================================
+// EVENT TYPE DEFINITIONS (ECS Compatible)
+// ============================================================================
+
+// ProcessEvent - Process creation/termination
+message ProcessEvent {
+  string action = 1;  // "created", "terminated"
+  
+  // Process info
+  int64 pid = 10;
+  int64 ppid = 11;
+  string name = 12;
+  string executable = 13;
+  string command_line = 14;
+  string working_directory = 15;
+  string hash_sha256 = 16;
+  string hash_md5 = 17;
+  
+  // User context
+  string user_name = 20;
+  string user_domain = 21;
+  string user_sid = 22;
+  
+  // Parent process info
+  string parent_name = 30;
+  string parent_executable = 31;
+  string parent_command_line = 32;
+  
+  // Integrity level
+  string integrity_level = 40;
+  bool is_elevated = 41;
+  
+  // Code signing
+  string signature_status = 50;
+  string signature_issuer = 51;
+}
+
+// NetworkEvent - Network connections
+message NetworkEvent {
+  string action = 1;  // "connection_attempted", "connection_established", "listening"
+  string direction = 2;  // "inbound", "outbound"
+  string protocol = 3;  // "tcp", "udp", "icmp"
+  
+  // Source
+  string source_ip = 10;
+  int32 source_port = 11;
+  
+  // Destination
+  string destination_ip = 20;
+  int32 destination_port = 21;
+  string destination_hostname = 22;
+  
+  // Process context
+  int64 pid = 30;
+  string process_name = 31;
+  
+  // Bytes transferred
+  int64 bytes_sent = 40;
+  int64 bytes_received = 41;
+}
+
+// FileEvent - File operations
+message FileEvent {
+  string action = 1;  // "created", "modified", "deleted", "renamed", "accessed"
+  
+  string path = 10;
+  string name = 11;
+  string extension = 12;
+  string directory = 13;
+  
+  int64 size_bytes = 20;
+  string hash_sha256 = 21;
+  
+  // For rename operations
+  string previous_path = 30;
+  string new_path = 31;
+  
+  // Process context
+  int64 pid = 40;
+  string process_name = 41;
+  
+  // Timestamps
+  google.protobuf.Timestamp created_time = 50;
+  google.protobuf.Timestamp modified_time = 51;
+  google.protobuf.Timestamp accessed_time = 52;
+}
+
+// RegistryEvent - Windows Registry operations
+message RegistryEvent {
+  string action = 1;  // "created", "modified", "deleted", "queried"
+  
+  string key_path = 10;
+  string value_name = 11;
+  string value_type = 12;  // "REG_SZ", "REG_DWORD", etc.
+  string value_data = 13;
+  string previous_data = 14;
+  
+  // Process context
+  int64 pid = 20;
+  string process_name = 21;
+}
+
+// DnsEvent - DNS queries
+message DnsEvent {
+  string action = 1;  // "query", "response"
+  
+  string query_name = 10;
+  string query_type = 11;  // "A", "AAAA", "CNAME", "MX", etc.
+  repeated string answers = 12;
+  string response_code = 13;  // "NOERROR", "NXDOMAIN", etc.
+  
+  // Process context
+  int64 pid = 20;
+  string process_name = 21;
+}
+
+// AuthEvent - Authentication events
+message AuthEvent {
+  string action = 1;  // "login", "logout", "failed_login"
+  string auth_type = 2;  // "interactive", "network", "service", "batch"
+  
+  string user_name = 10;
+  string user_domain = 11;
+  string user_sid = 12;
+  
+  string source_ip = 20;
+  string source_hostname = 21;
+  
+  string logon_id = 30;
+  string failure_reason = 31;
+  int32 failure_code = 32;
+}
+
+// DriverEvent - Driver load/unload
+message DriverEvent {
+  string action = 1;  // "loaded", "unloaded"
+  
+  string name = 10;
+  string path = 11;
+  string hash_sha256 = 12;
+  
+  string signature_status = 20;
+  string signature_issuer = 21;
+}
+
+// ImageLoadEvent - DLL/module loading
+message ImageLoadEvent {
+  string action = 1;  // "loaded"
+  
+  string path = 10;
+  string name = 11;
+  string hash_sha256 = 12;
+  
+  int64 pid = 20;
+  string process_name = 21;
+  
+  string signature_status = 30;
+  bool is_signed = 31;
+}
+
+// PipeEvent - Named pipe operations
+message PipeEvent {
+  string action = 1;  // "created", "connected"
+  
+  string pipe_name = 10;
+  
+  int64 pid = 20;
+  string process_name = 21;
+}
+
+// WmiEvent - WMI operations
+message WmiEvent {
+  string action = 1;  // "query", "consumer_created", "subscription_created"
+  
+  string namespace = 10;
+  string query = 11;
+  string consumer = 12;
+  string filter = 13;
+  
+  int64 pid = 20;
+  string process_name = 21;
+}
+
+// ClipboardEvent - Clipboard access
+message ClipboardEvent {
+  string action = 1;  // "accessed", "modified"
+  
+  int64 pid = 10;
+  string process_name = 11;
+  
+  string content_type = 20;
+  int32 content_size = 21;
+}
+
+// ============================================================================
+// COMMAND MESSAGES (Server to Agent)
+// ============================================================================
+
+// CommandBatch - Server response with commands and acknowledgment
+message CommandBatch {
+  string batch_id = 1;
+  google.protobuf.Timestamp timestamp = 2;
+  
+  // Server status
+  ServerStatus server_status = 3;
+  
+  // Commands for agent to execute
+  repeated Command commands = 4;
+  
+  // Acknowledgment of received batch
+  string ack_batch_id = 5;
+}
+
+// ServerStatus - Current server state
+enum ServerStatus {
+  SERVER_STATUS_OK = 0;
+  SERVER_STATUS_DEGRADED = 1;
+  SERVER_STATUS_MAINTENANCE = 2;
+  SERVER_STATUS_OVERLOADED = 3;
+}
+
+// Command - Individual command for agent
+message Command {
+  string command_id = 1;
+  google.protobuf.Timestamp timestamp = 2;
+  
+  CommandType type = 3;
+  
+  // Command parameters
+  map<string, string> parameters = 4;
+  
+  // Priority (higher = more urgent)
+  int32 priority = 5;
+  
+  // Expiry time (command invalid after this)
+  google.protobuf.Timestamp expires_at = 6;
+}
+
+// CommandType - Types of commands server can send
+enum CommandType {
+  COMMAND_TYPE_UNSPECIFIED = 0;
+  COMMAND_TYPE_UPDATE_CONFIG = 1;
+  COMMAND_TYPE_COLLECT_FORENSICS = 2;
+  COMMAND_TYPE_ISOLATE = 3;
+  COMMAND_TYPE_UNISOLATE = 4;
+  COMMAND_TYPE_RESTART_SERVICE = 5;
+  COMMAND_TYPE_UPDATE_AGENT = 6;
+  COMMAND_TYPE_TERMINATE_PROCESS = 7;
+  COMMAND_TYPE_ADJUST_RATE = 8;
+  // RUN_CMD = 9 is reserved for dynamic shell commands
+  COMMAND_TYPE_RESTART = 10;          // Restart the machine (OS-level reboot)
+  COMMAND_TYPE_SHUTDOWN = 11;         // Shutdown the machine (OS-level power off)
+  COMMAND_TYPE_UPDATE_FILTER_POLICY = 12; // Push new event filtering rules to agent
+}
+
+// CommandResult - Agent-to-server feedback for a completed command (C2 loop closure)
+message CommandResult {
+  string command_id = 1;
+  string agent_id = 2;
+  string status = 3;   // e.g. SUCCESS, FAILED, TIMEOUT
+  string output = 4;
+  string error = 5;
+  google.protobuf.Duration duration = 6;
+  google.protobuf.Timestamp timestamp = 7;
+}
+
+// ============================================================================
+// HEARTBEAT MESSAGES
+// ============================================================================
+
+// HeartbeatRequest - Periodic health check from agent
+message HeartbeatRequest {
+  string agent_id = 1;
+  google.protobuf.Timestamp timestamp = 2;
+  
+  // Agent status
+  AgentStatus status = 3;
+  
+  // Resource metrics
+  float cpu_usage = 10;
+  int64 memory_used_mb = 11;
+  int64 memory_total_mb = 12;
+  int64 disk_used_mb = 13;
+  int64 disk_total_mb = 14;
+  
+  // Event metrics
+  int64 events_generated = 20;
+  int64 events_sent = 21;
+  int32 queue_depth = 22;
+  int64 events_dropped = 23;
+  
+  // Network telemetry — non-loopback, active IP addresses
+  repeated string ip_addresses = 24;
+  
+  // Version info
+  string agent_version = 30;
+  
+  // Certificate info
+  int64 cert_expires_at = 40;
+}
+
+// AgentStatus - Current agent state
+enum AgentStatus {
+  AGENT_STATUS_UNKNOWN = 0;
+  AGENT_STATUS_HEALTHY = 1;
+  AGENT_STATUS_DEGRADED = 2;
+  AGENT_STATUS_CRITICAL = 3;
+  AGENT_STATUS_UPDATING = 4;
+  AGENT_STATUS_ISOLATED = 5;
+}
+
+// HeartbeatResponse - Server response to heartbeat
+message HeartbeatResponse {
+  string agent_id = 1;
+  google.protobuf.Timestamp server_timestamp = 2;
+  
+  // Server status
+  ServerStatus server_status = 3;
+  
+  // Flags for agent
+  bool has_pending_commands = 10;
+  bool cert_renewal_required = 11;
+  bool config_update_available = 12;
+  bool agent_update_available = 13;
+  
+  // New configuration (if config_update_available)
+  bytes new_config = 20;
+  
+  // Rate adjustment
+  int32 recommended_batch_size = 30;
+  int32 recommended_interval_ms = 31;
+}
+
+// ============================================================================
+// CERTIFICATE RENEWAL MESSAGES
+// ============================================================================
+
+// CertRenewalRequest - Request for new certificate
+message CertRenewalRequest {
+  string agent_id = 1;
+  
+  // Certificate Signing Request (PEM encoded)
+  bytes csr = 2;
+  
+  // Current certificate fingerprint (for validation)
+  string current_cert_fingerprint = 3;
+  
+  // Reason for renewal
+  string reason = 4;  // "expiring", "compromised", "rotation"
+}
+
+// CertificateResponse - New certificate from server
+message CertificateResponse {
+  // New certificate (PEM encoded)
+  bytes certificate = 1;
+  
+  // CA chain (PEM encoded)
+  bytes ca_chain = 2;
+  
+  // Certificate metadata
+  google.protobuf.Timestamp issued_at = 3;
+  google.protobuf.Timestamp expires_at = 4;
+  string fingerprint = 5;
+  
+  // Serial number
+  string serial_number = 6;
+}
+
+// ============================================================================
+// AGENT REGISTRATION MESSAGES
+// ============================================================================
+
+// AgentRegistrationRequest - Initial agent registration
+message AgentRegistrationRequest {
+  // Installation token (one-time use)
+  string installation_token = 1;
+  
+  // Proposed agent ID (UUID format)
+  string agent_id = 2;
+  
+  // Certificate Signing Request
+  bytes csr = 3;
+  
+  // Host information
+  string hostname = 10;
+  string os_type = 11;  // "windows", "linux", "macos"
+  string os_version = 12;
+  int32 cpu_count = 13;
+  int64 memory_mb = 14;
+  
+  // Agent version
+  string agent_version = 20;
+  
+  // Network info
+  repeated string ip_addresses = 30;
+  string mac_address = 31;
+  
+  // Metadata
+  map<string, string> tags = 40;
+}
+
+// AgentRegistrationResponse - Response to registration request
+message AgentRegistrationResponse {
+  // Confirmed agent ID
+  string agent_id = 1;
+  
+  // Registration status
+  RegistrationStatus status = 2;
+  
+  // Message (for pending/rejected status)
+  string message = 3;
+  
+  // Certificate (only if approved)
+  bytes certificate = 10;
+  bytes ca_chain = 11;
+  
+  // JWT tokens (only if approved)
+  string access_token = 20;
+  string refresh_token = 21;
+  
+  // Server configuration for agent
+  bytes initial_config = 30;
+}
+
+// RegistrationStatus - Agent registration states
+enum RegistrationStatus {
+  REGISTRATION_STATUS_UNSPECIFIED = 0;
+  REGISTRATION_STATUS_PENDING = 1;
+  REGISTRATION_STATUS_APPROVED = 2;
+  REGISTRATION_STATUS_REJECTED = 3;
+}
+
+// ============================================================================
+// ERROR CODES
+// ============================================================================
+
+// ErrorCode - Custom error codes for detailed error handling
+enum ErrorCode {
+  ERROR_CODE_UNSPECIFIED = 0;
+  
+  // Authentication errors (1xx)
+  ERROR_CODE_INVALID_TOKEN = 100;
+  ERROR_CODE_EXPIRED_TOKEN = 101;
+  ERROR_CODE_REVOKED_TOKEN = 102;
+  ERROR_CODE_INVALID_CERTIFICATE = 103;
+  ERROR_CODE_EXPIRED_CERTIFICATE = 104;
+  ERROR_CODE_REVOKED_CERTIFICATE = 105;
+  
+  // Authorization errors (2xx)
+  ERROR_CODE_PERMISSION_DENIED = 200;
+  ERROR_CODE_AGENT_NOT_APPROVED = 201;
+  ERROR_CODE_AGENT_SUSPENDED = 202;
+  
+  // Validation errors (3xx)
+  ERROR_CODE_INVALID_REQUEST = 300;
+  ERROR_CODE_INVALID_BATCH = 301;
+  ERROR_CODE_PAYLOAD_TOO_LARGE = 302;
+  ERROR_CODE_DUPLICATE_BATCH = 303;
+  ERROR_CODE_CHECKSUM_MISMATCH = 304;
+  
+  // Rate limiting (4xx)
+  ERROR_CODE_RATE_LIMITED = 400;
+  ERROR_CODE_QUOTA_EXCEEDED = 401;
+  
+  // Server errors (5xx)
+  ERROR_CODE_INTERNAL_ERROR = 500;
+  ERROR_CODE_DATABASE_ERROR = 501;
+  ERROR_CODE_CACHE_ERROR = 502;
+  ERROR_CODE_UNAVAILABLE = 503;
+}
+
+// ErrorDetails - Detailed error information
+message ErrorDetails {
+  ErrorCode code = 1;
+  string message = 2;
+  string request_id = 3;
+  google.protobuf.Timestamp timestamp = 4;
+  map<string, string> metadata = 5;
+}

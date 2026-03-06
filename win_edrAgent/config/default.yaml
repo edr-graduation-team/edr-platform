@@ -1,0 +1,106 @@
+# EDR Agent Configuration
+# ========================
+
+server:
+  # Connection Manager address
+  address: "localhost:50051"
+  # Use plaintext gRPC (no TLS) for debugging / Host-VM connectivity; set true when server has GRPC_INSECURE=1
+  insecure: false
+  # Connection timeout
+  timeout: 30s
+  # Initial reconnection delay
+  reconnect_delay: 1s
+  # Maximum reconnection delay (exponential backoff cap)
+  max_reconnect_delay: 30s
+  # Heartbeat interval
+  heartbeat_interval: 30s
+
+agent:
+  # Agent ID (auto-generated if empty)
+  id: ""
+  # Hostname (auto-detected if empty)
+  hostname: ""
+  # Number of events per batch
+  batch_size: 50
+  # Maximum time between batches
+  batch_interval: 1s
+  # Event buffer size (in-memory queue)
+  buffer_size: 5000
+  # Compression algorithm (snappy, gzip, none)
+  compression: "snappy"
+
+collectors:
+  # Enable ETW (Event Tracing for Windows)
+  etw_enabled: true
+  # ETW session name
+  etw_session_name: "EDRAgentSession"
+  # Enable WMI fallback/inventory
+  wmi_enabled: true
+  # WMI inventory interval
+  wmi_interval: 60m
+  # Enable registry monitoring
+  registry_enabled: true
+  # Enable file monitoring
+  file_enabled: true
+  # Enable network monitoring
+  network_enabled: true
+
+filtering:
+  # Processes to exclude from monitoring
+  exclude_processes:
+    - "svchost.exe"
+    - "csrss.exe"
+    - "services.exe"
+    - "smss.exe"
+    - "wininit.exe"
+    - "winlogon.exe"
+    - "dwm.exe"
+    - "taskhostw.exe"
+    - "RuntimeBroker.exe"
+    - "SearchIndexer.exe"
+    - "MsMpEng.exe"
+    - "agent.exe"
+  
+  # IP addresses/ranges to exclude
+  exclude_ips:
+    - "127.0.0.1"
+    - "::1"
+    - "0.0.0.0"
+    - "169.254.0.0/16"
+  
+  # Registry paths to exclude
+  exclude_registry:
+    - "HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Component Based Servicing"
+    - "HKLM\\SYSTEM\\CurrentControlSet\\Services\\bam\\State"
+  
+  # File paths to exclude
+  exclude_paths:
+    - "C:\\Windows\\Temp"
+    - "C:\\Users\\*\\AppData\\Local\\Temp"
+    - "C:\\Windows\\SoftwareDistribution"
+  
+  # File paths to always include (override exclude)
+  include_paths:
+    - "C:\\Windows\\System32"
+    - "C:\\Program Files"
+    - "C:\\Program Files (x86)"
+
+logging:
+  # Log level (DEBUG, INFO, WARN, ERROR)
+  level: "INFO"
+  # Log file path
+  file_path: "C:\\ProgramData\\EDR\\logs\\agent.log"
+  # Maximum log file size in MB
+  max_size_mb: 100
+  # Maximum log age in days
+  max_age_days: 7
+
+certs:
+  # Client certificate path
+  cert_path: "C:\\ProgramData\\EDR\\certs\\client.crt"
+  # Private key path
+  key_path: "C:\\ProgramData\\EDR\\certs\\private.key"
+  # CA certificate chain path
+  ca_path: "C:\\ProgramData\\EDR\\certs\\ca-chain.crt"
+  # Bootstrap token (for initial registration)
+  bootstrap_token: ""

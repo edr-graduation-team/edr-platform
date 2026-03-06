@@ -1,0 +1,300 @@
+version: "3.9"
+
+# =============================================================================
+# EDR Platform — Unified Docker Compose
+# =============================================================================
+#
+# ARCHITECTURE:
+#   All services run inside Docker on the edr-network:
+#   - Connection Manager  (gRPC :50051, REST :8082)
+#   - Sigma Engine        (REST :8080)
+#   - Dashboard Nginx     (HTTP :8088 → proxies to sigma-engine & connection-manager)
+#   - PostgreSQL, Redis, Kafka, Zookeeper (shared infra)
+#
+# USAGE:
+#   docker compose up -d              # start everything
+#   Open http://localhost:8088         # dashboard
+#
+# =============================================================================
+
+services:
+  # ============================================================================
+  # CONNECTION MANAGER (gRPC + REST API)
+  # ============================================================================
+  connection-manager:
+    build:
+      context: ./connection-manager
+      dockerfile: Dockerfile
+    ports:
+      - "50051:50051"  # gRPC (agent ↔ server)
+      - "8082:8082"    # REST API / health
+    environment:
+      LOG_LEVEL: debug
+      DATABASE_URL: "postgres://edr:edr@postgres:5432/edr?sslmode=disable"
+      REDIS_ADDR: "redis:6379"
+      KAFKA_BROKERS: "kafka:9092"        # INTERNAL listener (containers)
+      GRPC_PORT: "50051"
+      HTTP_PORT: "8082"
+    volumes:
+      - ./connection-manager/certs:/app/certs:ro
+      - ./connection-manager/config:/app/config:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8082/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - edr-network
+
+  # ============================================================================
+  # SIGMA DETECTION ENGINE
+  # ============================================================================
+  sigma-engine:
+    build:
+      context: ./sigma_engine_go
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      # --- Kafka (MUST enable + point to INTERNAL listener) ---
+      KAFKA_ENABLED: "true"
+      KAFKA_BROKERS: "kafka:9092"
+      KAFKA_CONSUMER_TOPIC: "events-raw"
+      KAFKA_PRODUCER_TOPIC: "alerts"
+      # --- Database ---
+      DATABASE_URL: "postgresql://edr:edr@postgres:5432/edr?sslmode=disable"
+      # --- API ---
+      API_PORT: "8080"
+      JWT_PUBLIC_KEY_PATH: "/app/certs/jwt_public.pem"
+    volumes:
+      - ./sigma_engine_go/sigma_rules:/app/sigma_rules:ro
+      - ./connection-manager/certs/jwt_public.pem:/app/certs/jwt_public.pem:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 15s
+    restart: unless-stopped
+    networks:
+      - edr-network
+
+  # ============================================================================
+  # DASHBOARD (Vite SPA + Nginx Reverse Proxy)
+  # ============================================================================
+  # Build args set VITE_* to empty strings so the JS bundle uses RELATIVE URLs.
+  # At runtime, Nginx proxies /api/v1/sigma/* → sigma-engine:8080
+  #                      and /api/v1/*       → host.docker.internal:8090 (host CM)
+  # ============================================================================
+  dashboard:
+    build:
+      context: ./dashboard
+      dockerfile: Dockerfile
+      args:
+        VITE_API_URL: ""
+        VITE_CONNECTION_MANAGER_URL: ""
+        VITE_WS_URL: ""
+    ports:
+      - "8088:80"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      sigma-engine:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+    networks:
+      - edr-network
+
+  # ============================================================================
+  # DATABASE — PostgreSQL
+  # ============================================================================
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: edr
+      POSTGRES_PASSWORD: edr
+      POSTGRES_DB: edr
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./connection-manager/internal/database/migrations:/docker-entrypoint-initdb.d/01-connection-manager:ro
+      - ./sigma_engine_go/internal/infrastructure/database/migrations:/docker-entrypoint-initdb.d/02-sigma-engine:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U edr -d edr"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - edr-network
+
+  # ============================================================================
+  # CACHE — Redis
+  # ============================================================================
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - edr-network
+
+  # ============================================================================
+  # KAFKA — Zookeeper
+  # ============================================================================
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+      ZOOKEEPER_SYNC_LIMIT: 2
+      ZOOKEEPER_INIT_LIMIT: 5
+      KAFKA_OPTS: "-Dzookeeper.4lw.commands.whitelist=ruok,stat,srvr"
+    ports:
+      - "2181:2181"
+    volumes:
+      - zookeeper_data:/var/lib/zookeeper/data
+      - zookeeper_log:/var/lib/zookeeper/log
+    healthcheck:
+      test: ["CMD-SHELL", "echo ruok | nc localhost 2181 | grep imok"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    restart: unless-stopped
+    networks:
+      - edr-network
+
+  # ============================================================================
+  # KAFKA — Broker
+  # ============================================================================
+  #
+  # LISTENER ARCHITECTURE:
+  #   INTERNAL  (port 9092)  → for Docker containers (sigma-engine, kafka-init, etc.)
+  #   EXTERNAL  (port 29092) → for the Windows Host  (connection-manager via go run)
+  #
+  # Containers connect to:  kafka:9092
+  # Host connects to:       localhost:29092
+  # ============================================================================
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      # Listeners: bind addresses inside the container
+      KAFKA_LISTENERS: INTERNAL://0.0.0.0:9092,EXTERNAL://0.0.0.0:29092
+      # Advertised: what clients see after connecting
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:9092,EXTERNAL://localhost:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      # Topic defaults
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      # Retention & limits
+      KAFKA_LOG_RETENTION_HOURS: 168   # 7 days
+      KAFKA_LOG_COMPRESSION_TYPE: snappy
+      KAFKA_MESSAGE_MAX_BYTES: 10485760  # 10 MB
+    ports:
+      - "9092:9092"     # INTERNAL (also available on host for debugging)
+      - "29092:29092"   # EXTERNAL (for host Connection Manager)
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:9092"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
+    networks:
+      - edr-network
+
+  # ============================================================================
+  # KAFKA — Topic Initialization (one-shot)
+  # ============================================================================
+  kafka-init:
+    image: confluentinc/cp-kafka:7.5.0
+    depends_on:
+      kafka:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    command: |
+      "
+      echo '=== Creating Kafka topics ==='
+      kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists --topic events-raw --partitions 6 --replication-factor 1 --config retention.ms=604800000 --config compression.type=snappy
+      kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists --topic events-dlq --partitions 1 --replication-factor 1 --config retention.ms=2592000000
+      kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists --topic alerts --partitions 3 --replication-factor 1 --config retention.ms=604800000
+      echo '=== Topics created ==='
+      kafka-topics --bootstrap-server kafka:9092 --list
+      "
+    restart: "no"
+    networks:
+      - edr-network
+
+  # ============================================================================
+  # KAFKA UI — Debugging / Monitoring (optional)
+  # ============================================================================
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    depends_on:
+      kafka:
+        condition: service_healthy
+    environment:
+      KAFKA_CLUSTERS_0_NAME: edr-local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+      KAFKA_CLUSTERS_0_ZOOKEEPER: zookeeper:2181
+    ports:
+      - "8081:8080"
+    restart: unless-stopped
+    networks:
+      - edr-network
+
+# ==============================================================================
+# VOLUMES
+# ==============================================================================
+volumes:
+  postgres_data:
+  redis_data:
+  kafka_data:
+  zookeeper_data:
+  zookeeper_log:
+
+# ==============================================================================
+# NETWORKS
+# ==============================================================================
+networks:
+  edr-network:
+    driver: bridge

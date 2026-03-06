@@ -1,0 +1,354 @@
+// Package grpcclient provides heartbeat mechanism for agent health reporting.
+package grpcclient
+
+import (
+	"context"
+	"net"
+	"sync"
+	"sync/atomic"
+	"time"
+
+	"github.com/edr-platform/win-agent/internal/config"
+	"github.com/edr-platform/win-agent/internal/logging"
+)
+
+// HeartbeatStatus represents the current agent status.
+type HeartbeatStatus string
+
+const (
+	StatusHealthy  HeartbeatStatus = "healthy"
+	StatusDegraded HeartbeatStatus = "degraded"
+	StatusCritical HeartbeatStatus = "critical"
+	StatusUpdating HeartbeatStatus = "updating"
+	StatusIsolated HeartbeatStatus = "isolated"
+)
+
+// Heartbeat manages periodic health reporting.
+// The status field is protected by statusMu because SetStatus() can be
+// called from any goroutine (e.g., isolation trigger, update trigger),
+// while buildRequest() reads status from the heartbeat loop goroutine.
+// Without the mutex, this is a data race on string assignment.
+type Heartbeat struct {
+	logger   *logging.Logger
+	cfg      *config.Config
+	interval time.Duration
+
+	// State — guarded by statusMu for thread safety
+	running  atomic.Bool
+	status   HeartbeatStatus
+	statusMu sync.RWMutex // protects status field
+
+	// Metrics collectors
+	getEventsGenerated func() uint64
+	getEventsSent      func() uint64
+	getQueueDepth      func() int
+	getEventsDropped   func() uint64 // filter + rate limiter drops
+
+	// Heartbeat counters
+	heartbeatsSent atomic.Uint64
+	lastHeartbeat  time.Time
+}
+
+// HeartbeatRequest represents data sent in heartbeat.
+type HeartbeatRequest struct {
+	AgentID         string          `json:"agent_id"`
+	Timestamp       time.Time       `json:"timestamp"`
+	Status          HeartbeatStatus `json:"status"`
+	Version         string          `json:"version"`
+	Hostname        string          `json:"hostname"`
+	CPUUsage        float64         `json:"cpu_usage"`
+	MemoryUsedMB    uint64          `json:"memory_used_mb"`
+	MemoryTotalMB   uint64          `json:"memory_total_mb"`
+	EventsGenerated uint64          `json:"events_generated"`
+	EventsSent      uint64          `json:"events_sent"`
+	QueueDepth      int             `json:"queue_depth"`
+	CertExpiresAt   int64           `json:"cert_expires_at,omitempty"`
+	CPUCount        int             `json:"cpu_count"`
+
+	// Telemetry enrichment — dropped events visibility for SOC
+	EventsDropped uint64   `json:"events_dropped"`
+	IPAddresses   []string `json:"ip_addresses,omitempty"`
+}
+
+// HeartbeatResponse represents server response.
+type HeartbeatResponse struct {
+	AckTimestamp          time.Time `json:"ack_timestamp"`
+	ServerStatus          string    `json:"server_status"`
+	HasPendingCommands    bool      `json:"has_pending_commands"`
+	CertRenewalRequired   bool      `json:"cert_renewal_required"`
+	ConfigUpdateAvailable bool      `json:"config_update_available"`
+	RecommendedBatchSize  int       `json:"recommended_batch_size,omitempty"`
+	RecommendedIntervalMs int       `json:"recommended_interval_ms,omitempty"`
+}
+
+// NewHeartbeat creates a new heartbeat manager.
+func NewHeartbeat(cfg *config.Config, logger *logging.Logger) *Heartbeat {
+	interval := cfg.Server.HeartbeatInterval
+	if interval <= 0 {
+		interval = 30 * time.Second
+	}
+
+	return &Heartbeat{
+		logger:   logger,
+		cfg:      cfg,
+		interval: interval,
+		status:   StatusHealthy,
+	}
+}
+
+// SetMetricsCollectors sets the functions used to collect metrics.
+func (h *Heartbeat) SetMetricsCollectors(
+	eventsGenerated func() uint64,
+	eventsSent func() uint64,
+	queueDepth func() int,
+	eventsDropped func() uint64,
+) {
+	h.getEventsGenerated = eventsGenerated
+	h.getEventsSent = eventsSent
+	h.getQueueDepth = queueDepth
+	h.getEventsDropped = eventsDropped
+}
+
+// Start begins the heartbeat loop.
+func (h *Heartbeat) Start(ctx context.Context, sendFunc func(*HeartbeatRequest) (*HeartbeatResponse, error)) {
+	if h.running.Load() {
+		return
+	}
+
+	h.running.Store(true)
+	h.logger.Infof("Starting heartbeat (interval: %v)", h.interval)
+
+	go h.heartbeatLoop(ctx, sendFunc)
+}
+
+// Stop stops the heartbeat.
+func (h *Heartbeat) Stop() {
+	h.running.Store(false)
+	h.logger.Infof("Heartbeat stopped (sent: %d)", h.heartbeatsSent.Load())
+}
+
+// heartbeatLoop runs the periodic heartbeat.
+func (h *Heartbeat) heartbeatLoop(ctx context.Context, sendFunc func(*HeartbeatRequest) (*HeartbeatResponse, error)) {
+	ticker := time.NewTicker(h.interval)
+	defer ticker.Stop()
+
+	// Send initial heartbeat
+	h.sendHeartbeat(sendFunc)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if !h.running.Load() {
+				return
+			}
+			h.sendHeartbeat(sendFunc)
+		}
+	}
+}
+
+// sendHeartbeat sends a single heartbeat.
+func (h *Heartbeat) sendHeartbeat(sendFunc func(*HeartbeatRequest) (*HeartbeatResponse, error)) {
+	req := h.buildRequest()
+
+	resp, err := sendFunc(req)
+	if err != nil {
+		h.logger.Debugf("Heartbeat failed: %v", err)
+		return
+	}
+
+	h.heartbeatsSent.Add(1)
+	h.lastHeartbeat = time.Now()
+
+	// Process response
+	h.processResponse(resp)
+
+	h.logger.Debugf("Heartbeat sent: status=%s events=%d/%d queue=%d",
+		req.Status, req.EventsSent, req.EventsGenerated, req.QueueDepth)
+}
+
+// buildRequest creates a heartbeat request with current metrics.
+func (h *Heartbeat) buildRequest() *HeartbeatRequest {
+	// Get ACTUAL system memory (not Go runtime memory)
+	totalMB, usedMB := getSystemMemoryMB()
+	cpuCount := getSystemCPUCount()
+
+	// Read status under RLock — concurrent with SetStatus() writes
+	h.statusMu.RLock()
+	currentStatus := h.status
+	h.statusMu.RUnlock()
+
+	req := &HeartbeatRequest{
+		AgentID:       h.cfg.Agent.ID,
+		Timestamp:     time.Now().UTC(),
+		Status:        currentStatus,
+		Version:       "1.0.0", // TODO: Get from build
+		Hostname:      h.cfg.Agent.Hostname,
+		MemoryUsedMB:  usedMB,
+		MemoryTotalMB: totalMB,
+		IPAddresses:   getLocalIPAddresses(),
+		CPUCount:      cpuCount,
+	}
+
+	// Get metrics from collectors
+	if h.getEventsGenerated != nil {
+		req.EventsGenerated = h.getEventsGenerated()
+	}
+	if h.getEventsSent != nil {
+		req.EventsSent = h.getEventsSent()
+	}
+	if h.getQueueDepth != nil {
+		req.QueueDepth = h.getQueueDepth()
+	}
+	if h.getEventsDropped != nil {
+		req.EventsDropped = h.getEventsDropped()
+	}
+
+	// Calculate status based on metrics
+	req.Status = h.calculateStatus(req)
+
+	return req
+}
+
+// getLocalIPAddresses returns the agent's non-loopback, active IP addresses.
+// Uses defensive programming: recovers from panics in OS-level network calls
+// to ensure the heartbeat loop is never disrupted by transient system errors.
+func getLocalIPAddresses() (addrs []string) {
+	// Zero-panic guard: recover from any panic in net.Interfaces()
+	defer func() {
+		if r := recover(); r != nil {
+			// Return empty list rather than crashing the heartbeat
+			addrs = nil
+		}
+	}()
+
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return nil
+	}
+
+	for _, iface := range ifaces {
+		// Skip down or loopback interfaces
+		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+
+		ifAddrs, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+
+		for _, addr := range ifAddrs {
+			var ip net.IP
+			switch v := addr.(type) {
+			case *net.IPNet:
+				ip = v.IP
+			case *net.IPAddr:
+				ip = v.IP
+			default:
+				continue
+			}
+
+			// Skip loopback and link-local addresses
+			if ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
+				continue
+			}
+
+			addrs = append(addrs, ip.String())
+		}
+	}
+
+	return addrs
+}
+
+// calculateStatus determines agent status from metrics.
+// Uses percentage-based thresholds for system memory (not Go process memory).
+func (h *Heartbeat) calculateStatus(req *HeartbeatRequest) HeartbeatStatus {
+	// Check for critical: >90% system memory usage
+	if req.MemoryTotalMB > 0 {
+		memPct := float64(req.MemoryUsedMB) / float64(req.MemoryTotalMB)
+		if memPct > 0.90 {
+			return StatusCritical
+		}
+	}
+
+	// Check for degraded conditions
+	if req.QueueDepth > 1000 {
+		return StatusDegraded
+	}
+	if req.CPUUsage > 80 {
+		return StatusDegraded
+	}
+
+	return StatusHealthy
+}
+
+// processResponse handles the server's heartbeat response.
+func (h *Heartbeat) processResponse(resp *HeartbeatResponse) {
+	if resp == nil {
+		return
+	}
+
+	// Handle pending commands
+	if resp.HasPendingCommands {
+		h.logger.Debug("Server has pending commands")
+		// TODO: Trigger command fetch
+	}
+
+	// Handle certificate renewal
+	if resp.CertRenewalRequired {
+		h.logger.Warn("Certificate renewal required")
+		// TODO: Trigger certificate renewal
+	}
+
+	// Handle config update
+	if resp.ConfigUpdateAvailable {
+		h.logger.Info("Configuration update available")
+		// TODO: Trigger config fetch
+	}
+
+	// Handle rate adjustment
+	if resp.RecommendedBatchSize > 0 {
+		h.logger.Infof("Server recommends batch size: %d", resp.RecommendedBatchSize)
+		// TODO: Apply to batcher
+	}
+}
+
+// SetStatus manually sets the agent status.
+// Thread-safe: uses RWMutex because this can be called from any goroutine
+// (e.g., main thread responding to an isolation command) while the heartbeat
+// loop goroutine reads the status in buildRequest().
+func (h *Heartbeat) SetStatus(status HeartbeatStatus) {
+	h.statusMu.Lock()
+	h.status = status
+	h.statusMu.Unlock()
+	h.logger.Infof("Agent status changed: %s", status)
+}
+
+// GetLastHeartbeat returns time of last successful heartbeat.
+func (h *Heartbeat) GetLastHeartbeat() time.Time {
+	return h.lastHeartbeat
+}
+
+// Stats returns heartbeat statistics.
+func (h *Heartbeat) Stats() HeartbeatStats {
+	h.statusMu.RLock()
+	currentStatus := h.status
+	h.statusMu.RUnlock()
+
+	return HeartbeatStats{
+		Running:        h.running.Load(),
+		HeartbeatsSent: h.heartbeatsSent.Load(),
+		LastHeartbeat:  h.lastHeartbeat,
+		CurrentStatus:  currentStatus,
+	}
+}
+
+// HeartbeatStats holds heartbeat statistics.
+type HeartbeatStats struct {
+	Running        bool
+	HeartbeatsSent uint64
+	LastHeartbeat  time.Time
+	CurrentStatus  HeartbeatStatus
+}

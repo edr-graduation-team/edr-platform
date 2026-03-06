@@ -1,0 +1,188 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sigma-engine
+  labels:
+    app: sigma-engine
+    version: v1.0.0
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: sigma-engine
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: sigma-engine
+        version: v1.0.0
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: sigma-engine
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+      - name: sigma-engine
+        image: sigma-engine:v1.0.0
+        imagePullPolicy: IfNotPresent
+        ports:
+        - name: http
+          containerPort: 8080
+          protocol: TCP
+        - name: https
+          containerPort: 8443
+          protocol: TCP
+        env:
+        - name: KAFKA_BROKERS
+          valueFrom:
+            configMapKeyRef:
+              name: sigma-engine-config
+              key: kafka-brokers
+        - name: KAFKA_CONSUMER_TOPIC
+          valueFrom:
+            configMapKeyRef:
+              name: sigma-engine-config
+              key: kafka-consumer-topic
+        - name: KAFKA_PRODUCER_TOPIC
+          valueFrom:
+            configMapKeyRef:
+              name: sigma-engine-config
+              key: kafka-producer-topic
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: sigma-engine-secrets
+              key: database-url
+        - name: LOG_LEVEL
+          value: "info"
+        resources:
+          requests:
+            cpu: 500m
+            memory: 512Mi
+          limits:
+            cpu: 2000m
+            memory: 2Gi
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 15
+          periodSeconds: 20
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: http
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          timeoutSeconds: 3
+          failureThreshold: 3
+        volumeMounts:
+        - name: rules
+          mountPath: /app/rules
+          readOnly: true
+      volumes:
+      - name: rules
+        configMap:
+          name: sigma-rules
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - sigma-engine
+              topologyKey: kubernetes.io/hostname
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sigma-engine
+  labels:
+    app: sigma-engine
+spec:
+  type: ClusterIP
+  ports:
+  - name: http
+    port: 8080
+    targetPort: http
+    protocol: TCP
+  - name: https
+    port: 8443
+    targetPort: https
+    protocol: TCP
+  selector:
+    app: sigma-engine
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sigma-engine-config
+data:
+  kafka-brokers: "kafka:9092"
+  kafka-consumer-topic: "events-raw"
+  kafka-producer-topic: "alerts"
+  kafka-consumer-group: "sigma-engine-group"
+  workers: "4"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: sigma-engine-secrets
+type: Opaque
+stringData:
+  database-url: "postgres://sigma:changeme@postgres:5432/sigma_engine?sslmode=require"
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: sigma-engine
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: sigma-engine
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: sigma-engine
+  minReplicas: 3
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: sigma-engine
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: sigma-engine

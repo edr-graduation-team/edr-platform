@@ -1,0 +1,45 @@
+title: EDR Test - Suspicious Recon Commands (vssadmin, whoami)
+id: edr-test-recon-commands-001
+status: test
+level: high
+description: |
+  Detects execution of common reconnaissance and shadow copy enumeration commands
+  such as vssadmin and whoami. This rule uses field names matching our custom EDR
+  agent's data schema for end-to-end detection pipeline testing.
+author: EDR Team
+date: 2026/02/27
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  selection_cmdline:
+    CommandLine|contains:
+      - 'vssadmin'
+      - 'whoami'
+      - 'net user'
+      - 'net localgroup'
+      - 'ipconfig'
+      - 'systeminfo'
+      - 'tasklist'
+  selection_image:
+    Image|endswith:
+      - '\vssadmin.exe'
+      - '\whoami.exe'
+      - '\net.exe'
+      - '\net1.exe'
+      - '\ipconfig.exe'
+      - '\systeminfo.exe'
+      - '\tasklist.exe'
+  condition: selection_cmdline or selection_image
+falsepositives:
+  - Legitimate system administration
+  - Automated inventory scripts
+tags:
+  - attack.discovery
+  - attack.t1033
+  - attack.t1049
+  - attack.t1082
+  - attack.t1016
+references:
+  - https://attack.mitre.org/techniques/T1033/
+  - https://attack.mitre.org/techniques/T1082/

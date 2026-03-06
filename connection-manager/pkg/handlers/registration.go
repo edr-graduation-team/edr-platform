@@ -1,0 +1,253 @@
+// Package handlers provides gRPC handler implementations.
+package handlers
+
+import (
+	"context"
+	"errors"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/sirupsen/logrus"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/timestamppb"
+
+	"github.com/edr-platform/connection-manager/internal/cache"
+	"github.com/edr-platform/connection-manager/internal/repository"
+	"github.com/edr-platform/connection-manager/pkg/models"
+	edrv1 "github.com/edr-platform/connection-manager/proto/v1"
+)
+
+// RegistrationHandler handles agent registration RPCs.
+type RegistrationHandler struct {
+	logger    *logrus.Logger
+	redis     *cache.RedisClient
+	agentRepo repository.AgentRepository
+	tokenRepo repository.InstallationTokenRepository
+	csrRepo   repository.CSRRepository
+}
+
+// NewRegistrationHandler creates a new registration handler.
+func NewRegistrationHandler(
+	logger *logrus.Logger,
+	redis *cache.RedisClient,
+	agentRepo repository.AgentRepository,
+	tokenRepo repository.InstallationTokenRepository,
+	csrRepo repository.CSRRepository,
+) *RegistrationHandler {
+	return &RegistrationHandler{
+		logger:    logger,
+		redis:     redis,
+		agentRepo: agentRepo,
+		tokenRepo: tokenRepo,
+		csrRepo:   csrRepo,
+	}
+}
+
+// RegisterAgent handles new agent registration.
+func (h *RegistrationHandler) RegisterAgent(ctx context.Context, req *edrv1.AgentRegistrationRequest) (*edrv1.AgentRegistrationResponse, error) {
+	logger := h.logger.WithFields(logrus.Fields{
+		"hostname": req.Hostname,
+		"agent_id": req.AgentId,
+	})
+
+	logger.Info("Agent registration request received")
+
+	// 1. Validate request
+	if err := h.validateRegistrationRequest(req); err != nil {
+		logger.WithError(err).Warn("Invalid registration request")
+		return nil, err
+	}
+
+	// 2. Validate installation token from database
+	token, err := h.tokenRepo.GetByValue(ctx, req.InstallationToken)
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil, status.Error(codes.Unauthenticated, "invalid installation token")
+		}
+		logger.WithError(err).Error("Failed to look up installation token")
+		return nil, status.Error(codes.Internal, "failed to validate token")
+	}
+	if !token.IsValid() {
+		return nil, status.Error(codes.Unauthenticated, "installation token is expired or already used")
+	}
+
+	// 3. Check for duplicate registration by hostname
+	existingAgent, err := h.agentRepo.GetByHostname(ctx, req.Hostname)
+	if err != nil && !errors.Is(err, repository.ErrNotFound) {
+		logger.WithError(err).Error("Failed to check for existing agent")
+		return nil, status.Error(codes.Internal, "failed to check agent registration")
+	}
+	if existingAgent != nil {
+		logger.Warn("Duplicate registration attempt for hostname")
+		return nil, status.Error(codes.AlreadyExists, "agent with this hostname is already registered")
+	}
+
+	// 4. Generate agent ID if not provided
+	agentUUID := uuid.New()
+	if req.AgentId != "" {
+		parsed, err := uuid.Parse(req.AgentId)
+		if err == nil {
+			agentUUID = parsed
+		}
+	}
+
+	// 5. Create agent record in database (status: pending)
+	now := time.Now()
+	agent := &models.Agent{
+		ID:            agentUUID,
+		Hostname:      req.Hostname,
+		Status:        models.AgentStatusPending,
+		OSType:        req.OsType,
+		OSVersion:     req.OsVersion,
+		CPUCount:      int(req.CpuCount),
+		MemoryMB:      req.MemoryMb,
+		AgentVersion:  req.AgentVersion,
+		InstalledDate: &now,
+		LastSeen:      now,
+		Tags:          req.Tags,
+		Metadata: map[string]string{
+			"ip_addresses": joinStrings(req.IpAddresses),
+			"mac_address":  req.MacAddress,
+		},
+	}
+
+	if err := h.agentRepo.Create(ctx, agent); err != nil {
+		logger.WithError(err).Error("Failed to create agent record in database")
+		return nil, status.Error(codes.Internal, "failed to register agent")
+	}
+
+	logger.WithFields(logrus.Fields{
+		"agent_id":   agentUUID.String(),
+		"os_type":    req.OsType,
+		"os_version": req.OsVersion,
+		"cpu_count":  req.CpuCount,
+		"memory_mb":  req.MemoryMb,
+	}).Info("Agent record created in database")
+
+	// 6. Store CSR for later admin approval
+	csr := &models.CSR{
+		ID:        uuid.New(),
+		AgentID:   agentUUID,
+		CSRData:   req.Csr,
+		CreatedAt: now,
+		ExpiresAt: now.Add(24 * time.Hour), // CSR valid for 24 hours
+	}
+
+	if err := h.csrRepo.Create(ctx, csr); err != nil {
+		logger.WithError(err).Error("Failed to store CSR")
+		// Non-fatal — agent is registered, CSR can be resubmitted
+	}
+
+	// 7. Mark installation token as used
+	if err := h.tokenRepo.MarkUsed(ctx, token.ID, agentUUID); err != nil {
+		logger.WithError(err).Warn("Failed to mark installation token as used")
+		// Non-fatal — token might be reusable but agent is already registered
+	}
+
+	// 8. Notify dashboard of pending agent via Redis pub/sub (skip when Redis unavailable)
+	if h.redis != nil {
+		if err := h.redis.Publish(ctx, "agents:pending", agentUUID.String()); err != nil {
+			logger.WithError(err).Warn("Failed to notify dashboard of pending agent")
+		}
+	}
+
+	logger.Info("Agent registered successfully (pending approval)")
+
+	return &edrv1.AgentRegistrationResponse{
+		AgentId: agentUUID.String(),
+		Status:  edrv1.RegistrationStatus_REGISTRATION_STATUS_PENDING,
+		Message: "Agent registration pending admin approval",
+	}, nil
+}
+
+// joinStrings joins strings with commas for metadata storage.
+func joinStrings(ss []string) string {
+	result := ""
+	for i, s := range ss {
+		if i > 0 {
+			result += ","
+		}
+		result += s
+	}
+	return result
+}
+
+// validateRegistrationRequest validates the registration request.
+func (h *RegistrationHandler) validateRegistrationRequest(req *edrv1.AgentRegistrationRequest) error {
+	if req.InstallationToken == "" {
+		return status.Error(codes.InvalidArgument, "installation_token is required")
+	}
+	if req.Hostname == "" {
+		return status.Error(codes.InvalidArgument, "hostname is required")
+	}
+	if len(req.Csr) == 0 {
+		return status.Error(codes.InvalidArgument, "csr is required")
+	}
+	if req.OsType == "" {
+		return status.Error(codes.InvalidArgument, "os_type is required")
+	}
+	return nil
+}
+
+// CertRenewalHandler handles certificate renewal RPCs.
+type CertRenewalHandler struct {
+	logger *logrus.Logger
+	redis  *cache.RedisClient
+	// certRepo repository.CertificateRepository
+	// caService *security.CAService
+}
+
+// NewCertRenewalHandler creates a new certificate renewal handler.
+func NewCertRenewalHandler(logger *logrus.Logger, redis *cache.RedisClient) *CertRenewalHandler {
+	return &CertRenewalHandler{
+		logger: logger,
+		redis:  redis,
+	}
+}
+
+// RequestCertificateRenewal handles certificate renewal requests.
+func (h *CertRenewalHandler) RequestCertificateRenewal(ctx context.Context, req *edrv1.CertRenewalRequest) (*edrv1.CertificateResponse, error) {
+	agentID := req.AgentId
+	logger := h.logger.WithField("agent_id", agentID)
+
+	logger.Info("Certificate renewal request received")
+
+	// 1. Validate request
+	if agentID == "" {
+		return nil, status.Error(codes.InvalidArgument, "agent_id is required")
+	}
+	if len(req.Csr) == 0 {
+		return nil, status.Error(codes.InvalidArgument, "csr is required")
+	}
+
+	// 2. Validate current certificate fingerprint
+	// TODO: Verify agent has valid current certificate
+
+	// 3. Parse and validate CSR
+	// TODO: Parse CSR using x509.ParseCertificateRequest
+
+	// 4. Sign new certificate (90 days validity)
+	// TODO: Use CA service to sign certificate
+
+	// 5. Store new certificate in database
+	// TODO: Store certificate
+
+	// 6. Mark old certificate as superseded
+	// TODO: Update old certificate status
+
+	logger.Info("Certificate renewed successfully")
+
+	// Return placeholder response (actual implementation will return real certificate)
+	now := time.Now()
+	expiresAt := now.AddDate(0, 0, 90) // 90 days
+
+	return &edrv1.CertificateResponse{
+		Certificate:  nil, // TODO: Return actual certificate bytes
+		CaChain:      nil, // TODO: Return CA chain
+		IssuedAt:     timestamppb.New(now),
+		ExpiresAt:    timestamppb.New(expiresAt),
+		Fingerprint:  "", // TODO: Calculate fingerprint
+		SerialNumber: uuid.New().String(),
+	}, nil
+}

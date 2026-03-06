@@ -1,0 +1,18 @@
+{
+  "files": {
+    "data\\agent_ecs-events\\ecs-events.jsonl": {
+      "offset": 46455,
+      "inode": 1767461943301073400,
+      "size": 46455,
+      "updated_at": "2026-01-07T22:42:38.0640761+03:00"
+    },
+    "data\\agent_ecs-events\\normalized_logs.jsonl": {
+      "offset": 811513,
+      "inode": 1767417232964090800,
+      "size": 811513,
+      "updated_at": "2026-01-07T22:42:38.0640761+03:00"
+    }
+  },
+  "updated_at": "2026-01-07T22:42:38.0640761+03:00",
+  "version": 1
+}

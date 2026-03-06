@@ -1,0 +1,37 @@
+title: EDR Custom - VSS Admin Shadow Copy Enumeration
+id: edr-custom-vssadmin-shadows-001
+status: test
+level: critical
+description: |
+  Detects execution of vssadmin.exe, particularly 'vssadmin list shadows' and
+  'vssadmin delete shadows' which are common precursors to ransomware attacks.
+  This rule uses the exact JSON field names from our EDR agent's data schema.
+author: EDR Detection Team
+date: 2026/02/28
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  selection_cmdline_vssadmin:
+    CommandLine|contains:
+      - 'vssadmin'
+  selection_cmdline_shadows:
+    CommandLine|contains:
+      - 'list shadows'
+      - 'delete shadows'
+      - 'resize shadowstorage'
+  selection_image:
+    Image|endswith:
+      - '\vssadmin.exe'
+  condition: selection_image or (selection_cmdline_vssadmin and selection_cmdline_shadows)
+falsepositives:
+  - Legitimate backup software using VSS
+  - System administrators performing manual VSS operations
+tags:
+  - attack.impact
+  - attack.t1490
+  - attack.defense_evasion
+  - attack.t1070
+references:
+  - https://attack.mitre.org/techniques/T1490/
+  - https://docs.microsoft.com/en-us/windows-server/administration/windows-commands/vssadmin

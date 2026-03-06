@@ -1,0 +1,59 @@
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+/connection-manager
+/server
+
+# Test binary
+*.test
+
+# Output of go coverage
+*.out
+coverage.html
+
+# Generated protobuf files
+proto/v1/*.pb.go
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment & secrets
+.env
+.env.local
+.env.production
+*.pem
+*.key
+!certs/README.md
+
+# Vendor (if using)
+vendor/
+
+# Build output
+bin/
+dist/
+
+# Logs
+*.log
+logs/
+
+# Debug
+debug
+__debug_bin
+
+# Coverage reports
+coverage/
+
+# Temporary files
+tmp/
+temp/

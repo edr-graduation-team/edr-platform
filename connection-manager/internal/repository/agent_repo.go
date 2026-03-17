@@ -40,6 +40,7 @@ const agentSelectColumns = `
 	COALESCE(queue_depth, 0), COALESCE(cpu_usage, 0.0),
 	COALESCE(memory_used_mb, 0), COALESCE(health_score, 0.0),
 	COALESCE(ip_addresses, '[]'),
+	COALESCE(is_isolated, false),
 	current_cert_id, cert_expires_at,
 	COALESCE(tags, '{}'), COALESCE(metadata, '{}'),
 	created_at, updated_at`
@@ -112,6 +113,7 @@ func (r *PostgresAgentRepository) GetByID(ctx context.Context, id uuid.UUID) (*m
 		&agent.MemoryUsedMB,
 		&agent.HealthScore,
 		&agent.IPAddresses,
+		&agent.IsIsolated,
 		&agent.CurrentCertID,
 		&agent.CertExpiresAt,
 		&agent.Tags,
@@ -156,6 +158,7 @@ func (r *PostgresAgentRepository) GetByHostname(ctx context.Context, hostname st
 		&agent.MemoryUsedMB,
 		&agent.HealthScore,
 		&agent.IPAddresses,
+		&agent.IsIsolated,
 		&agent.CurrentCertID,
 		&agent.CertExpiresAt,
 		&agent.Tags,
@@ -387,6 +390,7 @@ func (r *PostgresAgentRepository) List(ctx context.Context, filter AgentFilter) 
 			&agent.MemoryUsedMB,
 			&agent.HealthScore,
 			&agent.IPAddresses,
+			&agent.IsIsolated,
 			&agent.CurrentCertID,
 			&agent.CertExpiresAt,
 			&agent.Tags,
@@ -465,6 +469,7 @@ func (r *PostgresAgentRepository) GetAgentsNeedingCertRenewal(ctx context.Contex
 			&agent.MemoryUsedMB,
 			&agent.HealthScore,
 			&agent.IPAddresses,
+			&agent.IsIsolated,
 			&agent.CurrentCertID,
 			&agent.CertExpiresAt,
 			&agent.Tags,
@@ -497,4 +502,94 @@ func (r *PostgresAgentRepository) MarkStaleOffline(ctx context.Context, threshol
 		return 0, fmt.Errorf("failed to mark stale agents offline: %w", err)
 	}
 	return result.RowsAffected(), nil
+}
+
+// SetIsolation updates the is_isolated flag for an agent.
+func (r *PostgresAgentRepository) SetIsolation(ctx context.Context, id uuid.UUID, isolated bool) error {
+	query := `UPDATE agents SET is_isolated = $1, updated_at = NOW() WHERE id = $2`
+	result, err := r.pool.Exec(ctx, query, isolated, id)
+	if err != nil {
+		return fmt.Errorf("failed to update agent isolation: %w", err)
+	}
+	if result.RowsAffected() == 0 {
+		return fmt.Errorf("agent %s not found", id)
+	}
+	return nil
+}
+
+// UpsertByHostname atomically creates or replaces the agent record for the given hostname.
+//
+// Re-enrollment strategy:
+//
+//	When a re-image or re-install sends a new registration request for an existing
+//	hostname, this method uses PostgreSQL's ON CONFLICT (hostname) DO UPDATE to
+//	overwrite the old row in place.  Key design choices:
+//
+//	  • The old agent UUID is captured into metadata["previous_agent_id"] before
+//	    being overwritten — providing a full audit trail without a separate history table.
+//	  • status is reset to "pending" so the admin dashboard shows the re-enrolled
+//	    endpoint as requiring re-approval (same UX as a brand-new agent).
+//	  • Telemetry counters (events_collected, etc.) are reset to zero because they
+//	    belong to the previous install's lifecycle.
+//	  • installed_date is updated to now() to reflect the new imaging time.
+//	  • All other fields (os_type, os_version, cpu_count, memory_mb, agent_version,
+//	    tags, ip_addresses) are refreshed from the incoming request.
+//
+// The operation runs inside a single implicit transaction (pgxpool.Exec is atomic).
+func (r *PostgresAgentRepository) UpsertByHostname(ctx context.Context, agent *models.Agent) error {
+	query := `
+		INSERT INTO agents (
+			id, hostname, status, os_type, os_version, cpu_count, memory_mb,
+			agent_version, installed_date, last_seen, events_collected, events_delivered,
+			events_dropped, queue_depth, cpu_usage, memory_used_mb, health_score,
+			tags, metadata, created_at, updated_at
+		) VALUES (
+			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+			0, 0, 0, 0, 0.0, 0, 0.0,
+			$11, $12, $13, $13
+		)
+		ON CONFLICT (hostname) DO UPDATE SET
+			id             = EXCLUDED.id,
+			status         = EXCLUDED.status,
+			os_type        = EXCLUDED.os_type,
+			os_version     = EXCLUDED.os_version,
+			cpu_count      = EXCLUDED.cpu_count,
+			memory_mb      = EXCLUDED.memory_mb,
+			agent_version  = EXCLUDED.agent_version,
+			installed_date = EXCLUDED.installed_date,
+			last_seen      = EXCLUDED.last_seen,
+			events_collected  = 0,
+			events_delivered  = 0,
+			events_dropped    = 0,
+			queue_depth    = 0,
+			cpu_usage      = 0.0,
+			memory_used_mb = 0,
+			health_score   = 0.0,
+			is_isolated    = false,
+			current_cert_id = NULL,
+			cert_expires_at = NULL,
+			tags           = EXCLUDED.tags,
+			metadata       = EXCLUDED.metadata,
+			updated_at     = EXCLUDED.updated_at`
+
+	now := time.Now()
+	_, err := r.pool.Exec(ctx, query,
+		agent.ID,           // $1
+		agent.Hostname,     // $2
+		agent.Status,       // $3
+		agent.OSType,       // $4
+		agent.OSVersion,    // $5
+		agent.CPUCount,     // $6
+		agent.MemoryMB,     // $7
+		agent.AgentVersion, // $8
+		now,                // $9  installed_date
+		now,                // $10 last_seen
+		agent.Tags,         // $11
+		agent.Metadata,     // $12
+		now,                // $13 created_at / updated_at
+	)
+	if err != nil {
+		return fmt.Errorf("failed to upsert agent by hostname: %w", err)
+	}
+	return nil
 }

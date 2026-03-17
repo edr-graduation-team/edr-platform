@@ -11,16 +11,30 @@ CREATE TABLE IF NOT EXISTS commands (
     
     -- Command details
     command_type VARCHAR(50) NOT NULL CHECK (command_type IN (
-        'kill_process',
+        -- Process actions
+        'kill_process', 'terminate_process',
+        -- File actions
         'quarantine_file',
-        'collect_logs',
-        'update_policy',
-        'restart_agent',
-        'isolate_network',
-        'restore_network',
-        'scan_file',
-        'scan_memory',
-        'custom'
+        -- Log / forensics collection
+        'collect_logs', 'collect_forensics',
+        -- Network isolation
+        'isolate_network', 'isolate',
+        'restore_network', 'unisolate_network', 'unisolate',
+        -- System control (agent)
+        'restart_agent', 'restart_service',
+        -- System control (OS-level)
+        'restart_machine', 'restart',
+        'shutdown_machine', 'shutdown',
+        -- Scanning
+        'scan_file', 'scan_memory',
+        -- Agent management
+        'update_agent',
+        -- Policy / config
+        'update_policy', 'update_config', 'update_filter_policy',
+        -- Rate adjustment
+        'adjust_rate',
+        -- Generic
+        'run_cmd', 'custom'
     )),
     parameters JSONB DEFAULT '{}',
     priority INTEGER NOT NULL DEFAULT 5 CHECK (priority BETWEEN 1 AND 10),
@@ -51,8 +65,8 @@ CREATE TABLE IF NOT EXISTS commands (
     completed_at TIMESTAMP WITH TIME ZONE,
     expires_at TIMESTAMP WITH TIME ZONE,
     
-    -- Ownership
-    issued_by UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+    -- Ownership (nullable — system commands may not have a user)
+    issued_by UUID REFERENCES users(id) ON DELETE RESTRICT,
     
     -- Metadata
     metadata JSONB DEFAULT '{}'
@@ -72,22 +86,19 @@ CREATE TABLE IF NOT EXISTS command_queue (
 );
 
 -- Indexes
-CREATE INDEX idx_commands_agent_id ON commands(agent_id);
-CREATE INDEX idx_commands_status ON commands(status);
-CREATE INDEX idx_commands_command_type ON commands(command_type);
-CREATE INDEX idx_commands_issued_at ON commands(issued_at DESC);
-CREATE INDEX idx_commands_issued_by ON commands(issued_by);
-CREATE INDEX idx_commands_pending ON commands(agent_id, priority DESC) WHERE status = 'pending';
+CREATE INDEX IF NOT EXISTS idx_commands_agent_id ON commands(agent_id);
+CREATE INDEX IF NOT EXISTS idx_commands_status ON commands(status);
+CREATE INDEX IF NOT EXISTS idx_commands_command_type ON commands(command_type);
+CREATE INDEX IF NOT EXISTS idx_commands_issued_at ON commands(issued_at DESC);
+CREATE INDEX IF NOT EXISTS idx_commands_issued_by ON commands(issued_by);
+CREATE INDEX IF NOT EXISTS idx_commands_pending ON commands(agent_id, priority DESC) WHERE status = 'pending';
+CREATE INDEX IF NOT EXISTS idx_command_queue_agent_priority ON command_queue(agent_id, priority DESC, scheduled_at);
 
-CREATE INDEX idx_command_queue_agent_priority ON command_queue(agent_id, priority DESC, scheduled_at);
+-- ============================================================================
+-- FUNCTIONS (must be defined BEFORE triggers that reference them)
+-- ============================================================================
 
--- Updated at trigger (using issued_at as reference)
-CREATE TRIGGER trigger_commands_set_expires
-    BEFORE INSERT ON commands
-    FOR EACH ROW
-    EXECUTE FUNCTION set_command_expires();
-
--- Function to set expiration
+-- Function: auto-set expires_at from timeout_seconds on INSERT
 CREATE OR REPLACE FUNCTION set_command_expires()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -98,14 +109,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- Recreate trigger with function
-DROP TRIGGER IF EXISTS trigger_commands_set_expires ON commands;
-CREATE TRIGGER trigger_commands_set_expires
-    BEFORE INSERT ON commands
-    FOR EACH ROW
-    EXECUTE FUNCTION set_command_expires();
-
--- Auto-add to queue on insert
+-- Function: auto-add to command_queue on INSERT
 CREATE OR REPLACE FUNCTION add_to_command_queue()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -116,6 +120,17 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+-- ============================================================================
+-- TRIGGERS (defined AFTER the functions they reference)
+-- ============================================================================
+
+DROP TRIGGER IF EXISTS trigger_commands_set_expires ON commands;
+CREATE TRIGGER trigger_commands_set_expires
+    BEFORE INSERT ON commands
+    FOR EACH ROW
+    EXECUTE FUNCTION set_command_expires();
+
+DROP TRIGGER IF EXISTS trigger_commands_queue ON commands;
 CREATE TRIGGER trigger_commands_queue
     AFTER INSERT ON commands
     FOR EACH ROW

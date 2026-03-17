@@ -1,12 +1,20 @@
-// Package collectors provides event collection from Windows sources.
+// Package collectors — ETW kernel process tracer.
 //go:build windows
 // +build windows
 
 package collectors
 
+/*
+#cgo LDFLAGS: -ltdh -ladvapi32
+
+#include "etw_cgo.h"
+*/
+import "C"
+
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -18,271 +26,491 @@ import (
 	"github.com/edr-platform/win-agent/internal/logging"
 )
 
-// ETW Provider GUIDs for security-relevant events
-var (
-	// Microsoft-Windows-Kernel-Process
-	KernelProcessGUID = windows.GUID{
-		Data1: 0x22fb2cd6,
-		Data2: 0x0fe7,
-		Data3: 0x4212,
-		Data4: [8]byte{0xa2, 0x96, 0x1f, 0x7f, 0x7d, 0x3b, 0x40, 0x0c},
-	}
+// Unused GUID kept for session compat parameter.
+var kernelProcessGUID = C.GUID{
+	Data1: 0x22FB2CD6, Data2: 0x0FE7, Data3: 0x4212,
+	Data4: [8]C.uchar{0xA2, 0x96, 0x1F, 0x7F, 0x7D, 0x3B, 0x40, 0x0C},
+}
 
-	// Microsoft-Windows-Kernel-Network
-	KernelNetworkGUID = windows.GUID{
-		Data1: 0x7dd42a49,
-		Data2: 0x5329,
-		Data3: 0x4832,
-		Data4: [8]byte{0x8a, 0x15, 0xfb, 0x9b, 0x24, 0xe8, 0x4d, 0xd8},
-	}
+// =====================================================================
+// Collector
+// =====================================================================
 
-	// Microsoft-Windows-Kernel-Registry
-	KernelRegistryGUID = windows.GUID{
-		Data1: 0x70eb4f03,
-		Data2: 0xc1de,
-		Data3: 0x4f73,
-		Data4: [8]byte{0xa0, 0x51, 0x33, 0xd1, 0x3d, 0x54, 0x13, 0xbd},
-	}
-
-	// Microsoft-Windows-Kernel-File
-	KernelFileGUID = windows.GUID{
-		Data1: 0xedd08927,
-		Data2: 0x9cc4,
-		Data3: 0x4e65,
-		Data4: [8]byte{0xb9, 0x70, 0xc2, 0x56, 0x0f, 0xb5, 0xc2, 0x89},
-	}
-)
-
-// ETWCollector collects events using Event Tracing for Windows.
 type ETWCollector struct {
-	logger      *logging.Logger
-	eventChan   chan<- *event.Event
-	sessionName string
-
-	// State
-	running atomic.Bool
-	mu      sync.Mutex
-
-	// Metrics
-	eventsCollected atomic.Uint64
-	eventsDropped   atomic.Uint64
-	errors          atomic.Uint64
+	logger    *logging.Logger
+	eventChan chan<- *event.Event
+	session   string
+	running   atomic.Bool
+	collected atomic.Uint64
+	dropped   atomic.Uint64
+	errors    atomic.Uint64
 }
 
-// NewETWCollector creates a new ETW collector.
-func NewETWCollector(sessionName string, eventChan chan<- *event.Event, logger *logging.Logger) *ETWCollector {
-	if sessionName == "" {
-		sessionName = "EDRAgentSession"
-	}
+var globalCollector atomic.Pointer[ETWCollector]
 
-	return &ETWCollector{
-		logger:      logger,
-		eventChan:   eventChan,
-		sessionName: sessionName,
+func NewETWCollector(session string, ch chan<- *event.Event, l *logging.Logger) *ETWCollector {
+	if session == "" {
+		session = "EDRKernelTrace"
 	}
+	return &ETWCollector{logger: l, eventChan: ch, session: session}
 }
 
-// Start begins ETW event collection.
 func (c *ETWCollector) Start(ctx context.Context) error {
 	if c.running.Load() {
-		return fmt.Errorf("ETW collector already running")
+		return fmt.Errorf("already running")
 	}
-
-	c.logger.Info("Starting ETW collector...")
-	c.logger.Infof("Session name: %s", c.sessionName)
-
 	c.running.Store(true)
-
-	// Start collection goroutine
-	go c.collectLoop(ctx)
-
-	c.logger.Info("ETW collector started")
+	globalCollector.Store(c)
+	go c.run(ctx)
 	return nil
 }
 
-// Stop stops ETW event collection.
 func (c *ETWCollector) Stop() error {
-	if !c.running.Load() {
+	c.running.Store(false)
+	c.logger.Infof("ETW stats: collected=%d dropped=%d errors=%d",
+		c.collected.Load(), c.dropped.Load(), c.errors.Load())
+	return nil
+}
+
+func (c *ETWCollector) run(ctx context.Context) {
+	c.logger.Info("[BASELINE] Running initial process snapshot...")
+	c.baseline()
+	c.logger.Info("[BASELINE] Initial snapshot complete")
+
+	c.logger.Info("[ETW] Starting classic kernel process tracer (EnableFlags=PROCESS)")
+	for ctx.Err() == nil && c.running.Load() {
+		if err := c.session_(ctx); err != nil && ctx.Err() == nil && c.running.Load() {
+			c.logger.Errorf("[ETW] Session error: %v — restarting in 3s", err)
+			time.Sleep(3 * time.Second)
+		}
+	}
+	c.logger.Info("[ETW] Tracer stopped")
+}
+
+func (c *ETWCollector) session_(ctx context.Context) error {
+	name16, err := windows.UTF16FromString(c.session)
+	if err != nil {
+		return err
+	}
+	np := (*C.wchar_t)(unsafe.Pointer(&name16[0]))
+	C.KillNamedSession(np)
+	time.Sleep(200 * time.Millisecond)
+
+	ret := C.StartKernelProcessSession(np, &kernelProcessGUID, 0xFF, 0x10)
+	if ret != 0 {
+		c.errors.Add(1)
+		return fmt.Errorf("StartKernelProcessSession: error %d", ret)
+	}
+	c.logger.Info("[ETW] Session ACTIVE — SYSTEM_LOGGER_MODE + EnableFlags=PROCESS")
+
+	var diag atomic.Uint64
+	globalDiag.Store(&diag)
+	go func() {
+		time.Sleep(5 * time.Second)
+		c.logger.Infof("[ETW] Diagnostic: %d events in first 5s", diag.Load())
+	}()
+
+	go func() {
+		<-ctx.Done()
+		C.StopKernelSession(&kernelProcessGUID)
+	}()
+
+	ret = C.ProcessKernelEvents(np, nil)
+	if ret != 0 && ctx.Err() != nil {
 		return nil
 	}
-
-	c.logger.Info("Stopping ETW collector...")
-	c.running.Store(false)
-
-	c.logger.Infof("ETW stats: collected=%d dropped=%d errors=%d",
-		c.eventsCollected.Load(),
-		c.eventsDropped.Load(),
-		c.errors.Load())
-
+	if ret != 0 {
+		return fmt.Errorf("ProcessKernelEvents: error %d", ret)
+	}
 	return nil
 }
 
-// collectLoop is the main ETW event collection loop.
-// It uses a process snapshot (Toolhelp32) for process events and emits simulated
-// network events for pipeline validation until full ETW trace subscription is available.
-func (c *ETWCollector) collectLoop(ctx context.Context) {
-	c.logger.Debug("ETW collection loop started")
+// =====================================================================
+// C → Go callback (no goroutine, already parsed by C/TDH)
+// =====================================================================
 
-	// Process snapshot interval (avoids flooding; real ETW would be event-driven)
-	processTicker := time.NewTicker(2 * time.Second)
-	defer processTicker.Stop()
+var globalDiag atomic.Pointer[atomic.Uint64]
 
-	// Simulated network event interval for pipeline validation
-	simTicker := time.NewTicker(10 * time.Second)
-	defer simTicker.Stop()
+var (
+	dedupMu    sync.Mutex
+	dedupCache = make(map[uint32]int64, 64)
+)
 
-	tickCount := 0
-	for {
-		select {
-		case <-ctx.Done():
-			c.logger.Debug("ETW collection loop stopped (context)")
-			return
-		case <-processTicker.C:
-			if !c.running.Load() {
-				c.logger.Debug("ETW collection loop stopped (flag)")
-				return
-			}
-			c.collectProcessEvents()
-		case <-simTicker.C:
-			if !c.running.Load() {
-				return
-			}
-			tickCount++
-			c.emitSimulatedNetworkEvent(tickCount)
+func isDuplicate(pid uint32) bool {
+	now := time.Now().UnixNano()
+	dedupMu.Lock()
+	defer dedupMu.Unlock()
+	for k, ts := range dedupCache {
+		if now-ts > 2_000_000_000 {
+			delete(dedupCache, k)
 		}
+	}
+	if t, ok := dedupCache[pid]; ok && now-t < 2_000_000_000 {
+		return true
+	}
+	dedupCache[pid] = now
+	return false
+}
+
+//export goProcessEvent
+func goProcessEvent(evt *C.ParsedProcessEvent) {
+	collector := globalCollector.Load()
+	if collector == nil {
+		return
+	}
+
+	pid := uint32(evt.processId)
+	ppid := uint32(evt.parentId)
+	opcode := uint8(evt.opcode)
+
+	// Convert C strings to Go strings (copies — safe for goroutine)
+	imageName := C.GoString(&evt.imageFileName[0])
+	cmdLine := wcharToGo(&evt.commandLine[0], 4096)
+
+	// Diagnostic
+	if d := globalDiag.Load(); d != nil {
+		n := d.Add(1)
+		if n <= 20 {
+			collector.logger.Infof("[ETW-DBG] #%d Op=%d PID=%d Img=%s Cmd=%s",
+				n, opcode, pid, imageName, truncStr(cmdLine, 60))
+		}
+	}
+
+	if opcode == 1 {
+		go collector.processStart(pid, ppid, imageName, cmdLine)
+	} else {
+		go collector.processEnd(pid, ppid, imageName)
 	}
 }
 
-// collectProcessEvents collects process events using Windows API.
-// Enriches each process with full executable path and command line
-// so Sigma rules can match on CommandLine and Image fields.
-func (c *ETWCollector) collectProcessEvents() {
-	// Using CreateToolhelp32Snapshot for process enumeration
-	snapshot, err := windows.CreateToolhelp32Snapshot(windows.TH32CS_SNAPPROCESS, 0)
-	if err != nil {
-		c.errors.Add(1)
-		c.logger.Debugf("Failed to create process snapshot: %v", err)
-		return
+func wcharToGo(p *C.WCHAR, max int) string {
+	if p == nil {
+		return ""
 	}
-	defer windows.CloseHandle(snapshot)
-
-	var entry windows.ProcessEntry32
-	entry.Size = uint32(unsafe.Sizeof(entry))
-
-	err = windows.Process32First(snapshot, &entry)
-	if err != nil {
-		c.errors.Add(1)
-		return
-	}
-
-	for {
-		name := windows.UTF16ToString(entry.ExeFile[:])
-		pid := entry.ProcessID
-
-		// Enrich with full executable path via OpenProcess + QueryFullProcessImageNameW
-		executable := c.getProcessImagePath(pid)
-		if executable == "" {
-			// Fallback: construct path from name (common system processes)
-			executable = name
+	chars := make([]uint16, 0, 256)
+	base := uintptr(unsafe.Pointer(p))
+	for i := 0; i < max; i++ {
+		ch := *(*uint16)(unsafe.Pointer(base + uintptr(i*2)))
+		if ch == 0 {
+			break
 		}
+		chars = append(chars, ch)
+	}
+	if len(chars) == 0 {
+		return ""
+	}
+	return windows.UTF16ToString(chars)
+}
 
-		// Construct a synthetic command line from the executable/name
-		// Real ETW (process start) would have the actual command line;
-		// for snapshot mode we use the executable as the command line.
-		commandLine := executable
+// =====================================================================
+// Sigma-Enriched Process Events
+// =====================================================================
 
+func (c *ETWCollector) processStart(pid, ppid uint32, eventImg, eventCmd string) {
+	if isDuplicate(pid) {
+		return
+	}
+
+	// --- Enrich via Windows APIs (reliable for live processes) ---
+	exePath := getImagePath(pid)
+	cmdLine := getCmdLine(pid)
+
+	// --- Fallback to event data (short-lived processes) ---
+	if exePath == "" {
+		exePath = eventImg
+	}
+	if cmdLine == "" {
+		cmdLine = eventCmd
+	}
+
+	name := baseName(exePath)
+	if name == "" {
+		name = exePath
+	}
+	nameLow := strings.ToLower(name)
+
+	// Noise filter
+	if nameLow == "conhost.exe" || nameLow == "wmiprvse.exe" || nameLow == "" {
+		return
+	}
+	if nameLow == "powershell.exe" && strings.Contains(cmdLine, "-NoProfile") {
+		if containsAny(cmdLine, "Get-NetTCPConnection", "Get-CimInstance",
+			"Get-NetAdapter", "ConvertTo-Json", "ConvertTo-Csv") {
+			return
+		}
+	}
+
+	if cmdLine == "" {
+		cmdLine = exePath
+	}
+	if exePath == "" {
+		exePath = name
+	}
+
+	// Sigma enrichment: ParentImage, User
+	parentImage := getImagePath(ppid)
+	if parentImage == "" {
+		parentImage = fmt.Sprintf("pid:%d", ppid)
+	}
+	userSid, userName, isElevated, integrity := getPrivileges(pid)
+
+	evt := event.NewEvent(event.EventTypeProcess, event.SeverityLow, map[string]interface{}{
+		"action":           "process_creation",
+		"pid":              pid,
+		"ppid":             ppid,
+		"name":             name,
+		"executable":       exePath,
+		"command_line":     cmdLine,
+		"parent_executable": parentImage,
+		"parent_name":      baseName(parentImage),
+		"user_sid":         userSid,
+		"user_name":        userName,
+		"is_elevated":      isElevated,
+		"integrity_level":  integrity,
+	})
+	c.send(evt)
+	c.logger.Infof("[ETW] Process START: pid=%d ppid=%d name=%s cmd=%s",
+		pid, ppid, name, truncStr(cmdLine, 80))
+}
+
+func (c *ETWCollector) processEnd(pid, ppid uint32, eventImg string) {
+	name := baseName(getImagePath(pid))
+	if name == "" {
+		name = baseName(eventImg)
+	}
+	if name == "" || strings.ToLower(name) == "conhost.exe" {
+		return
+	}
+	evt := event.NewEvent(event.EventTypeProcess, event.SeverityLow, map[string]interface{}{
+		"action": "process_termination",
+		"pid":    pid,
+		"ppid":   ppid,
+		"name":   name,
+	})
+	c.send(evt)
+}
+
+// =====================================================================
+// Baseline Snapshot (Toolhelp32, runs once)
+// =====================================================================
+
+func (c *ETWCollector) baseline() {
+	snap, err := windows.CreateToolhelp32Snapshot(windows.TH32CS_SNAPPROCESS, 0)
+	if err != nil {
+		return
+	}
+	defer windows.CloseHandle(snap)
+
+	var e windows.ProcessEntry32
+	e.Size = uint32(unsafe.Sizeof(e))
+
+	table := map[uint32]struct{ n, x string }{}
+	if windows.Process32First(snap, &e) == nil {
+		for {
+			n := windows.UTF16ToString(e.ExeFile[:])
+			x := getImagePath(e.ProcessID)
+			if x == "" {
+				x = n
+			}
+			table[e.ProcessID] = struct{ n, x string }{n, x}
+			if windows.Process32Next(snap, &e) != nil {
+				break
+			}
+		}
+	}
+
+	if windows.Process32First(snap, &e) != nil {
+		return
+	}
+	for {
+		pid := e.ProcessID
+		ppid := e.ParentProcessID
+		info := table[pid]
+		pinfo := table[ppid]
+		cmd := getCmdLine(pid)
+		if cmd == "" {
+			cmd = info.x
+		}
+		sid, user, elev, integ := getPrivileges(pid)
 		evt := event.NewEvent(event.EventTypeProcess, event.SeverityLow, map[string]interface{}{
-			"action":       "snapshot",
-			"pid":          pid,
-			"ppid":         entry.ParentProcessID,
-			"name":         name,
-			"executable":   executable,
-			"command_line": commandLine,
-			"threads":      entry.Threads,
+			"action": "snapshot", "pid": pid, "ppid": ppid,
+			"name": info.n, "executable": info.x, "command_line": cmd,
+			"parent_name": pinfo.n, "parent_executable": pinfo.x,
+			"user_sid": sid, "user_name": user,
+			"is_elevated": elev, "integrity_level": integ,
 		})
-
-		c.sendEvent(evt)
-
-		err = windows.Process32Next(snapshot, &entry)
-		if err != nil {
+		c.send(evt)
+		if windows.Process32Next(snap, &e) != nil {
 			break
 		}
 	}
 }
 
-// getProcessImagePath retrieves the full executable path for a process via Windows API.
-// Returns empty string if the process cannot be queried (e.g., access denied, system process).
-func (c *ETWCollector) getProcessImagePath(pid uint32) string {
+// =====================================================================
+// Windows API Helpers
+// =====================================================================
+
+func getImagePath(pid uint32) string {
 	if pid == 0 || pid == 4 {
-		return "" // System Idle Process and System
+		return ""
 	}
-
-	// PROCESS_QUERY_LIMITED_INFORMATION = 0x1000 (works even for elevated processes)
-	handle, err := windows.OpenProcess(0x1000, false, pid)
+	h, err := windows.OpenProcess(0x1000, false, pid)
 	if err != nil {
 		return ""
 	}
-	defer windows.CloseHandle(handle)
-
-	// QueryFullProcessImageNameW
+	defer windows.CloseHandle(h)
 	var buf [windows.MAX_PATH]uint16
-	bufSize := uint32(len(buf))
-	err = windows.QueryFullProcessImageName(handle, 0, &buf[0], &bufSize)
+	sz := uint32(len(buf))
+	if windows.QueryFullProcessImageName(h, 0, &buf[0], &sz) != nil {
+		return ""
+	}
+	return windows.UTF16ToString(buf[:sz])
+}
+
+var (
+	ntdll    = windows.NewLazyDLL("ntdll.dll")
+	ntqip    = ntdll.NewProc("NtQueryInformationProcess")
+)
+
+func getCmdLine(pid uint32) string {
+	if pid == 0 || pid == 4 {
+		return ""
+	}
+	h, err := windows.OpenProcess(0x1000, false, pid)
 	if err != nil {
 		return ""
 	}
+	defer windows.CloseHandle(h)
 
-	return windows.UTF16ToString(buf[:bufSize])
+	const infoCls = 60
+	var retLen uint32
+	buf := make([]byte, 1024)
+	r, _, _ := ntqip.Call(uintptr(h), infoCls,
+		uintptr(unsafe.Pointer(&buf[0])), uintptr(len(buf)),
+		uintptr(unsafe.Pointer(&retLen)))
+
+	if r == 0xC0000004 && retLen > 0 && retLen < 65536 {
+		buf = make([]byte, retLen)
+		r, _, _ = ntqip.Call(uintptr(h), infoCls,
+			uintptr(unsafe.Pointer(&buf[0])), uintptr(len(buf)),
+			uintptr(unsafe.Pointer(&retLen)))
+	}
+	if r != 0 || retLen < 8 {
+		return ""
+	}
+
+	length := *(*uint16)(unsafe.Pointer(&buf[0]))
+	if length == 0 || int(length)+16 > len(buf) {
+		return ""
+	}
+	ptr := *(*uintptr)(unsafe.Pointer(&buf[8]))
+	base := uintptr(unsafe.Pointer(&buf[0]))
+	off := int(ptr - base)
+	if off < 0 || off+int(length) > len(buf) {
+		return ""
+	}
+	s := make([]uint16, length/2)
+	for i := range s {
+		s[i] = *(*uint16)(unsafe.Pointer(&buf[off+i*2]))
+	}
+	return windows.UTF16ToString(s)
 }
 
-// emitSimulatedNetworkEvent pushes a synthetic network event for pipeline validation
-// when full ETW kernel network tracing is not yet enabled.
-func (c *ETWCollector) emitSimulatedNetworkEvent(seq int) {
-	evt := event.NewEvent(event.EventTypeNetwork, event.SeverityLow, map[string]interface{}{
-		"action":           "connection_established",
-		"direction":        "outbound",
-		"protocol":         "tcp",
-		"source_ip":        "127.0.0.1",
-		"source_port":      0,
-		"destination_ip":   "0.0.0.0",
-		"destination_port": 0,
-		"pid":              int64(0),
-		"process_name":     "",
-		"simulated":        true,
-		"seq":              seq,
-	})
-	c.sendEvent(evt)
+func getPrivileges(pid uint32) (sid, user string, elevated bool, integrity string) {
+	if pid == 0 || pid == 4 {
+		return
+	}
+	h, err := windows.OpenProcess(0x1000, false, pid)
+	if err != nil {
+		return
+	}
+	defer windows.CloseHandle(h)
+
+	var tok windows.Token
+	if windows.OpenProcessToken(h, windows.TOKEN_QUERY, &tok) != nil {
+		return
+	}
+	defer tok.Close()
+
+	if u, err := tok.GetTokenUser(); err == nil {
+		sid = u.User.Sid.String()
+		if acct, dom, _, err := u.User.Sid.LookupAccount(""); err == nil {
+			user = dom + `\` + acct
+		}
+	}
+	elevated = tok.IsElevated()
+
+	var isz uint32
+	windows.GetTokenInformation(tok, windows.TokenIntegrityLevel, nil, 0, &isz)
+	if isz > 0 {
+		ib := make([]byte, isz)
+		if windows.GetTokenInformation(tok, windows.TokenIntegrityLevel, &ib[0], isz, &isz) == nil {
+			tml := (*windows.Tokenmandatorylabel)(unsafe.Pointer(&ib[0]))
+			switch tml.Label.Sid.String() {
+			case "S-1-16-4096":
+				integrity = "Low"
+			case "S-1-16-8192":
+				integrity = "Medium"
+			case "S-1-16-12288":
+				integrity = "High"
+			case "S-1-16-16384":
+				integrity = "System"
+			default:
+				integrity = tml.Label.Sid.String()
+			}
+		}
+	}
+	return
 }
 
-// sendEvent sends an event to the channel.
-func (c *ETWCollector) sendEvent(evt *event.Event) {
+// =====================================================================
+// Utility
+// =====================================================================
+
+func (c *ETWCollector) send(evt *event.Event) {
 	select {
 	case c.eventChan <- evt:
-		c.eventsCollected.Add(1)
+		c.collected.Add(1)
 	default:
-		c.eventsDropped.Add(1)
+		c.dropped.Add(1)
 	}
 }
 
-// Stats returns collector statistics.
+func baseName(p string) string {
+	if i := strings.LastIndex(p, `\`); i >= 0 {
+		return p[i+1:]
+	}
+	if i := strings.LastIndex(p, `/`); i >= 0 {
+		return p[i+1:]
+	}
+	return p
+}
+
+func truncStr(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "..."
+}
+
+func containsAny(s string, subs ...string) bool {
+	for _, sub := range subs {
+		if strings.Contains(s, sub) {
+			return true
+		}
+	}
+	return false
+}
+
+// Public API for agent
+func (c *ETWCollector) IsRunning() bool          { return c.running.Load() }
 func (c *ETWCollector) Stats() ETWStats {
-	return ETWStats{
-		Running:         c.running.Load(),
-		EventsCollected: c.eventsCollected.Load(),
-		EventsDropped:   c.eventsDropped.Load(),
-		Errors:          c.errors.Load(),
-	}
+	return ETWStats{c.running.Load(), c.collected.Load(), c.dropped.Load(), c.errors.Load()}
 }
 
-// ETWStats holds ETW collector statistics.
 type ETWStats struct {
 	Running         bool
 	EventsCollected uint64
 	EventsDropped   uint64
 	Errors          uint64
-}
-
-// IsRunning returns whether the collector is running.
-func (c *ETWCollector) IsRunning() bool {
-	return c.running.Load()
 }

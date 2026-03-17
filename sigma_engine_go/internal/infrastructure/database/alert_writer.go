@@ -233,6 +233,10 @@ func (w *AlertWriter) convertToDBAlert(da *domain.Alert) *Alert {
 		CombinedConfidence: &da.CombinedConfidence,
 		SeverityPromoted:   &da.SeverityPromoted,
 		OriginalSeverity:   origSeverity,
+		// Context-Aware Risk Scoring fields (Phase 1)
+		RiskScore:       da.RiskScore,
+		ContextSnapshot: da.ContextSnapshot,
+		ScoreBreakdown:  da.ScoreBreakdown,
 	}
 }
 

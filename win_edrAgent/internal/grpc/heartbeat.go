@@ -154,7 +154,7 @@ func (h *Heartbeat) sendHeartbeat(sendFunc func(*HeartbeatRequest) (*HeartbeatRe
 
 	resp, err := sendFunc(req)
 	if err != nil {
-		h.logger.Debugf("Heartbeat failed: %v", err)
+		h.logger.Warnf("[Heartbeat] FAILED (server unreachable?): %v", err)
 		return
 	}
 
@@ -164,8 +164,8 @@ func (h *Heartbeat) sendHeartbeat(sendFunc func(*HeartbeatRequest) (*HeartbeatRe
 	// Process response
 	h.processResponse(resp)
 
-	h.logger.Debugf("Heartbeat sent: status=%s events=%d/%d queue=%d",
-		req.Status, req.EventsSent, req.EventsGenerated, req.QueueDepth)
+	h.logger.Infof("[Heartbeat] OK: status=%s sent=%d events=%d/%d queue=%d",
+		req.Status, h.heartbeatsSent.Load(), req.EventsSent, req.EventsGenerated, req.QueueDepth)
 }
 
 // buildRequest creates a heartbeat request with current metrics.

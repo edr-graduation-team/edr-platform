@@ -36,8 +36,14 @@ type Alert struct {
 	CombinedConfidence *float64               `json:"combined_confidence,omitempty"`
 	SeverityPromoted   *bool                  `json:"severity_promoted,omitempty"`
 	OriginalSeverity   string                 `json:"original_severity,omitempty"`
-	CreatedAt          time.Time              `json:"created_at"`
-	UpdatedAt          time.Time              `json:"updated_at"`
+
+	// Context-Aware Risk Scoring (Phase 1) — populated after migration 014
+	RiskScore       int            `json:"risk_score"`
+	ContextSnapshot map[string]any `json:"context_snapshot,omitempty"`
+	ScoreBreakdown  map[string]any `json:"score_breakdown,omitempty"`
+
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // AlertFilters contains filter options for querying alerts.
@@ -67,6 +73,16 @@ type AlertStats struct {
 	AvgConfidence float64          `json:"avg_confidence"`
 }
 
+// TimelineDataPoint represents a single point in the alert timeline.
+type TimelineDataPoint struct {
+	Timestamp     time.Time `json:"timestamp"`
+	Critical      int64     `json:"critical"`
+	High          int64     `json:"high"`
+	Medium        int64     `json:"medium"`
+	Low           int64     `json:"low"`
+	Informational int64     `json:"informational"`
+}
+
 // AlertRepository defines the interface for alert data access.
 type AlertRepository interface {
 	// Create inserts a new alert into the database.
@@ -89,6 +105,9 @@ type AlertRepository interface {
 
 	// GetStats retrieves aggregate alert statistics.
 	GetStats(ctx context.Context) (*AlertStats, error)
+
+	// GetTimeline retrieves timeline data for the alert chart.
+	GetTimeline(ctx context.Context, from, to, granularity string) ([]*TimelineDataPoint, error)
 
 	// FindRecent finds recent similar alerts for deduplication.
 	FindRecent(ctx context.Context, agentID, ruleID string, since time.Time) (*Alert, error)

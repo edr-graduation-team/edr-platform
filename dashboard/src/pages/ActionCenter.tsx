@@ -1,0 +1,426 @@
+import { useQuery } from '@tanstack/react-query';
+import React, { useState } from 'react';
+import {
+    Zap, CheckCircle2, Clock, XCircle, AlertTriangle,
+    ChevronDown, ChevronRight, RefreshCw, Terminal,
+    Monitor, Search, X, Activity
+} from 'lucide-react';
+import { commandsApi, type CommandListItem, type CommandStats } from '../api/client';
+import { useDebounce } from '../hooks/useDebounce';
+
+const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string; icon: React.ElementType }> = {
+    pending: { label: 'Pending', color: '#f59e0b', bg: 'rgba(245,158,11,0.12)', icon: Clock },
+    sent: { label: 'Sent', color: '#3b82f6', bg: 'rgba(59,130,246,0.12)', icon: Zap },
+    completed: { label: 'Completed', color: '#22c55e', bg: 'rgba(34,197,94,0.12)', icon: CheckCircle2 },
+    failed: { label: 'Failed', color: '#ef4444', bg: 'rgba(239,68,68,0.12)', icon: XCircle },
+    timeout: { label: 'Timeout', color: '#f97316', bg: 'rgba(249,115,22,0.12)', icon: AlertTriangle },
+    cancelled: { label: 'Cancelled', color: '#6b7280', bg: 'rgba(107,114,128,0.12)', icon: XCircle },
+};
+
+function StatusBadge({ status }: { status: string }) {
+    const cfg = STATUS_CONFIG[status] || STATUS_CONFIG.pending;
+    const Icon = cfg.icon;
+    return (
+        <span style={{
+            display: 'inline-flex', alignItems: 'center', gap: '6px',
+            padding: '4px 10px', borderRadius: '9999px', fontSize: '12px', fontWeight: 600,
+            color: cfg.color, backgroundColor: cfg.bg,
+        }}>
+            <Icon style={{ width: 14, height: 14 }} />
+            {cfg.label}
+        </span>
+    );
+}
+
+
+
+
+
+function formatDuration(ms: number) {
+    if (ms < 1000) return `${ms}ms`;
+    if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
+    return `${(ms / 60000).toFixed(1)}m`;
+}
+
+// KPI Card Component
+const KPICard = React.memo(function KPICard({ title: label, value, icon: Icon, color, subtitle }: {
+    title: string; value: number; icon: React.ElementType; color: string; subtitle?: string;
+}) {
+    return (
+        <div className="relative overflow-hidden bg-white/60 dark:bg-slate-900/40 backdrop-blur-md rounded-xl border border-slate-200/80 dark:border-slate-700/50 p-5 shadow-sm transition-all hover:shadow-md group">
+            <div className="flex items-center gap-4 relative z-10">
+                <div className={`p-3 rounded-lg ${color}`}>
+                    <Icon className="w-6 h-6" />
+                </div>
+                <div>
+                    <div className="text-sm font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">{label}</div>
+                    <div className="text-2xl font-bold text-slate-900 dark:text-white">{value.toLocaleString()}</div>
+                    {subtitle && <div className="text-xs text-slate-500 dark:text-slate-500 mt-1">{subtitle}</div>}
+                </div>
+            </div>
+        </div>
+    );
+});
+
+// Command Stream Row Component
+const CommandRow = React.memo(function CommandRow({ command: item }: { command: CommandListItem }) {
+    const [expanded, setExpanded] = useState(false);
+
+    const issuedDate = new Date(item.issued_at);
+    const completedDate = item.completed_at ? new Date(item.completed_at) : null;
+    const duration = completedDate ? completedDate.getTime() - issuedDate.getTime() : null;
+
+    const getCommandStyles = (type: string) => {
+        switch (type) {
+            case 'kill_process': return { icon: XCircle, color: 'text-rose-600 dark:text-rose-400', bg: 'bg-rose-500/10 dark:bg-rose-500/20' };
+            case 'quarantine_file': return { icon: AlertTriangle, color: 'text-orange-600 dark:text-orange-400', bg: 'bg-orange-500/10 dark:bg-orange-500/20' };
+            case 'collect_logs': return { icon: Monitor, color: 'text-blue-600 dark:text-blue-400', bg: 'bg-blue-500/10 dark:bg-blue-500/20' };
+            case 'update_policy': return { icon: CheckCircle2, color: 'text-indigo-600 dark:text-indigo-400', bg: 'bg-indigo-500/10 dark:bg-indigo-500/20' };
+            case 'restart_agent': return { icon: RefreshCw, color: 'text-amber-600 dark:text-amber-400', bg: 'bg-amber-500/10 dark:bg-amber-500/20' };
+            case 'restart_machine': return { icon: RefreshCw, color: 'text-rose-600 dark:text-rose-400', bg: 'bg-rose-500/10 dark:bg-rose-500/20' };
+            case 'shutdown_machine': return { icon: XCircle, color: 'text-red-600 dark:text-red-400', bg: 'bg-red-500/10 dark:bg-red-500/20' };
+            case 'isolate_network': return { icon: Zap, color: 'text-red-600 dark:text-red-400', bg: 'bg-red-500/10 dark:bg-red-500/20' };
+            case 'restore_network': return { icon: Zap, color: 'text-emerald-600 dark:text-emerald-400', bg: 'bg-emerald-500/10 dark:bg-emerald-500/20' };
+            case 'scan_file': return { icon: Search, color: 'text-purple-600 dark:text-purple-400', bg: 'bg-purple-500/10 dark:bg-purple-500/20' };
+            case 'scan_memory': return { icon: Search, color: 'text-cyan-600 dark:text-cyan-400', bg: 'bg-cyan-500/10 dark:bg-cyan-500/20' };
+            default: return { icon: Terminal, color: 'text-slate-600 dark:text-slate-400', bg: 'bg-slate-500/10 dark:bg-slate-500/20' };
+        }
+    };
+
+    const { icon: Icon, color, bg } = getCommandStyles(item.command_type);
+
+    return (
+        <div className="p-4 rounded-xl border transition-all duration-200 group relative bg-slate-50/50 dark:bg-slate-800/40 border-slate-200/80 dark:border-slate-700/50 hover:bg-white dark:hover:bg-slate-800/60 hover:border-slate-300 dark:hover:border-slate-600/50">
+            {/* Status Indicator Bar */}
+            <div className={`absolute left-0 top-0 bottom-0 w-1 rounded-l-xl ${
+                item.status === 'completed' ? 'bg-emerald-500' :
+                item.status === 'failed' ? 'bg-rose-500' :
+                item.status === 'timeout' ? 'bg-orange-500' :
+                'bg-blue-500 animate-pulse'
+            }`} />
+
+            <div className="grid grid-cols-1 lg:grid-cols-[2fr_1.5fr_1.5fr_auto] items-center w-full gap-4 lg:gap-6">
+                {/* 1. Command Primary Info */}
+                <div className="flex items-center gap-4 min-w-0">
+                    <div className={`p-3 rounded-xl shrink-0 ${bg} ${color} flex items-center justify-center`}>
+                        <Icon className="w-5 h-5" />
+                    </div>
+                    <div className="flex flex-col justify-center min-w-0 gap-1.5 py-0.5">
+                        <div className="flex items-center flex-wrap gap-2.5">
+                            <span className="font-bold text-slate-900 dark:text-slate-100 uppercase tracking-widest text-xs leading-none">
+                                {item.command_type.replace(/_/g, ' ')}
+                            </span>
+                            <StatusBadge status={item.status} />
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <span className="h-5 px-2 flex items-center justify-center rounded text-[10px] font-mono bg-slate-100 dark:bg-slate-900/60 text-slate-500 dark:text-slate-400 border border-slate-200 dark:border-slate-800/60 transition-colors">
+                                ID: {item.id.substring(0, 8)}
+                            </span>
+                        </div>
+                    </div>
+                </div>
+
+                {/* 2. Target Info */}
+                <div className="flex flex-col min-w-0 gap-1.5 justify-center">
+                    <div className="flex items-center gap-2 text-slate-600 dark:text-slate-300 text-xs font-semibold">
+                        <Monitor className="w-4 h-4 text-slate-400" />
+                        <span className="truncate">{item.agent_hostname || 'Unknown Host'}</span>
+                    </div>
+                    <div className="flex items-center gap-2 text-slate-500 dark:text-slate-400 text-[11px] font-mono" title="Agent ID">
+                        <span className="font-bold text-slate-400">{'>_'}</span>
+                        <span className="truncate">{item.agent_id}</span>
+                    </div>
+                </div>
+
+                {/* 3. Time & Duration Info */}
+                <div className="flex flex-row lg:flex-col justify-start lg:justify-center items-center lg:items-start min-w-0 gap-3 lg:gap-2">
+                    <div className="flex items-center gap-2 text-slate-500 dark:text-slate-400 text-xs font-medium bg-slate-100 dark:bg-slate-800/40 px-2.5 py-1 rounded-md w-fit">
+                        <Activity className="w-3.5 h-3.5 opacity-70" />
+                        <span>{duration !== null ? formatDuration(duration) : '—'}</span>
+                    </div>
+                    <div className="flex items-center gap-2 text-slate-500 dark:text-slate-400 text-[11px] font-medium px-2 py-0.5">
+                        <Clock className="w-3.5 h-3.5 opacity-70" />
+                        <span>{new Date(item.issued_at).toLocaleString()}</span>
+                    </div>
+                </div>
+
+                {/* 4. Action */}
+                <div className="flex items-center justify-end shrink-0 ml-auto lg:ml-0">
+                    <button
+                        onClick={() => setExpanded(!expanded)}
+                        className="p-1.5 rounded-full hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors focus:outline-none focus:ring-2 focus:ring-slate-300 dark:focus:ring-slate-600"
+                        title={expanded ? 'Collapse Details' : 'Expand Details'}
+                    >
+                        {expanded
+                            ? <ChevronDown className="w-5 h-5 text-slate-500 dark:text-slate-400" />
+                            : <ChevronRight className="w-5 h-5 text-slate-500 dark:text-slate-400" />
+                        }
+                    </button>
+                </div>
+            </div>
+
+            {expanded && (
+                <div className="mt-4 pt-4 border-t border-slate-200 dark:border-slate-700/50 pl-2">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+                        <div>
+                            <div className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">Command ID</div>
+                            <code className="block bg-slate-100 dark:bg-slate-900/60 p-2 rounded-md text-slate-700 dark:text-slate-200 break-all">{item.id}</code>
+                        </div>
+                        <div>
+                            <div className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">Agent ID</div>
+                            <code className="block bg-slate-100 dark:bg-slate-900/60 p-2 rounded-md text-slate-700 dark:text-slate-200 break-all">{item.agent_id}</code>
+                        </div>
+                    </div>
+
+                    <div className="mt-4">
+                        <div className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">Parameters</div>
+                        <pre className="bg-slate-100 dark:bg-slate-900/60 p-3 rounded-md text-slate-700 dark:text-slate-200 whitespace-pre-wrap break-words overflow-y-auto max-h-64 text-xs">
+                            {JSON.stringify(item.parameters || {}, null, 2)}
+                        </pre>
+                    </div>
+
+                    {item.result && (
+                        <div className="mt-4">
+                            <div className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider mb-1 flex items-center gap-1">
+                                <Terminal className="w-3.5 h-3.5" /> Result Output
+                            </div>
+                            <pre className="bg-slate-900 p-3 rounded-md text-slate-100 whitespace-pre-wrap break-words overflow-y-auto max-h-64 text-xs">
+                                {typeof item.result === 'object' ? JSON.stringify(item.result, null, 2) : String(item.result)}
+                            </pre>
+                        </div>
+                    )}
+
+                    {item.error_message && (
+                        <div className="mt-4">
+                            <div className="text-xs font-semibold text-rose-600 dark:text-rose-400 uppercase tracking-wider mb-1">Error</div>
+                            <pre className="bg-slate-500/10 dark:bg-rose-500/20 p-3 rounded-md text-rose-700 dark:text-rose-300 whitespace-pre-wrap break-words overflow-y-auto max-h-64 text-xs">
+                                {item.error_message}
+                            </pre>
+                        </div>
+                    )}
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4 text-sm text-slate-600 dark:text-slate-400">
+                        <div>
+                            <div className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Issued At</div>
+                            <div>{new Date(item.issued_at).toLocaleString()}</div>
+                        </div>
+                        {item.sent_at && (
+                            <div>
+                                <div className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Sent At</div>
+                                <div>{new Date(item.sent_at).toLocaleString()}</div>
+                            </div>
+                        )}
+                        {item.completed_at && (
+                            <div>
+                                <div className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Completed At</div>
+                                <div>{new Date(item.completed_at).toLocaleString()}</div>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+});
+
+export default function ActionCenter() {
+    const [filters, setFilters] = useState<{
+        status?: string;
+        command_type?: string;
+        agent_id?: string;
+    }>({});
+    const [page, setPage] = useState(0);
+    const limit = 25; // Increased limit for longer lists
+    const debouncedAgentId = useDebounce(filters.agent_id, 300);
+
+    const { data: stats } = useQuery<CommandStats>({
+        queryKey: ['command-stats'],
+        queryFn: () => commandsApi.stats(),
+        refetchInterval: 30000,
+    });
+
+    const {
+        data: commandsData,
+        isLoading: commandsLoading,
+        isFetching,
+        isError,
+        refetch,
+        dataUpdatedAt
+    } = useQuery({
+        queryKey: ['commands', filters.status, filters.command_type, debouncedAgentId, page],
+        queryFn: () => commandsApi.list({
+            limit,
+            offset: page * limit,
+            status: filters.status || undefined,
+            command_type: filters.command_type || undefined,
+            agent_id: debouncedAgentId || undefined,
+        }),
+        refetchInterval: 30000,
+    });
+
+    const commands = commandsData?.data || [];
+    const pagination = commandsData?.pagination;
+    const total = pagination?.total || 0;
+    const totalPages = Math.ceil(total / limit);
+
+    const handleRefresh = () => {
+        refetch();
+    };
+
+    const handlePageChange = (newPage: number) => {
+        setPage(newPage - 1);
+    };
+
+    const lastUpdated = dataUpdatedAt || Date.now();
+    const currentPage = page + 1;
+
+    return (
+        <div className="relative flex flex-col min-h-[calc(100vh-2rem)] lg:min-h-[calc(100vh-1rem)] h-full -mx-4 sm:-mx-6 lg:-mx-8 -my-4 sm:-my-6 lg:-my-8 p-4 sm:p-6 lg:p-8 bg-slate-50 dark:bg-gradient-to-br dark:from-slate-900 dark:via-[#0b1120] dark:to-slate-900 transition-colors overflow-hidden">
+            {/* Background ambient glow setup */}
+            <div className="absolute top-0 right-0 w-[500px] h-[500px] pointer-events-none mix-blend-screen" style={{ background: 'radial-gradient(circle, rgba(6,182,212,0.08) 0%, transparent 70%)' }} />
+
+            <div className="relative flex-1 flex flex-col min-h-0 space-y-4 lg:space-y-6 max-w-[1600px] mx-auto w-full">
+                
+                {/* Header Section */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 shrink-0">
+                    <div>
+                        <h1 className="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-gray-900 to-gray-600 dark:from-white dark:to-gray-300">
+                            Action Center
+                        </h1>
+                        <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Real-time command history and fleet operations</p>
+                    </div>
+                    
+                    {/* Action Bar */}
+                    <div className="flex flex-wrap items-center gap-3">
+                        {isError && (
+                            <div className="flex items-center gap-2 text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-500/10 px-3 py-1.5 rounded-lg border border-rose-200 dark:border-rose-500/20 text-sm font-medium">
+                                <AlertTriangle className="w-4 h-4" />
+                                <span>Sync failed</span>
+                            </div>
+                        )}
+                        <span className="text-sm text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
+                            {isFetching && !commandsLoading && <RefreshCw className="w-4 h-4 animate-spin text-cyan-500" />}
+                            Last updated: {new Date(lastUpdated).toLocaleTimeString()}
+                        </span>
+                        <button
+                            onClick={handleRefresh}
+                            className="p-2 border border-slate-200 dark:border-slate-700 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 transition-colors bg-white/60 dark:bg-slate-900/60 backdrop-blur"
+                            title="Refresh Now"
+                        >
+                            <RefreshCw className={`w-4 h-4 ${isFetching ? 'animate-spin' : ''}`} />
+                        </button>
+                    </div>
+                </div>
+
+                {/* Stats KPIs */}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 shrink-0">
+                    <KPICard title="Total Commands" value={stats?.total || 0} icon={Terminal} color="bg-blue-500/10 dark:bg-blue-500/20 text-blue-600 dark:text-blue-400 border border-blue-500/20" />
+                    <KPICard title="Pending" value={stats?.pending || 0} icon={Clock} color="bg-amber-500/10 dark:bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/20" />
+                    <KPICard title="Completed" value={stats?.completed || 0} icon={CheckCircle2} color="bg-emerald-500/10 dark:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20" />
+                    <KPICard title="Failed" value={stats?.failed || 0} icon={XCircle} color="bg-rose-500/10 dark:bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/20" />
+                </div>
+
+                {/* Filters Strip */}
+                <div className="relative z-20 shrink-0 bg-white/60 dark:bg-slate-900/40 backdrop-blur-md border border-slate-200/80 dark:border-slate-700/50 rounded-xl p-4 shadow-sm flex flex-col md:flex-row gap-4 items-end">
+                    
+                    <div className="w-full md:w-64 relative">
+                        <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">
+                            Search Endpoints
+                        </label>
+                        <div className="relative">
+                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                            <input
+                                type="text"
+                                placeholder="Filter by Agent ID..."
+                                value={filters.agent_id || ''}
+                                onChange={(e) => setFilters(prev => ({ ...prev, agent_id: e.target.value || undefined }))}
+                                className="w-full bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700/80 text-slate-700 dark:text-slate-200 rounded-lg pl-9 pr-3 py-2 text-sm focus:ring-2 focus:ring-cyan-500/50 focus:border-cyan-500 transition-all hover:bg-white dark:hover:bg-slate-800"
+                            />
+                            {filters.agent_id && (
+                                <button 
+                                    onClick={() => setFilters(prev => ({ ...prev, agent_id: undefined }))}
+                                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-cyan-500"
+                                >
+                                    <X className="w-3.5 h-3.5" />
+                                </button>
+                            )}
+                        </div>
+                    </div>
+
+                    <div className="w-full md:w-48 relative">
+                        <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">
+                            Type Filter
+                        </label>
+                        <div className="relative">
+                            <select
+                                value={filters.command_type || ''}
+                                onChange={(e) => setFilters(prev => ({ ...prev, command_type: e.target.value || undefined }))}
+                                className="appearance-none w-full bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700/80 text-slate-700 dark:text-slate-200 rounded-lg pl-3 pr-8 py-2 text-sm focus:ring-2 focus:ring-cyan-500/50 focus:border-cyan-500 transition-all hover:bg-white dark:hover:bg-slate-800 cursor-pointer"
+                            >
+                                <option value="">All Types</option>
+                                <option value="remediate">Remediate</option>
+                                <option value="isolate">Isolate</option>
+                                <option value="scan">Scan</option>
+                                <option value="restart">Restart</option>
+                            </select>
+                            <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+                        </div>
+                    </div>
+                </div>
+
+                {/* Commands Stream Grid */}
+                <div className="relative flex-1 flex flex-col min-h-0 bg-white dark:bg-slate-800/70 rounded-2xl border border-slate-200 dark:border-slate-700/60 shadow-sm overflow-hidden mt-2">
+                    
+                    {/* Inner Scrollable Area */}
+                    <div className="flex-1 overflow-auto custom-scrollbar p-0.5 transform-gpu">
+                        {commandsLoading ? (
+                            <div className="p-4 space-y-4">
+                                <div className="h-20 bg-slate-200 dark:bg-slate-800 rounded-xl animate-pulse"></div>
+                                <div className="h-20 bg-slate-200 dark:bg-slate-800 rounded-xl animate-pulse opacity-75"></div>
+                                <div className="h-20 bg-slate-200 dark:bg-slate-800 rounded-xl animate-pulse opacity-50"></div>
+                            </div>
+                        ) : commands.length === 0 ? (
+                            <div className="text-center py-20 flex flex-col items-center justify-center">
+                                <Activity className="w-12 h-12 text-slate-400 dark:text-slate-600 mb-4" />
+                                <h3 className="text-lg font-medium text-slate-900 dark:text-slate-100 mb-1">No commands found</h3>
+                                <p className="text-slate-500 dark:text-slate-400">Try adjusting your filters or search terms.</p>
+                            </div>
+                        ) : (
+                            <div className="p-4 space-y-3">
+                                {commands.map((cmd) => (
+                                    <CommandRow key={cmd.id} command={cmd} />
+                                ))}
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Pagination Strip */}
+                    <div className="shrink-0 px-4 py-3 bg-slate-50/50 dark:bg-slate-900/40 border-t border-slate-200 dark:border-slate-800/60 mt-auto flex items-center justify-between">
+                        <div className="text-sm text-slate-500 dark:text-slate-400">
+                            Showing <span className="font-semibold text-slate-700 dark:text-slate-200">{commands.length}</span> out of <span className="font-semibold text-slate-700 dark:text-slate-200">{stats?.total || 0}</span> commands
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <button
+                                onClick={() => handlePageChange(currentPage - 1)}
+                                disabled={currentPage === 1}
+                                className="px-3 py-1.5 border border-slate-200 dark:border-slate-700 rounded-md text-sm font-medium hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed text-slate-700 dark:text-slate-300 transition-colors"
+                            >
+                                Previous
+                            </button>
+                            <span className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                                Page {currentPage} of {Math.max(1, totalPages)}
+                            </span>
+                            <button
+                                onClick={() => handlePageChange(currentPage + 1)}
+                                disabled={currentPage === totalPages || totalPages === 0}
+                                className="px-3 py-1.5 border border-slate-200 dark:border-slate-700 rounded-md text-sm font-medium hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed text-slate-700 dark:text-slate-300 transition-colors"
+                            >
+                                Next
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+}

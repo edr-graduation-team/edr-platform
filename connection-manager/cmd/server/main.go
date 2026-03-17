@@ -6,6 +6,7 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"flag"
+	"fmt"
 	"net/http"
 	"os"
 	"os/signal"
@@ -183,8 +184,11 @@ func main() {
 	var agentSvc service.AgentService
 	var authSvc service.AuthService
 	var enrollmentTokenRepo repository.EnrollmentTokenRepository
-	var agentRepo repository.AgentRepository // hoisted for sweeper access
-	var dbPool *database.PostgresPool        // scoped outside if-block for fallback access
+	var agentRepo repository.AgentRepository     // hoisted for sweeper access
+	var commandRepo repository.CommandRepository // hoisted for C2 injection
+	var auditRepo repository.AuditLogRepository  // hoisted for audit log API
+	var alertRepo repository.AlertRepository     // hoisted for alert stats API
+	var dbPool *database.PostgresPool            // scoped outside if-block for fallback access
 
 	dbPoolInst, dbErr := database.NewPostgresPool(ctx, &database.PostgresConfig{
 		Host:            cfg.Database.Host,
@@ -221,8 +225,10 @@ func main() {
 		agentRepo = repository.NewPostgresAgentRepository(pool)
 		tokenRepo := repository.NewPostgresInstallationTokenRepository(pool)
 		enrollmentTokenRepo = repository.NewPostgresEnrollmentTokenRepository(pool)
-		auditRepo := repository.NewPostgresAuditLogRepository(pool)
+		auditRepo = repository.NewPostgresAuditLogRepository(pool)
 		certRepo := repository.NewPostgresCertificateRepository(pool)
+		commandRepo = repository.NewPostgresCommandRepository(pool)
+		alertRepo = repository.NewPostgresAlertRepository(pool)
 
 		// CA paths for signing agent certificates (ca.key next to ca.crt)
 		caCertPath := cfg.Server.CACertPath
@@ -341,6 +347,46 @@ func main() {
 	// Wire the gRPC server's AgentRegistry into REST API handlers for C2 command routing.
 	// Without this, POST /agents/:id/commands returns 503 (registry == nil).
 	apiHandlers.SetRegistry(grpcServer.GetRegistry())
+
+	// Wire the gRPC address so isolate commands automatically inject server_address
+	// into their parameters. The agent needs this to build correct ALLOW firewall rules.
+	// NOTE: The address here must match what the agent uses to connect.
+	//       Env var C2_GRPC_ADDRESS overrides the default "host:port" construct.
+	c2GRPCAddress := os.Getenv("C2_GRPC_ADDRESS")
+	if c2GRPCAddress == "" {
+		c2GRPCAddress = fmt.Sprintf("localhost:%d", cfg.Server.GRPCPort)
+	}
+	apiHandlers.SetGRPCAddress(c2GRPCAddress)
+	logger.Infof("[C2] Isolation server_address configured as %s", c2GRPCAddress)
+
+	// Wire CommandRepository into REST handlers and gRPC server for C2 persistence.
+	// Also wire into EventHandler for pending command re-delivery on agent reconnect.
+	if commandRepo != nil {
+		apiHandlers.SetCommandRepo(commandRepo)
+		grpcServer.SetCommandRepo(commandRepo)
+		evtHandler.SetCommandRepo(commandRepo) // enables re-delivery on reconnect
+		logger.Info("C2 command persistence enabled (commands table + pending re-delivery)")
+	}
+
+	// Wire AuditLogRepository into REST handlers for the Audit Logs page.
+	if auditRepo != nil {
+		apiHandlers.SetAuditRepo(auditRepo)
+		logger.Info("Audit log querying enabled")
+	}
+
+	// Wire AlertRepository into REST handlers for Alert Stats and querying.
+	if alertRepo != nil {
+		apiHandlers.SetAlertRepo(alertRepo)
+		logger.Info("Alert querying and stats enabled")
+	}
+
+	// Wire UserRepository + RoleRepository into REST handlers for RBAC.
+	if dbPool != nil {
+		pool := dbPool.Pool()
+		apiHandlers.SetUserRepo(repository.NewPostgresUserRepository(pool))
+		apiHandlers.SetRoleRepo(repository.NewPostgresRoleRepository(pool))
+		logger.Info("User management and RBAC enabled")
+	}
 
 	restAPIServer.RegisterRoutes(apiHandlers)
 

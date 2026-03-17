@@ -96,6 +96,33 @@ func (se *SelectionEvaluator) EvaluateField(
 		return false
 	}
 
+	// Check if this field should use ALL logic
+	isAllModifier := false
+	for _, mod := range field.Modifiers {
+		if strings.EqualFold(mod, "all") {
+			isAllModifier = true
+			break
+		}
+	}
+
+	if isAllModifier {
+		// Pass the entire Values array to the modifier engine
+		match, err := se.modifierEngine.ApplyModifier(
+			fieldValue,
+			field.Values,
+			field.Modifiers,
+			true, // Sigma spec dictates case-insensitive matching by default
+		)
+		if err != nil {
+			logger.Debugf("Modifier error: %v", err)
+			return false
+		}
+		if field.IsNegated {
+			return !match
+		}
+		return match
+	}
+
 	// Handle multiple expected values (OR logic within field)
 	// If any value matches, field matches
 	for _, expectedValue := range field.Values {
@@ -164,7 +191,7 @@ func (se *SelectionEvaluator) compareValue(
 			fieldValue,
 			expectedValues,
 			modifiers,
-			false, // caseInsensitive
+			true, // Sigma requires case-insensitive matching by default
 		)
 		if err != nil {
 			logger.Debugf("Modifier error: %v", err)

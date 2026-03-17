@@ -69,9 +69,19 @@ func (e *LogEvent) GetField(fieldPath string) (interface{}, bool) {
 		return cached, true
 	}
 
-	if val, ok := e.RawData[fieldPath]; ok {
+	if val, ok := e.RawData[fieldPath]; ok && val != nil {
 		e.fieldCache[fieldPath] = val
 		return val, true
+	}
+
+	// Windows Agent specific fallback: search inside the "data" sub-map
+	if sub, ok := e.RawData["data"]; ok && sub != nil {
+		if m, ok := sub.(map[string]interface{}); ok {
+			if val, ok := m[fieldPath]; ok && val != nil {
+				e.fieldCache[fieldPath] = val
+				return val, true
+			}
+		}
 	}
 
 	if val := e.getNested(fieldPath); val != nil {

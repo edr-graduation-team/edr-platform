@@ -65,8 +65,63 @@ export type AlertSeverity = 'critical' | 'high' | 'medium' | 'low' | 'informatio
 export type AlertStatus = 'open' | 'in_progress' | 'acknowledged' | 'resolved' | 'closed' | 'false_positive';
 export type AgentStatus = 'online' | 'offline' | 'degraded' | 'pending' | 'suspended';
 export type CommandType = 'kill_process' | 'quarantine_file' | 'collect_logs' | 'update_policy' |
-    'restart_agent' | 'isolate_network' | 'restore_network' | 'scan_file' | 'scan_memory' | 'custom' | 'restart_machine' | 'shutdown_machine' | 'update_filter_policy';
+    'restart_agent' | 'stop_agent' | 'start_agent' |
+    'isolate_network' | 'restore_network' | 'scan_file' | 'scan_memory' | 'custom' |
+    'restart_machine' | 'shutdown_machine' | 'update_filter_policy';
 export type CommandStatus = 'pending' | 'sent' | 'acknowledged' | 'executing' | 'completed' | 'failed' | 'timeout' | 'cancelled';
+
+// Sprint 4 context-aware scoring types
+export interface AncestorEntry {
+    pid: number;
+    name: string;
+    path?: string;
+    user_sid?: string;
+    integrity?: string;
+    is_elevated: boolean;
+    sig_status?: string;
+    seen_at: number; // Unix seconds
+}
+
+export interface ScoreBreakdown {
+    base_score: number;
+    lineage_bonus: number;
+    privilege_bonus: number;
+    burst_bonus: number;
+    fp_discount: number;
+    ueba_bonus: number;
+    ueba_discount: number;
+    ueba_signal: 'anomaly' | 'normal' | 'none' | string;
+    raw_score: number;
+    final_score: number;
+}
+
+export interface ContextSnapshot {
+    scored_at: string;
+    process_name?: string;
+    process_path?: string;
+    process_cmd_line?: string;
+    user_sid?: string;
+    user_name?: string;
+    integrity_level?: string;
+    is_elevated: boolean;
+    signature_status?: string;
+    parent_pid?: number;
+    parent_name?: string;
+    parent_path?: string;
+    grandparent_name?: string;
+    grandparent_path?: string;
+    lineage_suspicion: string;
+    ancestor_chain?: AncestorEntry[];
+    burst_count: number;
+    burst_window_sec: number;
+    rule_id?: string;
+    rule_title?: string;
+    rule_severity?: string;
+    rule_category?: string;
+    match_count: number;
+    score_breakdown: ScoreBreakdown;
+    warnings?: string[];
+}
 
 export interface Alert {
     id: string;
@@ -79,6 +134,11 @@ export interface Alert {
     event_count: number;
     status: AlertStatus;
     confidence: number;
+    // Sprint 3+ risk scoring
+    risk_score?: number;
+    false_positive_risk?: number;
+    context_snapshot?: ContextSnapshot;
+    score_breakdown?: ScoreBreakdown;
     matched_fields?: Record<string, string>;
     mitre_techniques?: string[];
     mitre_tactics?: string[];
@@ -114,8 +174,9 @@ export interface AlertStats {
     total_alerts: number;
     by_severity: Record<string, number>;
     by_status: Record<string, number>;
-    alerts_24h: number;
-    alerts_7d: number;
+    by_rule?: Record<string, number>;
+    last_24h: number;
+    last_7d: number;
     avg_confidence: number;
 }
 
@@ -139,6 +200,7 @@ export interface Agent {
     events_collected?: number;
     events_dropped?: number;
     ip_addresses?: string[];
+    is_isolated?: boolean;
     cpu_count?: number;
     memory_mb?: number;
     cpu_usage?: number;
@@ -240,11 +302,40 @@ export interface User {
     role: 'admin' | 'security' | 'analyst' | 'operations' | 'viewer';
     status: 'active' | 'inactive' | 'locked';
     last_login?: string;
+    created_at?: string;
+    updated_at?: string;
+}
+
+export interface Permission {
+    id: string;
+    resource: string;
+    action: string;
+    description: string;
+}
+
+export interface Role {
+    id: string;
+    name: string;
+    description: string;
+    is_built_in: boolean;
+    permissions: Permission[];
 }
 
 // ============================================================================
 // Sigma Engine Alert APIs
 // ============================================================================
+
+// Phase 2 — Endpoint Risk Intelligence
+export interface EndpointRiskSummary {
+    agent_id: string;
+    total_alerts: number;
+    peak_risk_score: number;
+    avg_risk_score: number;
+    critical_count: number; // risk_score >= 90
+    high_count: number;     // risk_score 70-89
+    open_count: number;
+    last_alert_at: string;
+}
 
 export const alertsApi = {
     list: async (params?: {
@@ -254,8 +345,9 @@ export const alertsApi = {
         status?: string;
         agent_id?: string;
         rule_id?: string;
-        from?: string;
-        to?: string;
+        date_from?: string;
+        date_to?: string;
+        search?: string;
         sort?: string;
         order?: 'asc' | 'desc';
     }) => {
@@ -281,7 +373,15 @@ export const alertsApi = {
         const response = await sigmaApi.patch('/api/v1/sigma/alerts/bulk/status', { ids, status });
         return response.data;
     },
+    // Phase 2: aggregated per-agent risk posture from connection-manager
+    endpointRisk: async () => {
+        const response = await connectionApi.get<{ data: EndpointRiskSummary[]; total: number }>(
+            '/api/v1/alerts/endpoint-risk'
+        );
+        return response.data;
+    },
 };
+
 
 // ============================================================================
 // Sigma Engine Rules APIs
@@ -587,7 +687,12 @@ export const authApi = {
         }
         return response.data;
     },
-    logout: () => {
+    logout: async () => {
+        try {
+            await connectionApi.post('/api/v1/auth/logout');
+        } catch (e) {
+            console.warn('Backend logout failed or already disconnected', e);
+        }
         localStorage.removeItem('auth_token');
         localStorage.removeItem('user');
     },
@@ -611,3 +716,126 @@ export const authApi = {
     },
 };
 
+// ============================================================================
+// Command History Types (Action Center)
+// ============================================================================
+
+export interface CommandListItem extends Command {
+    agent_hostname: string;
+    issued_by_user: string;
+}
+
+export interface CommandStats {
+    total: number;
+    pending: number;
+    sent: number;
+    completed: number;
+    failed: number;
+    timeout: number;
+    cancelled: number;
+}
+
+// ============================================================================
+// Commands API (Action Center)
+// ============================================================================
+
+export const commandsApi = {
+    list: async (params?: {
+        limit?: number;
+        offset?: number;
+        status?: string;
+        command_type?: string;
+        agent_id?: string;
+        sort_by?: string;
+        sort_order?: string;
+    }) => {
+        const response = await connectionApi.get<{
+            data: CommandListItem[];
+            pagination: { total: number; limit: number; offset: number; has_more: boolean };
+        }>('/api/v1/commands', { params });
+        return response.data;
+    },
+    stats: async () => {
+        const response = await connectionApi.get<{ data: CommandStats }>('/api/v1/commands/stats');
+        return response.data.data;
+    },
+};
+
+// ============================================================================
+// Users API (User Management)
+// ============================================================================
+
+export const usersApi = {
+    list: async (params?: {
+        limit?: number;
+        offset?: number;
+        role?: string;
+        status?: string;
+        search?: string;
+    }) => {
+        const response = await connectionApi.get<{
+            data: User[];
+            pagination: { total: number; limit: number; offset: number };
+        }>('/api/v1/users', { params });
+        return response.data;
+    },
+    get: async (id: string) => {
+        const response = await connectionApi.get<{ data: User }>(`/api/v1/users/${id}`);
+        return response.data.data;
+    },
+    create: async (data: {
+        username: string;
+        email: string;
+        password: string;
+        full_name: string;
+        role: string;
+    }) => {
+        const response = await connectionApi.post<{ data: User }>('/api/v1/users', data);
+        return response.data.data;
+    },
+    update: async (id: string, data: {
+        email?: string;
+        full_name?: string;
+        role?: string;
+        status?: string;
+    }) => {
+        const response = await connectionApi.patch<{ data: User }>(`/api/v1/users/${id}`, data);
+        return response.data.data;
+    },
+    delete: async (id: string) => {
+        await connectionApi.delete(`/api/v1/users/${id}`);
+    },
+    changePassword: async (id: string, oldPassword: string, newPassword: string) => {
+        await connectionApi.post(`/api/v1/users/${id}/password`, {
+            old_password: oldPassword,
+            new_password: newPassword,
+        });
+    },
+};
+
+// ============================================================================
+// Roles & Permissions API (RBAC Management)
+// ============================================================================
+
+export const rolesApi = {
+    list: async () => {
+        const response = await connectionApi.get<{ data: Role[] }>('/api/v1/roles');
+        return response.data.data;
+    },
+    create: async (data: { name: string; description: string; permission_ids: string[] }) => {
+        const response = await connectionApi.post<{ data: Role }>('/api/v1/roles', data);
+        return response.data.data;
+    },
+    updatePermissions: async (id: string, permissionIds: string[]) => {
+        await connectionApi.patch(`/api/v1/roles/${id}/permissions`, {
+            permission_ids: permissionIds,
+        });
+    },
+    delete: async (id: string) => {
+        await connectionApi.delete(`/api/v1/roles/${id}`);
+    },
+    permissions: async () => {
+        const response = await connectionApi.get<{ data: Permission[] }>('/api/v1/permissions');
+        return response.data.data;
+    },
+};

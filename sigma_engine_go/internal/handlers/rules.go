@@ -15,12 +15,13 @@ import (
 
 // RuleHandler handles rule management API endpoints.
 type RuleHandler struct {
-	repo database.RuleRepository
+	repo        database.RuleRepository
+	auditLogger *database.AuditLogger
 }
 
 // NewRuleHandler creates a new rule handler.
-func NewRuleHandler(repo database.RuleRepository) *RuleHandler {
-	return &RuleHandler{repo: repo}
+func NewRuleHandler(repo database.RuleRepository, auditLogger *database.AuditLogger) *RuleHandler {
+	return &RuleHandler{repo: repo, auditLogger: auditLogger}
 }
 
 // RegisterRoutes registers rule routes on the router.
@@ -206,6 +207,11 @@ func (h *RuleHandler) CreateRule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if h.auditLogger != nil {
+		userID, username, ip := getAuditContext(r)
+		_ = h.auditLogger.Log(ctx, "create_rule", "Rule", rule.ID, username, userID, ip, "success", "Created custom rule: "+rule.Title)
+	}
+
 	writeJSON(w, http.StatusCreated, toRuleResponse(created))
 }
 
@@ -265,6 +271,11 @@ func (h *RuleHandler) UpdateRule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if h.auditLogger != nil {
+		userID, username, ip := getAuditContext(r)
+		_ = h.auditLogger.Log(ctx, "update_rule", "Rule", ruleID, username, userID, ip, "success", "Updated rule: "+existing.Title)
+	}
+
 	writeJSON(w, http.StatusOK, toRuleResponse(updated))
 }
 
@@ -285,6 +296,11 @@ func (h *RuleHandler) DeleteRule(w http.ResponseWriter, r *http.Request) {
 		logger.Errorf("Failed to delete rule: %v", err)
 		writeError(w, http.StatusInternalServerError, "Failed to delete rule")
 		return
+	}
+
+	if h.auditLogger != nil {
+		userID, username, ip := getAuditContext(r)
+		_ = h.auditLogger.Log(ctx, "delete_rule", "Rule", ruleID, username, userID, ip, "success", "Deleted rule")
 	}
 
 	w.WriteHeader(http.StatusNoContent)
@@ -309,6 +325,11 @@ func (h *RuleHandler) EnableRule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if h.auditLogger != nil {
+		userID, username, ip := getAuditContext(r)
+		_ = h.auditLogger.Log(ctx, "enable_rule", "Rule", ruleID, username, userID, ip, "success", "Enabled rule")
+	}
+
 	existing.Enabled = true
 	writeJSON(w, http.StatusOK, toRuleResponse(existing))
 }
@@ -330,6 +351,11 @@ func (h *RuleHandler) DisableRule(w http.ResponseWriter, r *http.Request) {
 		logger.Errorf("Failed to disable rule: %v", err)
 		writeError(w, http.StatusInternalServerError, "Failed to disable rule")
 		return
+	}
+
+	if h.auditLogger != nil {
+		userID, username, ip := getAuditContext(r)
+		_ = h.auditLogger.Log(ctx, "disable_rule", "Rule", ruleID, username, userID, ip, "success", "Disabled rule")
 	}
 
 	existing.Enabled = false
@@ -388,6 +414,11 @@ func (h *RuleHandler) BulkImportRules(w http.ResponseWriter, r *http.Request) {
 		} else {
 			response.Imported++
 		}
+	}
+
+	if h.auditLogger != nil && response.Imported > 0 {
+		userID, username, ip := getAuditContext(r)
+		_ = h.auditLogger.Log(ctx, "bulk_import_rules", "Rule", "", username, userID, ip, "success", strconv.Itoa(response.Imported)+" rules imported successfully")
 	}
 
 	writeJSON(w, http.StatusOK, response)

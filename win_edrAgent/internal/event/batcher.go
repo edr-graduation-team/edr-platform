@@ -202,3 +202,31 @@ func (b *Batcher) SetInterval(interval time.Duration) {
 	defer b.mu.Unlock()
 	b.interval = interval
 }
+
+// Reconfigure atomically updates batchSize, interval, and compression in a
+// single lock acquisition. This is used by agent.UpdateConfig() during a
+// hot-reload so all three parameters change simultaneously without a window
+// where they are inconsistent.
+func (b *Batcher) Reconfigure(batchSize int, interval time.Duration, compression string) {
+	if batchSize < 1 {
+		batchSize = 1
+	}
+	if batchSize > 10000 {
+		batchSize = 10000
+	}
+	if interval < 100*time.Millisecond {
+		interval = 100 * time.Millisecond
+	}
+	if interval > 60*time.Second {
+		interval = 60 * time.Second
+	}
+	if compression == "" {
+		compression = "snappy"
+	}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.batchSize = batchSize
+	b.interval = interval
+	b.compression = compression
+}

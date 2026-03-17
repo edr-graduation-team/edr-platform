@@ -2,8 +2,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import React, { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import {
-    Search, Filter, Monitor, Wifi, WifiOff, AlertTriangle, ChevronDown,
-    Play, Shield, FileX, Folder, RefreshCw, X, Check, Clock, Loader2, Power
+    Search, Monitor, Wifi, WifiOff, AlertTriangle, ChevronDown,
+    Play, Shield, FileX, Folder, RefreshCw, X, Check, Clock, Loader2, Power, ShieldAlert, Square, Zap
 } from 'lucide-react';
 import {
     agentsApi,
@@ -13,6 +13,7 @@ import {
     type FilterPolicy
 } from '../api/client';
 import { Modal, useToast, SkeletonTable } from '../components';
+import { useDebounce } from '../hooks/useDebounce';
 
 // Command definitions
 const COMMAND_DEFINITIONS: Record<CommandType, { label: string; icon: typeof Play; description: string; color: string }> = {
@@ -21,18 +22,20 @@ const COMMAND_DEFINITIONS: Record<CommandType, { label: string; icon: typeof Pla
     collect_logs: { label: 'Collect Logs', icon: Folder, description: 'Gather forensic logs', color: 'text-blue-500' },
     update_policy: { label: 'Update Policy', icon: Shield, description: 'Apply new security policy', color: 'text-indigo-500' },
     restart_agent: { label: 'Restart Agent', icon: RefreshCw, description: 'Restart EDR agent service', color: 'text-amber-500' },
+    stop_agent: { label: 'Stop Agent', icon: Square, description: 'Stop the EDR agent service', color: 'text-red-500' },
+    start_agent: { label: 'Start Agent', icon: Play, description: 'Start / re-enable the EDR agent service', color: 'text-green-500' },
     restart_machine: { label: 'Restart Machine', icon: RefreshCw, description: 'Reboot the endpoint machine (OS-level restart)', color: 'text-red-500' },
     shutdown_machine: { label: 'Shutdown Machine', icon: Power, description: 'Power off the endpoint machine (OS-level shutdown)', color: 'text-red-700' },
     isolate_network: { label: 'Isolate Network', icon: WifiOff, description: 'Block all network traffic', color: 'text-red-600' },
     restore_network: { label: 'Restore Network', icon: Wifi, description: 'Restore network connectivity', color: 'text-green-500' },
     scan_file: { label: 'Scan File', icon: Search, description: 'Scan a specific file', color: 'text-purple-500' },
     scan_memory: { label: 'Scan Memory', icon: Monitor, description: 'Perform memory analysis', color: 'text-cyan-500' },
-    custom: { label: 'Custom Command', icon: Play, description: 'Execute custom command', color: 'text-gray-500' },
+    custom: { label: 'Custom Command', icon: Zap, description: 'Execute custom command', color: 'text-gray-500' },
     update_filter_policy: { label: 'Update Filter Policy', icon: Shield, description: 'Push new filtering rules to agent', color: 'text-teal-500' },
 };
 
 // Status badge component
-function StatusBadge({ status }: { status: Agent['status'] }) {
+const StatusBadge = React.memo(function StatusBadge({ status }: { status: Agent['status'] }) {
     const config = {
         online: { label: 'Online', color: 'badge-online', icon: Wifi },
         offline: { label: 'Offline', color: 'badge-offline', icon: WifiOff },
@@ -49,10 +52,21 @@ function StatusBadge({ status }: { status: Agent['status'] }) {
             {label}
         </span>
     );
-}
+});
+
+// Isolation badge — red warning indicator
+const IsolationBadge = React.memo(function IsolationBadge({ isIsolated }: { isIsolated?: boolean }) {
+    if (!isIsolated) return null;
+    return (
+        <span className="badge flex items-center gap-1 text-xs font-bold px-2 py-0.5 rounded-full bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-400 border border-red-300 dark:border-red-700 animate-pulse">
+            <ShieldAlert className="w-3 h-3" />
+            ISOLATED
+        </span>
+    );
+});
 
 // Health Score Bar
-function HealthScoreBar({ score }: { score: number }) {
+const HealthScoreBar = React.memo(function HealthScoreBar({ score }: { score: number }) {
     const getColor = () => {
         if (score >= 80) return 'bg-green-500';
         if (score >= 60) return 'bg-amber-500';
@@ -70,17 +84,17 @@ function HealthScoreBar({ score }: { score: number }) {
             <span className="text-sm text-gray-600 dark:text-gray-300">{score.toFixed(0)}%</span>
         </div>
     );
-}
+});
 
 // OS Icon
-function OSIcon({ os }: { os: string }) {
+const OSIcon = React.memo(function OSIcon({ os }: { os: string }) {
     const icons: Record<string, string> = {
         windows: '🖥️',
         linux: '🐧',
         macos: '🍎',
     };
     return <span className="text-lg">{icons[os?.toLowerCase()] || '💻'}</span>;
-}
+});
 
 // Quick Actions Dropdown — uses React Portal to escape all overflow clipping
 function QuickActionsDropdown({
@@ -97,13 +111,18 @@ function QuickActionsDropdown({
     const effectiveStatus = getEffectiveStatus(agent);
 
     const availableCommands: CommandType[] = [
-        'isolate_network',
-        'restore_network',
+        // Network isolation (context-aware)
+        ...(agent.is_isolated ? ['restore_network' as CommandType] : ['isolate_network' as CommandType]),
+        // Forensics & scanning (online only)
         'kill_process',
         'quarantine_file',
         'collect_logs',
         'scan_memory',
-        'restart_agent',
+        // Agent service control
+        'restart_agent',           // restart the EDR service (stop → start)
+        'stop_agent',              // stop the EDR service only
+        'start_agent',             // start/recover a stopped EDR service
+        // OS-level control
         'restart_machine',
         'shutdown_machine',
     ];
@@ -156,28 +175,63 @@ function QuickActionsDropdown({
                 >
                     {availableCommands.map((cmd) => {
                         const def = COMMAND_DEFINITIONS[cmd];
-                        const isDisabled =
-                            effectiveStatus === 'offline' && cmd !== 'restore_network';
+                        // ── State Matrix ────────────────────────────────────────────────
+                        //  online/degraded  : Machine ON  + Agent RUNNING     → Stop, Restart enabled; Start disabled
+                        //  suspended        : Machine ON  + Agent STOPPED     → Start enabled; Stop, Restart disabled
+                        //  offline          : Machine OFF / unreachable        → ALL agent actions disabled
+                        //  pending          : Agent registering                → ALL agent actions disabled
+                        const agentRunning = effectiveStatus === 'online' || effectiveStatus === 'degraded';
+                        const agentSuspended = effectiveStatus === 'suspended';
+                        const machineOnline = effectiveStatus !== 'offline' && effectiveStatus !== 'pending';
+
+                        const isDisabled = (c: CommandType): boolean => {
+                            switch (c) {
+                                case 'start_agent':
+                                    // Enable ONLY when agent is deliberately stopped (machine still on)
+                                    return !agentSuspended;
+                                case 'stop_agent':
+                                case 'restart_agent':
+                                    // Enable ONLY when agent is actively running
+                                    return !agentRunning;
+                                case 'restart_machine':
+                                case 'shutdown_machine':
+                                    // Enable whenever machine is reachable (even if agent is suspended)
+                                    return !machineOnline;
+                                case 'restore_network':
+                                    return false; // always enabled
+                                default:
+                                    // Forensics / scan / isolation: require agent running
+                                    return !agentRunning;
+                            }
+                        };
+
+                        // Visual separator before OS-level commands
+                        const showSeparator = cmd === 'restart_machine';
+
                         return (
-                            <button
-                                key={cmd}
-                                onClick={() => {
-                                    setIsOpen(false);
-                                    onCommand(cmd);
-                                }}
-                                disabled={isDisabled}
-                                className="w-full flex items-center gap-3 px-4 py-2.5 text-left hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                            >
-                                <def.icon className={`w-4 h-4 flex-shrink-0 ${def.color}`} />
-                                <div className="min-w-0">
-                                    <p className="text-sm font-medium text-gray-900 dark:text-white">
-                                        {def.label}
-                                    </p>
-                                    <p className="text-xs text-gray-500 dark:text-gray-400">
-                                        {def.description}
-                                    </p>
-                                </div>
-                            </button>
+                            <React.Fragment key={cmd}>
+                                {showSeparator && (
+                                    <div className="mx-4 my-1 border-t border-gray-200 dark:border-gray-600" />
+                                )}
+                                <button
+                                    onClick={() => {
+                                        setIsOpen(false);
+                                        onCommand(cmd);
+                                    }}
+                                    disabled={isDisabled(cmd)}
+                                    className="w-full flex items-center gap-3 px-4 py-2.5 text-left hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                                >
+                                    <def.icon className={`w-4 h-4 flex-shrink-0 ${def.color}`} />
+                                    <div className="min-w-0">
+                                        <p className="text-sm font-medium text-gray-900 dark:text-white">
+                                            {def.label}
+                                        </p>
+                                        <p className="text-xs text-gray-500 dark:text-gray-400">
+                                            {def.description}
+                                        </p>
+                                    </div>
+                                </button>
+                            </React.Fragment>
                         );
                     })}
                 </div>
@@ -222,10 +276,23 @@ function CommandExecutionModal({
         mutationFn: async ({ agentId, command }: { agentId: string; command: CommandRequest }) => {
             return agentsApi.executeCommand(agentId, command);
         },
-        onSuccess: (data) => {
+        onSuccess: (data, variables) => {
             setStatus('completed');
             showToast(`Command queued successfully (ID: ${data.command_id})`, 'success');
+            // Immediate invalidation for status changes that DB updates right away
             queryClient.invalidateQueries({ queryKey: ['agents'] });
+            // Isolation commands take 5-15s for the agent to respond with SUCCESS.
+            // The backend only writes is_isolated AFTER the agent's gRPC ACK arrives.
+            // Schedule a delayed re-fetch so the UI reflects the actual state.
+            const cmdType = variables.command.command_type;
+            if (cmdType === 'isolate_network' || cmdType === 'restore_network') {
+                setTimeout(() => {
+                    queryClient.invalidateQueries({ queryKey: ['agents'] });
+                }, 10000);
+                setTimeout(() => {
+                    queryClient.invalidateQueries({ queryKey: ['agents'] });
+                }, 20000);
+            }
         },
         onError: (error: Error) => {
             setStatus('failed');
@@ -585,7 +652,7 @@ function InlineAgentDetail({ agent }: { agent: Agent }) {
     const memPct = agent.memory_mb && agent.memory_used_mb ? Math.min(100, (agent.memory_used_mb / agent.memory_mb) * 100) : 0;
 
     return (
-        <div className="bg-gray-50/80 dark:bg-[#0d1321] border-t-2 border-b-2 border-primary-400/30 dark:border-primary-700/40 px-6 py-5 animate-in">
+        <div className="bg-gray-50/80 dark:bg-[#0d1321] border-t-2 border-b-2 border-primary-400/30 dark:border-primary-700/40 px-6 py-5 animate-in whitespace-normal text-left">
 
             {/* ═══ Alert Banners ═══ */}
             {isBlindingRisk && (
@@ -801,7 +868,7 @@ function InlineAgentDetail({ agent }: { agent: Agent }) {
                         {/* Read-Only Current Policy */}
                         <div>
                             <span className="text-[10px] text-gray-400 uppercase tracking-wider">Active Policy (Agent-Side)</span>
-                            <pre className="mt-1.5 p-2.5 text-[10px] font-mono bg-gray-100 dark:bg-gray-900/80 border border-gray-200 dark:border-gray-700 rounded-lg overflow-x-auto max-h-32 text-gray-700 dark:text-gray-300 leading-relaxed">
+                            <pre className="mt-1.5 p-2.5 text-[10px] font-mono whitespace-pre-wrap break-words bg-gray-100 dark:bg-gray-900/80 border border-gray-200 dark:border-gray-700 rounded-lg overflow-y-auto max-h-64 text-gray-700 dark:text-gray-300 leading-relaxed">
                                 {agent.metadata?.filter_policy
                                     ? JSON.stringify(JSON.parse(agent.metadata.filter_policy), null, 2)
                                     : '{ "status": "No policy deployed yet" }'}
@@ -862,14 +929,16 @@ export default function Endpoints() {
         search: '',
     });
 
+    const debouncedSearch = useDebounce(filters.search, 300);
+
     // Fetch agents
     const { data, isLoading, error } = useQuery({
-        queryKey: ['agents', filters],
+        queryKey: ['agents', filters.status, filters.os_type, debouncedSearch],
         queryFn: () => agentsApi.list({
             limit: 50,
             status: filters.status || undefined,
             os_type: filters.os_type || undefined,
-            search: filters.search || undefined,
+            search: debouncedSearch || undefined,
             sort_by: 'health_score',
             sort_order: 'desc',
         }),
@@ -906,9 +975,16 @@ export default function Endpoints() {
     }
 
     return (
-        <div className="space-y-6">
-            <div className="flex items-center justify-between">
-                <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Endpoints</h1>
+        <div className="relative flex flex-col min-h-[calc(100vh-2rem)] lg:min-h-[calc(100vh-1rem)] h-full -mx-4 sm:-mx-6 lg:-mx-8 -my-4 sm:-my-6 lg:-my-8 p-4 sm:p-6 lg:p-8 bg-slate-50 dark:bg-gradient-to-br dark:from-slate-900 dark:via-[#0b1120] dark:to-slate-900 transition-colors overflow-hidden">
+            {/* Background ambient glow effect for Endpoints interface */}
+            <div className="absolute top-1/4 right-1/4 w-[600px] h-[600px] pointer-events-none -translate-y-1/2 translate-x-1/3" style={{ background: 'radial-gradient(circle, rgba(59,130,246,0.08) 0%, transparent 70%)' }} />
+            
+            <div className="relative flex-1 flex flex-col min-h-0 space-y-4 lg:space-y-6 max-w-[1600px] mx-auto w-full">
+                <div className="flex items-center justify-between shrink-0">
+                    <div>
+                        <h1 className="text-3xl font-bold text-slate-900 dark:text-white tracking-tight">Endpoints</h1>
+                        <p className="text-sm text-slate-500 mt-1">Fleet visibility, lifecycle, and response controls</p>
+                    </div>
                 {agents.length > 0 && (() => {
                     // Recompute stats from agent list using effective status
                     let onlineCount = 0, offlineCount = 0, degradedCount = 0;
@@ -919,17 +995,17 @@ export default function Endpoints() {
                         else offlineCount++;
                     });
                     return (
-                        <div className="flex items-center gap-4 text-sm">
-                            <span className="flex items-center gap-1.5">
-                                <span className="w-2 h-2 rounded-full bg-green-500" />
+                        <div className="flex items-center gap-3">
+                            <span className="flex items-center gap-2 px-3 py-1.5 bg-green-500/10 dark:bg-green-500/20 text-green-700 dark:text-green-400 border border-green-500/20 rounded-full text-xs font-bold uppercase tracking-wider shadow-[0_0_10px_rgba(34,197,94,0.1)]">
+                                <span className="w-1.5 h-1.5 rounded-full bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.8)]" />
                                 {onlineCount} Online
                             </span>
-                            <span className="flex items-center gap-1.5">
-                                <span className="w-2 h-2 rounded-full bg-gray-400" />
+                            <span className="flex items-center gap-2 px-3 py-1.5 bg-slate-500/10 dark:bg-slate-500/20 text-slate-600 dark:text-slate-400 border border-slate-500/20 rounded-full text-xs font-bold uppercase tracking-wider">
+                                <span className="w-1.5 h-1.5 rounded-full bg-slate-400" />
                                 {offlineCount} Offline
                             </span>
-                            <span className="flex items-center gap-1.5">
-                                <span className="w-2 h-2 rounded-full bg-amber-500" />
+                            <span className="flex items-center gap-2 px-3 py-1.5 bg-amber-500/10 dark:bg-amber-500/20 text-amber-700 dark:text-amber-400 border border-amber-500/20 rounded-full text-xs font-bold uppercase tracking-wider shadow-[0_0_10px_rgba(245,158,11,0.1)]">
+                                <span className="w-1.5 h-1.5 rounded-full bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.8)] animate-pulse" />
                                 {degradedCount} Degraded
                             </span>
                         </div>
@@ -938,78 +1014,102 @@ export default function Endpoints() {
             </div>
 
             {/* Filters */}
-            <div className="card">
-                <div className="flex flex-wrap gap-4">
-                    <div className="flex items-center gap-2">
-                        <Filter className="w-4 h-4 text-gray-400" />
-                        <select
-                            value={filters.status}
-                            onChange={(e) => setFilters({ ...filters, status: e.target.value })}
-                            className="input w-36"
-                        >
-                            <option value="">All Status</option>
-                            <option value="online">Online</option>
-                            <option value="offline">Offline</option>
-                            <option value="degraded">Degraded</option>
-                            <option value="pending">Pending</option>
-                        </select>
+            <div className="relative z-20 shrink-0 bg-white dark:bg-slate-900/50 border border-slate-200/80 dark:border-slate-700/50 rounded-xl p-4 shadow-sm">
+                <div className="flex flex-wrap gap-4 items-end">
+                    <div className="flex-1 sm:flex-none relative">
+                        <label className="block text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1.5">
+                            Status
+                        </label>
+                        <div className="relative">
+                            <select
+                                value={filters.status}
+                                onChange={(e) => setFilters({ ...filters, status: e.target.value })}
+                                className="w-full sm:w-48 appearance-none bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 rounded-lg pl-3 pr-10 py-2 focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500 text-sm transition-colors cursor-pointer"
+                            >
+                                <option value="">All Statuses</option>
+                                <option value="online">Online</option>
+                                <option value="offline">Offline</option>
+                                <option value="degraded">Degraded</option>
+                                <option value="pending">Pending</option>
+                            </select>
+                            <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-slate-500">
+                                <ChevronDown className="w-4 h-4" />
+                            </div>
+                        </div>
                     </div>
-                    <select
-                        value={filters.os_type}
-                        onChange={(e) => setFilters({ ...filters, os_type: e.target.value })}
-                        className="input w-36"
-                    >
-                        <option value="">All OS Types</option>
-                        <option value="windows">Windows</option>
-                        <option value="linux">Linux</option>
-                        <option value="macos">macOS</option>
-                    </select>
-                    <div className="flex-1 flex items-center gap-2">
-                        <Search className="w-4 h-4 text-gray-400" />
-                        <input
-                            type="text"
-                            placeholder="Search by hostname..."
-                            value={filters.search}
-                            onChange={(e) => setFilters({ ...filters, search: e.target.value })}
-                            className="input"
-                        />
+                    
+                    <div className="flex-1 sm:flex-none relative">
+                        <label className="block text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1.5">
+                            OS Type
+                        </label>
+                        <div className="relative">
+                            <select
+                                value={filters.os_type}
+                                onChange={(e) => setFilters({ ...filters, os_type: e.target.value })}
+                                className="w-full sm:w-48 appearance-none bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 rounded-lg pl-3 pr-10 py-2 focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500 text-sm transition-colors cursor-pointer"
+                            >
+                                <option value="">All Platforms</option>
+                                <option value="windows">Windows</option>
+                                <option value="linux">Linux</option>
+                                <option value="macos">macOS</option>
+                            </select>
+                            <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-slate-500">
+                                <ChevronDown className="w-4 h-4" />
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="flex-1 min-w-[200px]">
+                        <label className="block text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1.5">
+                            Search
+                        </label>
+                        <div className="relative">
+                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                            <input
+                                type="text"
+                                placeholder="Search by hostname or IP..."
+                                value={filters.search}
+                                onChange={(e) => setFilters({ ...filters, search: e.target.value })}
+                                className="w-full bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200 rounded-lg pl-9 pr-4 py-2 focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500 text-sm transition-colors"
+                            />
+                        </div>
                     </div>
                 </div>
             </div>
 
             {/* Agents Table */}
-            <div className="card p-0">
+            <div className="relative z-10 flex-1 flex flex-col min-h-0 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700/50 rounded-2xl shadow-lg overflow-hidden">
                 {isLoading ? (
-                    <div className="p-4">
+                    <div className="p-4 flex-1 overflow-auto">
                         <SkeletonTable rows={8} columns={7} />
                     </div>
                 ) : agents.length === 0 ? (
-                    <div className="text-center py-12">
-                        <Monitor className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-                        <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">
+                    <div className="flex-1 flex flex-col items-center justify-center text-center py-12">
+                        <Monitor className="w-12 h-12 text-blue-400 mx-auto mb-4 opacity-50" />
+                        <h3 className="text-lg font-medium text-slate-900 dark:text-white mb-2">
                             No Endpoints Found
                         </h3>
-                        <p className="text-gray-500">
+                        <p className="text-slate-500">
                             {filters.search || filters.status || filters.os_type
                                 ? 'Try adjusting your filters'
                                 : 'No agents have registered yet'}
                         </p>
                     </div>
                 ) : (
-                    <div className="overflow-x-auto">
-                        <table className="table">
-                            <thead className="bg-gray-50 dark:bg-gray-800">
+                    <div className="flex-1 overflow-auto custom-scrollbar transform-gpu">
+                        <table className="w-full text-left text-sm whitespace-nowrap">
+                            <thead className="sticky top-0 z-10 bg-slate-100 dark:bg-slate-800 border-b-2 border-slate-200 dark:border-slate-700/80 text-xs uppercase tracking-wider text-slate-600 dark:text-slate-300 font-bold shadow-sm">
                                 <tr>
-                                    <th>Hostname</th>
-                                    <th>Status</th>
-                                    <th>OS</th>
-                                    <th>Version</th>
-                                    <th>Health</th>
-                                    <th>Last Seen</th>
-                                    <th>Actions</th>
+                                    <th className="py-4 px-4">Hostname</th>
+                                    <th className="py-4 px-4">Status</th>
+                                    <th className="py-4 px-4">OS</th>
+                                    <th className="py-4 px-4">Version</th>
+                                    <th className="py-4 px-4">Health</th>
+                                    <th className="py-4 px-4">Last Seen</th>
+                                    <th className="py-4 px-4 text-right">Actions</th>
                                 </tr>
                             </thead>
-                            <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+                            <tbody className="divide-y divide-slate-100 dark:divide-slate-700/60">
                                 {agents.map((agent) => (
                                     <React.Fragment key={agent.id}>
                                         <tr
@@ -1019,39 +1119,42 @@ export default function Endpoints() {
                                                 }`}
                                             onClick={() => setExpandedAgentId(prev => prev === agent.id ? null : agent.id)}
                                         >
-                                            <td>
+                                            <td className="py-4 px-4">
                                                 <div className="flex items-center gap-2">
                                                     <div className={`w-1 h-8 rounded-full ${expandedAgentId === agent.id ? 'bg-primary-500' : 'bg-transparent'}`} />
                                                     <OSIcon os={agent.os_type} />
                                                     <div>
-                                                        <p className="font-medium text-gray-900 dark:text-white">
+                                                        <p className="font-medium text-slate-900 dark:text-white">
                                                             {agent.hostname}
                                                         </p>
-                                                        <p className="text-xs text-gray-500">
+                                                        <p className="text-xs text-slate-500">
                                                             {agent.ip_addresses?.[0] || agent.id.slice(0, 8)}
                                                         </p>
                                                     </div>
-                                                    <ChevronDown className={`w-4 h-4 text-gray-400 ml-auto transition-transform ${expandedAgentId === agent.id ? 'rotate-180' : ''}`} />
+                                                    <ChevronDown className={`w-4 h-4 text-slate-400 ml-auto transition-transform ${expandedAgentId === agent.id ? 'rotate-180' : ''}`} />
                                                 </div>
                                             </td>
-                                            <td>
-                                                <StatusBadge status={getEffectiveStatus(agent)} />
+                                            <td className="py-4 px-4">
+                                                <div className="flex items-center gap-2">
+                                                    <StatusBadge status={getEffectiveStatus(agent)} />
+                                                    <IsolationBadge isIsolated={agent.is_isolated} />
+                                                </div>
                                             </td>
-                                            <td className="text-sm text-gray-600 dark:text-gray-300">
+                                            <td className="py-4 px-4 text-sm text-slate-600 dark:text-slate-300">
                                                 {agent.os_version || agent.os_type}
                                             </td>
-                                            <td className="text-sm text-gray-600 dark:text-gray-300">
+                                            <td className="py-4 px-4 text-sm text-slate-600 dark:text-slate-300">
                                                 {agent.agent_version ? `v${agent.agent_version}` : 'N/A'}
                                             </td>
-                                            <td>
+                                            <td className="py-4 px-4">
                                                 <HealthScoreBar score={agent.health_score} />
                                             </td>
-                                            <td className="text-sm text-gray-500">
+                                            <td className="py-4 px-4 text-sm text-slate-500">
                                                 <span title={new Date(agent.last_seen).toLocaleString()}>
                                                     {formatRelativeTime(agent.last_seen)}
                                                 </span>
                                             </td>
-                                            <td onClick={(e) => e.stopPropagation()}>
+                                            <td className="py-4 px-4 text-right" onClick={(e) => e.stopPropagation()}>
                                                 <QuickActionsDropdown
                                                     agent={agent}
                                                     onCommand={(cmd) => handleCommand(agent, cmd)}
@@ -1061,7 +1164,7 @@ export default function Endpoints() {
                                         {/* ── Inline expandable detail panel ── */}
                                         {expandedAgentId === agent.id && (
                                             <tr>
-                                                <td colSpan={7} className="p-0">
+                                                <td colSpan={7} className="p-0 border-b-2 border-primary-500/20">
                                                     <InlineAgentDetail agent={agent} />
                                                 </td>
                                             </tr>
@@ -1074,12 +1177,11 @@ export default function Endpoints() {
                 )}
 
                 {/* Footer with count */}
-                <div className="px-4 py-3 bg-gray-50 dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 text-sm text-gray-500">
+                <div className="shrink-0 px-4 py-3 bg-slate-50/50 dark:bg-slate-900/40 border-t border-slate-200 dark:border-slate-700/60 text-sm text-slate-500 rounded-b-2xl">
                     Showing {agents.length} of {total} endpoints
                 </div>
             </div>
 
-            {/* Command Execution Modal */}
             <CommandExecutionModal
                 isOpen={!!selectedAgent && !!selectedCommand}
                 onClose={() => {
@@ -1090,6 +1192,7 @@ export default function Endpoints() {
                 commandType={selectedCommand}
             />
 
+            </div>
         </div>
     );
 }

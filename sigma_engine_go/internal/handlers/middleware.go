@@ -2,6 +2,7 @@
 package handlers
 
 import (
+	"context"
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/pem"
@@ -267,16 +268,16 @@ func NewJWTAuth(publicKeyPath string) (*JWTAuth, error) {
 }
 
 // ValidateJWT parses and validates an RS256 JWT token.
-// Returns nil error if the token is valid and not expired.
-func (ja *JWTAuth) ValidateJWT(tokenString string) error {
-	_, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+// Returns the parsed token if valid.
+func (ja *JWTAuth) ValidateJWT(tokenString string) (*jwt.Token, error) {
+	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
 		// Enforce RS256 signing method to prevent algorithm-switching attacks
 		if _, ok := token.Method.(*jwt.SigningMethodRSA); !ok {
 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 		}
 		return ja.publicKey, nil
 	})
-	return err
+	return token, err
 }
 
 // CombinedAuthMiddleware tries JWT validation first, then falls back to API key.
@@ -309,8 +310,30 @@ func CombinedAuthMiddleware(jwtAuth *JWTAuth, tokenAuth *TokenAuth) func(http.Ha
 
 			// Strategy 1: Try RSA JWT validation (dashboard tokens)
 			if jwtAuth != nil {
-				if err := jwtAuth.ValidateJWT(token); err == nil {
-					next.ServeHTTP(w, r)
+				if parsedToken, err := jwtAuth.ValidateJWT(token); err == nil {
+					ctx := r.Context()
+					if claims, ok := parsedToken.Claims.(jwt.MapClaims); ok {
+						if sub, ok := claims["sub"].(string); ok {
+							ctx = context.WithValue(ctx, "user_id", sub)
+						}
+						// Extract username (connection-manager JWT uses "username" key)
+						if username, ok := claims["username"].(string); ok {
+							ctx = context.WithValue(ctx, "username", username)
+						} else if username, ok := claims["preferred_username"].(string); ok {
+							ctx = context.WithValue(ctx, "username", username)
+						}
+						// Extract roles for RBAC enforcement
+						if rolesRaw, ok := claims["roles"].([]interface{}); ok {
+							roles := make([]string, 0, len(rolesRaw))
+							for _, r := range rolesRaw {
+								if s, ok := r.(string); ok {
+									roles = append(roles, s)
+								}
+							}
+							ctx = context.WithValue(ctx, "user_roles", roles)
+						}
+					}
+					next.ServeHTTP(w, r.WithContext(ctx))
 					return
 				}
 			}

@@ -2,6 +2,8 @@
 package api
 
 import (
+	"fmt"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -27,6 +29,12 @@ type Handlers struct {
 	caCertPath          string                               // path to the CA certificate for zero-touch provisioning
 	enrollmentTokenRepo repository.EnrollmentTokenRepository // optional: nil when DB unavailable
 	registry            *handlers.AgentRegistry              // real-time agent command routing
+	commandRepo         repository.CommandRepository         // C2 command persistence
+	auditRepo           repository.AuditLogRepository        // audit log querying
+	alertRepo           repository.AlertRepository           // alert querying and stats
+	userRepo            repository.UserRepository            // user CRUD
+	roleRepo            repository.RoleRepository            // RBAC role/permission management
+	grpcAddress         string                               // C2 gRPC address (host:port) injected into isolate params
 }
 
 // NewHandlers creates a new handlers instance.
@@ -52,9 +60,42 @@ func NewHandlers(
 	}
 }
 
+// SetGRPCAddress sets the C2 gRPC server address (host:port).
+// When set, it is automatically injected as "server_address" into isolate_network
+// and unisolate_network command parameters so the agent knows which IP/port to
+// allow through the firewall without requiring the dashboard to pass it.
+func (h *Handlers) SetGRPCAddress(addr string) {
+	h.grpcAddress = addr
+}
+
 // SetRegistry sets the AgentRegistry for command routing.
 func (h *Handlers) SetRegistry(r *handlers.AgentRegistry) {
 	h.registry = r
+}
+
+// SetAuditRepo sets the AuditLogRepository for audit log querying.
+func (h *Handlers) SetAuditRepo(repo repository.AuditLogRepository) {
+	h.auditRepo = repo
+}
+
+// SetAlertRepo sets the AlertRepository for alert querying and stats.
+func (h *Handlers) SetAlertRepo(repo repository.AlertRepository) {
+	h.alertRepo = repo
+}
+
+// SetCommandRepo sets the CommandRepository for C2 persistence.
+func (h *Handlers) SetCommandRepo(repo repository.CommandRepository) {
+	h.commandRepo = repo
+}
+
+// SetUserRepo sets the UserRepository for user CRUD operations.
+func (h *Handlers) SetUserRepo(repo repository.UserRepository) {
+	h.userRepo = repo
+}
+
+// SetRoleRepo sets the RoleRepository for RBAC role/permission management.
+func (h *Handlers) SetRoleRepo(repo repository.RoleRepository) {
+	h.roleRepo = repo
 }
 
 // UserClaims represents authenticated user info.
@@ -110,11 +151,12 @@ func (h *Handlers) AuthMiddleware(next echo.HandlerFunc) echo.HandlerFunc {
 			return errorResponse(c, http.StatusUnauthorized, "INVALID_TOKEN", "Invalid or expired token")
 		}
 
-		// Extract user claims - Claims has Roles field directly
+		// Extract user claims — Username is the human-readable login name now
+		// embedded in the token. Subject is still the user UUID.
 		user := &UserClaims{
 			UserID:   claims.Subject,
-			Username: claims.Subject, // Or get from AgentID
-			Roles:    claims.Roles,   // Roles field directly on Claims
+			Username: claims.Username,
+			Roles:    claims.Roles,
 		}
 
 		// Store user in context
@@ -143,6 +185,46 @@ func (h *Handlers) RequireRole(roles ...string) echo.MiddlewareFunc {
 			}
 
 			return errorResponse(c, http.StatusForbidden, "FORBIDDEN", "Insufficient permissions")
+		}
+	}
+}
+
+// RequirePermission checks if the authenticated user's role(s) grant
+// the specified resource:action permission. Falls back to admin bypass.
+func (h *Handlers) RequirePermission(resource, action string) echo.MiddlewareFunc {
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			user, ok := c.Get(string(ContextKeyUser)).(*UserClaims)
+			if !ok || user == nil {
+				return errorResponse(c, http.StatusUnauthorized, "AUTH_REQUIRED", "Authentication required")
+			}
+
+			// Admin bypass — admins always have full access
+			for _, role := range user.Roles {
+				if role == "admin" {
+					return next(c)
+				}
+			}
+
+			// Check permission via DB lookup
+			if h.roleRepo != nil {
+				permKey := resource + ":" + action
+				for _, role := range user.Roles {
+					perms, err := h.roleRepo.GetPermissionsForRoleName(c.Request().Context(), role)
+					if err != nil {
+						h.logger.WithError(err).Warnf("Failed to get permissions for role %s", role)
+						continue
+					}
+					for _, p := range perms {
+						if p == permKey {
+							return next(c)
+						}
+					}
+				}
+			}
+
+			return errorResponse(c, http.StatusForbidden, "FORBIDDEN",
+				fmt.Sprintf("Missing permission: %s:%s", resource, action))
 		}
 	}
 }
@@ -178,10 +260,55 @@ func (h *Handlers) RateLimitMiddleware(next echo.HandlerFunc) echo.HandlerFunc {
 	}
 }
 
-// getCurrentUser extracts user from context.
+// getCurrentUser extracts user claims from Echo context (set by AuthMiddleware).
 func getCurrentUser(c echo.Context) *UserClaims {
 	user, _ := c.Get(string(ContextKeyUser)).(*UserClaims)
 	return user
+}
+
+// getClientIP extracts the real client IP address considering that the backend
+// sits behind a Dockerized Nginx reverse proxy which sets X-Forwarded-For.
+//
+// Resolution order:
+//  1. First non-private IP in X-Forwarded-For (spoofing-safe: leftmost is client)
+//  2. X-Real-IP header
+//  3. Echo's built-in RealIP (strips port)
+//  4. Raw RemoteAddr as final fallback
+func getClientIP(c echo.Context) string {
+	// Parse X-Forwarded-For — may contain multiple IPs: "client, proxy1, proxy2"
+	if xff := c.Request().Header.Get("X-Forwarded-For"); xff != "" {
+		for _, part := range strings.Split(xff, ",") {
+			ip := strings.TrimSpace(part)
+			if net.ParseIP(ip) != nil {
+				return ip
+			}
+		}
+	}
+
+	// X-Real-IP (set by Nginx proxy_set_header X-Real-IP $remote_addr)
+	if xri := c.Request().Header.Get("X-Real-IP"); xri != "" {
+		xri = strings.TrimSpace(xri)
+		if net.ParseIP(xri) != nil {
+			return xri
+		}
+	}
+
+	// Echo built-in — strips port from RemoteAddr automatically
+	if ip := c.RealIP(); ip != "" {
+		return ip
+	}
+
+	// Last resort: strip port manually from RemoteAddr
+	addr := c.Request().RemoteAddr
+	if host, _, err := net.SplitHostPort(addr); err == nil {
+		return host
+	}
+	return addr
+}
+
+// auditContext returns (ipAddress, userAgent) for AuditLog.WithContext calls.
+func auditContext(c echo.Context) (string, string) {
+	return getClientIP(c), c.Request().Header.Get("User-Agent")
 }
 
 // errorResponse returns a standardized error response.

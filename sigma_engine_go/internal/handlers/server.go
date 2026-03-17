@@ -55,6 +55,7 @@ func NewServer(
 	config ServerConfig,
 	ruleRepo database.RuleRepository,
 	alertRepo database.AlertRepository,
+	auditLogger *database.AuditLogger,
 ) *Server {
 	router := mux.NewRouter()
 
@@ -99,8 +100,8 @@ func NewServer(
 	s := &Server{
 		config:       config,
 		router:       router,
-		ruleHandler:  NewRuleHandler(ruleRepo),
-		alertHandler: NewAlertHandler(alertRepo),
+		ruleHandler:  NewRuleHandler(ruleRepo, auditLogger),
+		alertHandler: NewAlertHandler(alertRepo, auditLogger),
 		statsHandler: NewStatsHandler(alertRepo, ruleRepo),
 		wsServer:     NewWebSocketServer(),
 		tokenAuth:    tokenAuth,

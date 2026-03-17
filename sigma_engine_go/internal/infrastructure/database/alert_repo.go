@@ -27,6 +27,14 @@ func NewPostgresAlertRepository(pool *pgxpool.Pool) *PostgresAlertRepository {
 func (r *PostgresAlertRepository) Create(ctx context.Context, alert *Alert) (*Alert, error) {
 	matchedFieldsJSON, _ := json.Marshal(alert.MatchedFields)
 	contextDataJSON, _ := json.Marshal(alert.ContextData)
+	contextSnapshotJSON, _ := json.Marshal(alert.ContextSnapshot)
+	scoreBreakdownJSON, _ := json.Marshal(alert.ScoreBreakdown)
+	if contextSnapshotJSON == nil {
+		contextSnapshotJSON = []byte(`{}`)
+	}
+	if scoreBreakdownJSON == nil {
+		scoreBreakdownJSON = []byte(`{}`)
+	}
 
 	query := `
 		INSERT INTO sigma_alerts (
@@ -35,14 +43,16 @@ func (r *PostgresAlertRepository) Create(ctx context.Context, alert *Alert) (*Al
 			matched_fields, matched_selections, context_data,
 			status, confidence, false_positive_risk,
 			match_count, related_rules, combined_confidence,
-			severity_promoted, original_severity
+			severity_promoted, original_severity,
+			risk_score, context_snapshot, score_breakdown
 		) VALUES (
 			$1, $2, $3, $4, $5, $6,
 			$7, $8, $9, $10,
 			$11, $12, $13,
 			$14, $15, $16,
 			$17, $18, $19,
-			$20, $21
+			$20, $21,
+			$22, $23, $24
 		) RETURNING id, created_at, updated_at`
 
 	err := r.pool.QueryRow(ctx, query,
@@ -52,6 +62,7 @@ func (r *PostgresAlertRepository) Create(ctx context.Context, alert *Alert) (*Al
 		alert.Status, alert.Confidence, alert.FalsePositiveRisk,
 		alert.MatchCount, alert.RelatedRules, alert.CombinedConfidence,
 		alert.SeverityPromoted, alert.OriginalSeverity,
+		alert.RiskScore, contextSnapshotJSON, scoreBreakdownJSON,
 	).Scan(&alert.ID, &alert.CreatedAt, &alert.UpdatedAt)
 
 	if err != nil {
@@ -71,6 +82,7 @@ func (r *PostgresAlertRepository) GetByID(ctx context.Context, id string) (*Aler
 			confidence, false_positive_risk,
 			match_count, related_rules, combined_confidence,
 			severity_promoted, original_severity,
+			risk_score, context_snapshot, score_breakdown,
 			created_at, updated_at
 		FROM sigma_alerts
 		WHERE id = $1`
@@ -116,7 +128,7 @@ func (r *PostgresAlertRepository) List(ctx context.Context, filters AlertFilters
 		argNum++
 	}
 	if filters.Search != "" {
-		conditions = append(conditions, fmt.Sprintf("rule_title ILIKE $%d", argNum))
+		conditions = append(conditions, fmt.Sprintf("(rule_title ILIKE $%d OR agent_id ILIKE $%d OR rule_id ILIKE $%d)", argNum, argNum, argNum))
 		args = append(args, "%"+filters.Search+"%")
 		argNum++
 	}
@@ -126,10 +138,19 @@ func (r *PostgresAlertRepository) List(ctx context.Context, filters AlertFilters
 		whereClause = "WHERE " + strings.Join(conditions, " AND ")
 	}
 
-	// Sort
+	// Sort — allowlist guards against SQL injection from the SortBy field.
+	// risk_score DESC is the primary SOC triage sort; timestamp DESC is the default.
+	allowedSortColumns := map[string]string{
+		"timestamp":  "timestamp",
+		"risk_score": "risk_score",
+		"severity":   "severity",
+		"status":     "status",
+		"rule_id":    "rule_id",
+		"agent_id":   "agent_id",
+	}
 	sortBy := "timestamp"
-	if filters.SortBy != "" {
-		sortBy = filters.SortBy
+	if col, ok := allowedSortColumns[filters.SortBy]; ok {
+		sortBy = col
 	}
 	sortOrder := "DESC"
 	if filters.SortOrder == "asc" {
@@ -159,6 +180,7 @@ func (r *PostgresAlertRepository) List(ctx context.Context, filters AlertFilters
 			confidence, false_positive_risk,
 			match_count, related_rules, combined_confidence,
 			severity_promoted, original_severity,
+			risk_score, context_snapshot, score_breakdown,
 			created_at, updated_at
 		FROM sigma_alerts %s
 		ORDER BY %s %s
@@ -265,7 +287,66 @@ func (r *PostgresAlertRepository) GetStats(ctx context.Context) (*AlertStats, er
 	}
 	rows.Close()
 
+	// Avg Confidence
+	r.pool.QueryRow(ctx, "SELECT COALESCE(AVG(risk_score), 0) / 100.0 FROM sigma_alerts").Scan(&stats.AvgConfidence)
+
+	// By rule
+	rowsRule, _ := r.pool.Query(ctx, "SELECT rule_title, COUNT(*) FROM sigma_alerts GROUP BY rule_title")
+	for rowsRule.Next() {
+		var title string
+		var count int64
+		rowsRule.Scan(&title, &count)
+		stats.ByRule[title] = count
+	}
+	rowsRule.Close()
+
 	return stats, nil
+}
+
+// GetTimeline retrieves timeline data for the alert chart.
+func (r *PostgresAlertRepository) GetTimeline(ctx context.Context, from, to, granularity string) ([]*TimelineDataPoint, error) {
+	var trunc string
+	switch granularity {
+	case "1d":
+		trunc = "day"
+	default:
+		trunc = "hour"
+	}
+
+	query := fmt.Sprintf(`
+		SELECT 
+			date_trunc('%s', timestamp) as bucket,
+			COUNT(*) FILTER (WHERE severity = 'critical') as critical,
+			COUNT(*) FILTER (WHERE severity = 'high') as high,
+			COUNT(*) FILTER (WHERE severity = 'medium') as medium,
+			COUNT(*) FILTER (WHERE severity = 'low') as low,
+			COUNT(*) FILTER (WHERE severity = 'informational') as informational
+		FROM sigma_alerts
+		WHERE timestamp >= $1::timestamp AND timestamp <= $2::timestamp
+		GROUP BY bucket
+		ORDER BY bucket ASC
+	`, trunc)
+
+	rows, err := r.pool.Query(ctx, query, from, to)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query timeline: %w", err)
+	}
+	defer rows.Close()
+
+	var timeline []*TimelineDataPoint
+	for rows.Next() {
+		pt := &TimelineDataPoint{}
+		if err := rows.Scan(&pt.Timestamp, &pt.Critical, &pt.High, &pt.Medium, &pt.Low, &pt.Informational); err != nil {
+			return nil, err
+		}
+		timeline = append(timeline, pt)
+	}
+
+	if timeline == nil {
+		timeline = make([]*TimelineDataPoint, 0)
+	}
+
+	return timeline, nil
 }
 
 // FindRecent finds recent similar alerts for deduplication.
@@ -278,6 +359,7 @@ func (r *PostgresAlertRepository) FindRecent(ctx context.Context, agentID, ruleI
 			confidence, false_positive_risk,
 			match_count, related_rules, combined_confidence,
 			severity_promoted, original_severity,
+			risk_score, context_snapshot, score_breakdown,
 			created_at, updated_at
 		FROM sigma_alerts
 		WHERE agent_id = $1 AND rule_id = $2 AND timestamp >= $3
@@ -317,7 +399,7 @@ func (r *PostgresAlertRepository) Close() error {
 // scanAlert scans a single alert from a QueryRow.
 func (r *PostgresAlertRepository) scanAlert(row pgx.Row) (*Alert, error) {
 	var alert Alert
-	var matchedFieldsJSON, contextDataJSON []byte
+	var matchedFieldsJSON, contextDataJSON, contextSnapshotJSON, scoreBreakdownJSON []byte
 	var assignedTo, resolutionNotes, originalSeverity *string
 
 	err := row.Scan(
@@ -329,6 +411,7 @@ func (r *PostgresAlertRepository) scanAlert(row pgx.Row) (*Alert, error) {
 		&alert.Confidence, &alert.FalsePositiveRisk,
 		&alert.MatchCount, &alert.RelatedRules, &alert.CombinedConfidence,
 		&alert.SeverityPromoted, &originalSeverity,
+		&alert.RiskScore, &contextSnapshotJSON, &scoreBreakdownJSON,
 		&alert.CreatedAt, &alert.UpdatedAt,
 	)
 
@@ -338,6 +421,8 @@ func (r *PostgresAlertRepository) scanAlert(row pgx.Row) (*Alert, error) {
 
 	json.Unmarshal(matchedFieldsJSON, &alert.MatchedFields)
 	json.Unmarshal(contextDataJSON, &alert.ContextData)
+	json.Unmarshal(contextSnapshotJSON, &alert.ContextSnapshot)
+	json.Unmarshal(scoreBreakdownJSON, &alert.ScoreBreakdown)
 	if assignedTo != nil {
 		alert.AssignedTo = *assignedTo
 	}
@@ -354,7 +439,7 @@ func (r *PostgresAlertRepository) scanAlert(row pgx.Row) (*Alert, error) {
 // scanAlertRow scans a single alert from Rows.
 func (r *PostgresAlertRepository) scanAlertRow(rows pgx.Rows) (*Alert, error) {
 	var alert Alert
-	var matchedFieldsJSON, contextDataJSON []byte
+	var matchedFieldsJSON, contextDataJSON, contextSnapshotJSON, scoreBreakdownJSON []byte
 	var assignedTo, resolutionNotes, originalSeverity *string
 
 	err := rows.Scan(
@@ -366,6 +451,7 @@ func (r *PostgresAlertRepository) scanAlertRow(rows pgx.Rows) (*Alert, error) {
 		&alert.Confidence, &alert.FalsePositiveRisk,
 		&alert.MatchCount, &alert.RelatedRules, &alert.CombinedConfidence,
 		&alert.SeverityPromoted, &originalSeverity,
+		&alert.RiskScore, &contextSnapshotJSON, &scoreBreakdownJSON,
 		&alert.CreatedAt, &alert.UpdatedAt,
 	)
 
@@ -375,6 +461,8 @@ func (r *PostgresAlertRepository) scanAlertRow(rows pgx.Rows) (*Alert, error) {
 
 	json.Unmarshal(matchedFieldsJSON, &alert.MatchedFields)
 	json.Unmarshal(contextDataJSON, &alert.ContextData)
+	json.Unmarshal(contextSnapshotJSON, &alert.ContextSnapshot)
+	json.Unmarshal(scoreBreakdownJSON, &alert.ScoreBreakdown)
 	if assignedTo != nil {
 		alert.AssignedTo = *assignedTo
 	}

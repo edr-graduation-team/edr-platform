@@ -30,9 +30,9 @@ func (r *PostgresAuditLogRepository) Create(ctx context.Context, log *models.Aud
 	query := `
 		INSERT INTO audit_logs (
 			id, user_id, username, action, resource_type, resource_id,
-			old_value, new_value, details, result, error_message,
-			ip_address, user_agent, timestamp
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`
+			old_value, new_value, result, error_message,
+			ip_address, user_agent, created_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`
 
 	_, err := r.pool.Exec(ctx, query,
 		log.ID,
@@ -43,7 +43,6 @@ func (r *PostgresAuditLogRepository) Create(ctx context.Context, log *models.Aud
 		log.ResourceID,
 		log.OldValue,
 		log.NewValue,
-		log.Details,
 		log.Result,
 		log.ErrorMessage,
 		log.IPAddress,
@@ -62,8 +61,8 @@ func (r *PostgresAuditLogRepository) Create(ctx context.Context, log *models.Aud
 func (r *PostgresAuditLogRepository) GetByID(ctx context.Context, id uuid.UUID) (*models.AuditLog, error) {
 	query := `
 		SELECT id, user_id, username, action, resource_type, resource_id,
-			old_value, new_value, details, result, error_message,
-			ip_address, user_agent, timestamp
+			old_value, new_value, result, error_message,
+			ip_address, user_agent, created_at
 		FROM audit_logs
 		WHERE id = $1`
 
@@ -77,7 +76,6 @@ func (r *PostgresAuditLogRepository) GetByID(ctx context.Context, id uuid.UUID) 
 		&log.ResourceID,
 		&log.OldValue,
 		&log.NewValue,
-		&log.Details,
 		&log.Result,
 		&log.ErrorMessage,
 		&log.IPAddress,
@@ -99,8 +97,8 @@ func (r *PostgresAuditLogRepository) GetByID(ctx context.Context, id uuid.UUID) 
 func (r *PostgresAuditLogRepository) List(ctx context.Context, filter AuditLogFilter) ([]*models.AuditLog, error) {
 	query := `
 		SELECT id, user_id, username, action, resource_type, resource_id,
-			old_value, new_value, details, result, error_message,
-			ip_address, user_agent, timestamp
+			old_value, new_value, result, error_message,
+			ip_address, user_agent, created_at
 		FROM audit_logs
 		WHERE 1=1`
 
@@ -138,18 +136,18 @@ func (r *PostgresAuditLogRepository) List(ctx context.Context, filter AuditLogFi
 	}
 
 	if filter.StartTime != nil {
-		query += fmt.Sprintf(" AND timestamp >= $%d", argNum)
+		query += fmt.Sprintf(" AND created_at >= $%d", argNum)
 		args = append(args, *filter.StartTime)
 		argNum++
 	}
 
 	if filter.EndTime != nil {
-		query += fmt.Sprintf(" AND timestamp <= $%d", argNum)
+		query += fmt.Sprintf(" AND created_at <= $%d", argNum)
 		args = append(args, *filter.EndTime)
 		argNum++
 	}
 
-	query += " ORDER BY timestamp DESC"
+	query += " ORDER BY created_at DESC"
 
 	if filter.Limit > 0 {
 		query += fmt.Sprintf(" LIMIT %d", filter.Limit)
@@ -176,7 +174,6 @@ func (r *PostgresAuditLogRepository) List(ctx context.Context, filter AuditLogFi
 			&log.ResourceID,
 			&log.OldValue,
 			&log.NewValue,
-			&log.Details,
 			&log.Result,
 			&log.ErrorMessage,
 			&log.IPAddress,
@@ -211,13 +208,13 @@ func (r *PostgresAuditLogRepository) Count(ctx context.Context, filter AuditLogF
 	}
 
 	if filter.StartTime != nil {
-		query += fmt.Sprintf(" AND timestamp >= $%d", argNum)
+		query += fmt.Sprintf(" AND created_at >= $%d", argNum)
 		args = append(args, *filter.StartTime)
 		argNum++
 	}
 
 	if filter.EndTime != nil {
-		query += fmt.Sprintf(" AND timestamp <= $%d", argNum)
+		query += fmt.Sprintf(" AND created_at <= $%d", argNum)
 		args = append(args, *filter.EndTime)
 		argNum++
 	}

@@ -1,0 +1,95 @@
+=== RUN   TestModifier_Contains
+=== RUN   TestModifier_Contains/String_contains
+=== RUN   TestModifier_Contains/String_does_not_contain
+=== RUN   TestModifier_Contains/Case_insensitive_match
+=== RUN   TestModifier_Contains/Case_sensitive_no_match
+=== RUN   TestModifier_Contains/Empty_string
+=== RUN   TestModifier_Contains/Nil_value
+--- PASS: TestModifier_Contains (0.00s)
+    --- PASS: TestModifier_Contains/String_contains (0.00s)
+    --- PASS: TestModifier_Contains/String_does_not_contain (0.00s)
+    --- PASS: TestModifier_Contains/Case_insensitive_match (0.00s)
+    --- PASS: TestModifier_Contains/Case_sensitive_no_match (0.00s)
+    --- PASS: TestModifier_Contains/Empty_string (0.00s)
+    --- PASS: TestModifier_Contains/Nil_value (0.00s)
+=== RUN   TestModifier_StartsWith
+=== RUN   TestModifier_StartsWith/String_starts_with
+=== RUN   TestModifier_StartsWith/String_does_not_start_with
+=== RUN   TestModifier_StartsWith/Case_insensitive
+=== RUN   TestModifier_StartsWith/Empty_prefix
+--- PASS: TestModifier_StartsWith (0.00s)
+    --- PASS: TestModifier_StartsWith/String_starts_with (0.00s)
+    --- PASS: TestModifier_StartsWith/String_does_not_start_with (0.00s)
+    --- PASS: TestModifier_StartsWith/Case_insensitive (0.00s)
+    --- PASS: TestModifier_StartsWith/Empty_prefix (0.00s)
+=== RUN   TestModifier_EndsWith
+=== RUN   TestModifier_EndsWith/String_ends_with
+=== RUN   TestModifier_EndsWith/String_does_not_end_with
+=== RUN   TestModifier_EndsWith/Case_insensitive
+--- PASS: TestModifier_EndsWith (0.00s)
+    --- PASS: TestModifier_EndsWith/String_ends_with (0.00s)
+    --- PASS: TestModifier_EndsWith/String_does_not_end_with (0.00s)
+    --- PASS: TestModifier_EndsWith/Case_insensitive (0.00s)
+=== RUN   TestModifier_Regex
+=== RUN   TestModifier_Regex/Simple_pattern
+=== RUN   TestModifier_Regex/Complex_pattern
+=== RUN   TestModifier_Regex/No_match
+=== RUN   TestModifier_Regex/Case_insensitive
+    modifier_test.go:112: 
+        	Error Trace:	D:/EDR_Platform/sigma_engine_go/internal/application/detection/modifier_test.go:112
+        	Error:      	Not equal: 
+        	            	expected: true
+        	            	actual  : false
+        	Test:       	TestModifier_Regex/Case_insensitive
+=== RUN   TestModifier_Regex/Invalid_pattern
+--- FAIL: TestModifier_Regex (0.00s)
+    --- PASS: TestModifier_Regex/Simple_pattern (0.00s)
+    --- PASS: TestModifier_Regex/Complex_pattern (0.00s)
+    --- PASS: TestModifier_Regex/No_match (0.00s)
+    --- FAIL: TestModifier_Regex/Case_insensitive (0.00s)
+    --- PASS: TestModifier_Regex/Invalid_pattern (0.00s)
+=== RUN   TestModifier_Base64
+=== RUN   TestModifier_Base64/Valid_base64
+=== RUN   TestModifier_Base64/Invalid_base64
+=== RUN   TestModifier_Base64/Empty_base64
+--- PASS: TestModifier_Base64 (0.00s)
+    --- PASS: TestModifier_Base64/Valid_base64 (0.00s)
+    --- PASS: TestModifier_Base64/Invalid_base64 (0.00s)
+    --- PASS: TestModifier_Base64/Empty_base64 (0.00s)
+=== RUN   TestModifier_CIDR
+=== RUN   TestModifier_CIDR/IP_in_range
+=== RUN   TestModifier_CIDR/IP_outside_range
+=== RUN   TestModifier_CIDR/Invalid_IP
+=== RUN   TestModifier_CIDR/Invalid_CIDR
+--- PASS: TestModifier_CIDR (0.00s)
+    --- PASS: TestModifier_CIDR/IP_in_range (0.00s)
+    --- PASS: TestModifier_CIDR/IP_outside_range (0.00s)
+    --- PASS: TestModifier_CIDR/Invalid_IP (0.00s)
+    --- PASS: TestModifier_CIDR/Invalid_CIDR (0.00s)
+=== RUN   TestModifier_Numeric
+=== RUN   TestModifier_Numeric/Less_than
+=== RUN   TestModifier_Numeric/Less_than_or_equal
+=== RUN   TestModifier_Numeric/Greater_than
+=== RUN   TestModifier_Numeric/Greater_than_or_equal
+=== RUN   TestModifier_Numeric/Not_less_than
+=== RUN   TestModifier_Numeric/Invalid_number
+--- PASS: TestModifier_Numeric (0.00s)
+    --- PASS: TestModifier_Numeric/Less_than (0.00s)
+    --- PASS: TestModifier_Numeric/Less_than_or_equal (0.00s)
+    --- PASS: TestModifier_Numeric/Greater_than (0.00s)
+    --- PASS: TestModifier_Numeric/Greater_than_or_equal (0.00s)
+    --- PASS: TestModifier_Numeric/Not_less_than (0.00s)
+    --- PASS: TestModifier_Numeric/Invalid_number (0.00s)
+=== RUN   TestModifier_All
+=== RUN   TestModifier_All/All_patterns_match_(with_all)
+=== RUN   TestModifier_All/Some_patterns_do_not_match_(with_all)
+=== RUN   TestModifier_All/All_patterns_match_(without_all)
+=== RUN   TestModifier_All/Some_patterns_match_(without_all)
+--- PASS: TestModifier_All (0.00s)
+    --- PASS: TestModifier_All/All_patterns_match_(with_all) (0.00s)
+    --- PASS: TestModifier_All/Some_patterns_do_not_match_(with_all) (0.00s)
+    --- PASS: TestModifier_All/All_patterns_match_(without_all) (0.00s)
+    --- PASS: TestModifier_All/Some_patterns_match_(without_all) (0.00s)
+FAIL
+FAIL	github.com/edr-platform/sigma-engine/internal/application/detection	1.414s
+FAIL

@@ -14,8 +14,9 @@
 *.test
 
 # Output of go coverage
-*.out
-*.prof
+#*.out
+#*.prof
+*.md
 
 # Go workspace
 go.work
@@ -33,10 +34,10 @@ go.work.sum
 Thumbs.db
 
 # Environment
-.env
-.env.local
-*.pem
-*.key
+#.env
+#.env.local
+#*.pem
+#*.key
 
 # Node modules (dashboard)
 dashboard/node_modules/

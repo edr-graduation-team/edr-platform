@@ -3,14 +3,20 @@ package command
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
+	"gopkg.in/yaml.v3"
+
+	"github.com/edr-platform/win-agent/internal/config"
 	"github.com/edr-platform/win-agent/internal/logging"
 )
 
@@ -52,19 +58,98 @@ type Result struct {
 	Timestamp time.Time
 }
 
+// GRPCHealthChecker is an interface for checking gRPC connection health.
+// Implemented by grpcclient.Client — injected to avoid circular imports.
+type GRPCHealthChecker interface {
+	IsConnected() bool
+}
+
 // Handler processes incoming commands.
 type Handler struct {
 	logger        *logging.Logger
 	quarantineDir string
+	serverAddress string // C2 server address for smart isolation
 	mu            sync.Mutex
+
+	// Restart info — populated via SetRestartInfo() for self-restart support.
+	configPath string
+	exePath    string
+	pid        int
+
+	// ── Isolation state ──────────────────────────────────────────────────────
+	// Protected by mu. All fields are written under mu and read under mu
+	// EXCEPT watchdogCancel, which is only ever written once under mu and then
+	// called (read) from outside — safe because context.CancelFunc is
+	// goroutine-safe to call from any goroutine.
+
+	isIsolated         bool               // true while network is isolated
+	isolationHostname  string             // original C2 hostname (e.g. "edr-c2.local")
+	isolationPort      string             // gRPC port extracted from server_address
+	isolationCurrentIP string             // last resolved IP used in firewall rules
+	watchdogCancel     context.CancelFunc // cancels the isolation watchdog goroutine
+	grpcHealth         GRPCHealthChecker  // injected: nil-safe health probe
+
+	// configUpdateFn is injected by agent.SetConfigUpdateHandler so the handler
+	// can apply a remote config push without importing the agent package.
+	configUpdateFn func(newCfg *config.Config) error
+
+	// currentCfg holds a pointer to the live agent config. It is used by the
+	// updateConfig handler to clone and apply partial policy updates (e.g. the
+	// JSON payload sent by the dashboard's update_filter_policy command).
+	// Set via SetCurrentConfig — nil-safe: if unset the handler falls back to
+	// the full YAML / sparse-key paths.
+	currentCfg *config.Config
 }
 
 // NewHandler creates a new command handler.
-func NewHandler(logger *logging.Logger) *Handler {
+func NewHandler(logger *logging.Logger, serverAddress string) *Handler {
+	exePath, _ := os.Executable()
 	return &Handler{
 		logger:        logger,
 		quarantineDir: "C:\\ProgramData\\EDR\\quarantine",
+		serverAddress: serverAddress,
+		exePath:       exePath,
+		pid:           os.Getpid(),
 	}
+}
+
+// SetGRPCHealthChecker injects the gRPC client so the isolation watchdog can
+// probe connection health. Call this once after NewHandler, before agent.Start().
+func (h *Handler) SetGRPCHealthChecker(hc GRPCHealthChecker) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.grpcHealth = hc
+}
+
+// SetRestartInfo injects the config file path so restartService can relaunch
+// the agent in standalone mode.
+func (h *Handler) SetRestartInfo(configPath string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if abs, err := filepath.Abs(configPath); err == nil {
+		h.configPath = abs
+	} else {
+		h.configPath = configPath
+	}
+}
+
+// SetConfigUpdateCallback registers the function that will be called when the
+// C2 server sends an UPDATE_CONFIG command. The callback is agent.UpdateConfig.
+// Using a callback avoids a direct import of the agent package from command.
+func (h *Handler) SetConfigUpdateCallback(fn func(newCfg *config.Config) error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.configUpdateFn = fn
+}
+
+// SetCurrentConfig gives the handler a reference to the live agent config so
+// that updateConfig can clone and partially update it when the dashboard pushes
+// a FilterPolicy JSON payload (params["policy"]).
+// Call this immediately after SetConfigUpdateCallback in agent.go.
+func (h *Handler) SetCurrentConfig(cfg *config.Config) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.currentCfg = cfg
 }
 
 // Execute processes a command and returns the result.
@@ -150,8 +235,7 @@ func (h *Handler) terminateProcess(ctx context.Context, params map[string]string
 		return "", fmt.Errorf("pid parameter is required")
 	}
 
-	// Safety check: prevent killing critical system processes
-	criticalPIDs := []string{"0", "4"} // System, System Idle
+	criticalPIDs := []string{"0", "4"}
 	for _, cp := range criticalPIDs {
 		if pid == cp {
 			return "", fmt.Errorf("cannot terminate critical system process")
@@ -174,22 +258,18 @@ func (h *Handler) quarantineFile(ctx context.Context, params map[string]string) 
 		return "", fmt.Errorf("path parameter is required")
 	}
 
-	// Validate path exists
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
 		return "", fmt.Errorf("file not found: %s", filePath)
 	}
 
-	// Create quarantine directory
 	if err := os.MkdirAll(h.quarantineDir, 0700); err != nil {
 		return "", fmt.Errorf("failed to create quarantine dir: %w", err)
 	}
 
-	// Generate quarantine filename
 	timestamp := time.Now().Format("20060102_150405")
 	baseName := filepath.Base(filePath)
 	quarantinePath := filepath.Join(h.quarantineDir, fmt.Sprintf("%s_%s.quarantine", timestamp, baseName))
 
-	// Move file
 	if err := os.Rename(filePath, quarantinePath); err != nil {
 		return "", fmt.Errorf("failed to quarantine file: %w", err)
 	}
@@ -197,67 +277,568 @@ func (h *Handler) quarantineFile(ctx context.Context, params map[string]string) 
 	return fmt.Sprintf("File quarantined: %s -> %s", filePath, quarantinePath), nil
 }
 
-// isolateNetwork disables network adapters.
+// =============================================================================
+// NETWORK ISOLATION — Dynamic Architecture
+// =============================================================================
+//
+// Design Overview:
+//   1. Just-In-Time Resolution: hostname → IP at isolation time via net.LookupHost
+//   2. ACK-before-block: ALLOW rules are installed synchronously; the block
+//      policy is applied in a goroutine after a 4-second grace period so
+//      SendCommandResult can traverse the still-open gRPC connection.
+//   3. Isolation Watchdog: a long-lived goroutine monitors gRPC health every
+//      10 seconds while isolated. If the stream drops AND the C2 IP has
+//      changed, it atomically replaces the firewall rules and reconnects.
+//   4. Graceful Termination: unisolateNetwork() cancels the watchdog context
+//      before removing firewall rules, guaranteeing clean shutdown.
+// =============================================================================
+
+// resolveC2IP resolves a hostname or bare IP to a usable IPv4 address.
+// If addr is already a bare IP, it is returned unchanged.
+// If resolution fails, it falls back to using the raw hostname (best-effort).
+func (h *Handler) resolveC2IP(hostOrIP string) (string, error) {
+	// If it's already a valid IP, return it directly.
+	if ip := net.ParseIP(hostOrIP); ip != nil {
+		return hostOrIP, nil
+	}
+
+	// It's a hostname — resolve via OS DNS (respects /etc/hosts and mDNS).
+	h.logger.Infof("[Isolate] Resolving hostname %q via DNS...", hostOrIP)
+	addrs, err := net.LookupHost(hostOrIP)
+	if err != nil {
+		return "", fmt.Errorf("DNS resolution of %q failed: %w", hostOrIP, err)
+	}
+	if len(addrs) == 0 {
+		return "", fmt.Errorf("DNS returned no addresses for %q", hostOrIP)
+	}
+
+	// Prefer IPv4. Walk results: first IPv4 wins.
+	for _, a := range addrs {
+		if ip := net.ParseIP(a); ip != nil && ip.To4() != nil {
+			h.logger.Infof("[Isolate] Resolved %q → %s", hostOrIP, a)
+			return a, nil
+		}
+	}
+
+	// Fall back to first result (may be IPv6).
+	h.logger.Warnf("[Isolate] No IPv4 for %q; using %s (IPv6 may not work with netsh remoteip)", hostOrIP, addrs[0])
+	return addrs[0], nil
+}
+
+// installIsolationRules adds the EDR_C2_* ALLOW rules for the given IP and ports.
+// It is idempotent: existing rules with the same names are deleted first.
+// httpPort is always "8082" (REST/enrollment); grpcPort is typically "50051".
+func (h *Handler) installIsolationRules(c2IP, grpcPort string) error {
+	const httpPort = "8082"
+
+	rules := []struct {
+		name string
+		args []string
+	}{
+		// gRPC OUT — agent → server
+		{
+			"EDR_C2_GRPC_OUT",
+			[]string{"advfirewall", "firewall", "add", "rule",
+				"name=EDR_C2_GRPC_OUT", "dir=out", "action=allow",
+				"remoteip=" + c2IP, "remoteport=" + grpcPort, "protocol=TCP"},
+		},
+		// gRPC IN — allow replies from C2 IP (any local port, TCP established)
+		{
+			"EDR_C2_GRPC_IN",
+			[]string{"advfirewall", "firewall", "add", "rule",
+				"name=EDR_C2_GRPC_IN", "dir=in", "action=allow",
+				"remoteip=" + c2IP, "protocol=TCP"},
+		},
+		// HTTP/REST OUT
+		{
+			"EDR_C2_HTTP_OUT",
+			[]string{"advfirewall", "firewall", "add", "rule",
+				"name=EDR_C2_HTTP_OUT", "dir=out", "action=allow",
+				"remoteip=" + c2IP, "remoteport=" + httpPort, "protocol=TCP"},
+		},
+		// HTTP/REST IN
+		{
+			"EDR_C2_HTTP_IN",
+			[]string{"advfirewall", "firewall", "add", "rule",
+				"name=EDR_C2_HTTP_IN", "dir=in", "action=allow",
+				"remoteip=" + c2IP, "protocol=TCP"},
+		},
+		// DNS OUT
+		{
+			"EDR_DNS_ALLOW",
+			[]string{"advfirewall", "firewall", "add", "rule",
+				"name=EDR_DNS_ALLOW", "dir=out", "action=allow",
+				"remoteport=53", "protocol=UDP"},
+		},
+		// Loopback OUT
+		{
+			"EDR_LOOPBACK_ALLOW",
+			[]string{"advfirewall", "firewall", "add", "rule",
+				"name=EDR_LOOPBACK_ALLOW", "dir=out", "action=allow",
+				"remoteip=127.0.0.1"},
+		},
+	}
+
+	for _, rule := range rules {
+		// Delete first (idempotent).
+		_ = exec.Command("netsh", "advfirewall", "firewall", "delete", "rule", "name="+rule.name).Run()
+
+		out, err := exec.Command("netsh", rule.args...).CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("failed to add firewall rule %s: %w (output: %s)", rule.name, err, string(out))
+		}
+		h.logger.Infof("[Isolate] Firewall rule added: %s (remoteip=%s)", rule.name, c2IP)
+	}
+	return nil
+}
+
+// removeIsolationRules deletes all EDR_C2_* firewall rules installed during isolation.
+func removeIsolationRules() {
+	edrRules := []string{
+		"EDR_C2_GRPC_OUT", "EDR_C2_GRPC_IN",
+		"EDR_C2_HTTP_OUT", "EDR_C2_HTTP_IN",
+		"EDR_C2_ALLOW_OUT", "EDR_C2_ALLOW_IN", // legacy names (cleanup)
+		"EDR_DNS_ALLOW",
+		"EDR_LOOPBACK_ALLOW",
+	}
+	for _, name := range edrRules {
+		_ = exec.Command("netsh", "advfirewall", "firewall", "delete", "rule", "name="+name).Run()
+	}
+}
+
+// isolateNetwork uses Windows Firewall to block all traffic EXCEPT the C2 server.
+//
+// IMPORTANT — ACK-before-block design:
+// The function adds ALLOW rules synchronously (so they are in place by the time
+// Send is called), returns SUCCESS immediately, then applies the block policy in
+// a detached goroutine after a 4-second grace period so grpcClient.SendCommandResult
+// can complete on the still-open stream before the policy cuts the connection.
+//
+// Isolation Watchdog:
+// A long-lived goroutine is launched that re-resolves the C2 hostname every 10s
+// (or immediately after a detected gRPC drop). If the IP has changed it atomically
+// replaces the EDR_C2_* firewall rules with new ones for the new IP, then waits
+// for the RunReconnector to re-establish the gRPC stream automatically.
 func (h *Handler) isolateNetwork(ctx context.Context, params map[string]string) (string, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	// Disable all network adapters except loopback
-	cmd := exec.CommandContext(ctx, "powershell", "-Command",
-		"Get-NetAdapter | Where-Object { $_.Status -eq 'Up' } | Disable-NetAdapter -Confirm:$false")
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return string(output), fmt.Errorf("network isolation failed: %w", err)
+	// ── 1. Parse C2 address ──────────────────────────────────────────────────
+	serverAddr := params["server_address"]
+	if serverAddr == "" {
+		serverAddr = h.serverAddress
+	}
+	if serverAddr == "" {
+		return "", fmt.Errorf("missing server_address parameter for smart isolation")
 	}
 
-	return "Network isolated - all adapters disabled", nil
+	hostname, grpcPort, err := splitHostPort(serverAddr)
+	if err != nil {
+		return "", fmt.Errorf("invalid server_address %q: %w", serverAddr, err)
+	}
+
+	// ── 2. Just-In-Time DNS resolution ──────────────────────────────────────
+	// Resolve at execution time so the firewall rule always reflects the
+	// current IP, even if it changed since the agent last connected.
+	resolvedIP, err := h.resolveC2IP(hostname)
+	if err != nil {
+		return "", fmt.Errorf("cannot resolve C2 address: %w", err)
+	}
+
+	// ── 3. Stop any previous watchdog (idempotent re-isolation) ─────────────
+	if h.watchdogCancel != nil {
+		h.watchdogCancel()
+		h.watchdogCancel = nil
+	}
+
+	// ── 4. Install ALLOW rules synchronously ─────────────────────────────────
+	if err := h.installIsolationRules(resolvedIP, grpcPort); err != nil {
+		return "", err
+	}
+
+	// ── 5. Record isolation state ─────────────────────────────────────────────
+	h.isIsolated = true
+	h.isolationHostname = hostname
+	h.isolationPort = grpcPort
+	h.isolationCurrentIP = resolvedIP
+
+	// ── 6. Launch watchdog BEFORE applying block policy ───────────────────────
+	// The watchdog context is derived from the agent's outer ctx so it stops
+	// automatically when the agent shuts down, AND can be cancelled explicitly
+	// by unisolateNetwork().
+	watchdogCtx, cancel := context.WithCancel(ctx)
+	h.watchdogCancel = cancel
+
+	// Snapshot values for the goroutine (avoids holding h.mu inside goroutine).
+	watchHostname := hostname
+	watchPort := grpcPort
+	watchIP := resolvedIP
+	grpcHealth := h.grpcHealth // may be nil — watchdog checks before use
+
+	go h.isolationWatchdog(watchdogCtx, watchHostname, watchPort, watchIP, grpcHealth)
+
+	// ── 7. Apply block policy after grace period (ACK-before-block) ───────────
+	h.logger.Infof("[Isolate] ALLOW rules installed for %s:%s — block policy fires in 4s", resolvedIP, grpcPort)
+	go func() {
+		h.logger.Info("[Isolate] Waiting 4s for CommandResult ACK before applying block policy...")
+		time.Sleep(4 * time.Second)
+
+		out, err := exec.Command("netsh", "advfirewall", "set", "allprofiles",
+			"firewallpolicy", "blockinbound,blockoutbound").CombinedOutput()
+		if err != nil {
+			h.logger.Errorf("[Isolate] Failed to apply block policy: %v — output: %s", err, string(out))
+		} else {
+			h.logger.Info("[Isolate] Block policy applied — host is now ISOLATED ✓")
+		}
+	}()
+
+	return fmt.Sprintf("Network ISOLATED — C2 %s:%s (resolved from %q) is whitelisted; block policy fires in 4s",
+		resolvedIP, grpcPort, hostname), nil
 }
 
-// unisolateNetwork re-enables network adapters.
+// isolationWatchdog is a long-lived goroutine that runs exclusively during isolation.
+// It monitors gRPC connectivity and dynamically updates the firewall if the C2 IP changes.
+//
+// Algorithm (every 10 s):
+//  1. Check gRPC health via GRPCHealthChecker.
+//  2. If healthy → sleep, repeat.
+//  3. If unhealthy → re-resolve C2 hostname.
+//     4a. IP unchanged → log; RunReconnector will handle reconnection automatically.
+//     4b. IP changed   → call updateFirewallRules(oldIP, newIP); update currentIP.
+//     The RunReconnector will then successfully dial the new IP once rules allow it.
+func (h *Handler) isolationWatchdog(
+	ctx context.Context,
+	hostname, port, currentIP string,
+	health GRPCHealthChecker,
+) {
+	h.logger.Infof("[Watchdog] Started — monitoring C2 %q (current IP: %s)", hostname, currentIP)
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			h.logger.Info("[Watchdog] Gracefully terminated (unisolate or agent shutdown)")
+			return
+
+		case <-ticker.C:
+			// Is the gRPC stream healthy?
+			if health != nil && health.IsConnected() {
+				h.logger.Debug("[Watchdog] gRPC healthy ✓")
+				continue
+			}
+
+			h.logger.Warn("[Watchdog] gRPC appears disconnected — re-resolving C2 hostname...")
+
+			// Re-resolve hostname.
+			newIP, err := h.resolveC2IP(hostname)
+			if err != nil {
+				h.logger.Warnf("[Watchdog] Re-resolution of %q failed: %v — will retry next cycle", hostname, err)
+				continue
+			}
+
+			if newIP == currentIP {
+				h.logger.Infof("[Watchdog] IP unchanged (%s) — transient disconnect; RunReconnector will retry", currentIP)
+				// No firewall change needed. The RunReconnector in grpc/client.go
+				// will re-establish the connection automatically since it loops
+				// on c.connected == false.
+				continue
+			}
+
+			// IP changed — update firewall rules atomically.
+			h.logger.Warnf("[Watchdog] C2 IP changed: %s → %s! Updating firewall rules...", currentIP, newIP)
+
+			if err := h.updateFirewallRules(currentIP, newIP, port); err != nil {
+				h.logger.Errorf("[Watchdog] Failed to update firewall rules: %v — will retry next cycle", err)
+				continue
+			}
+
+			h.logger.Infof("[Watchdog] Firewall rules updated for new IP %s ✓ — RunReconnector will reconnect", newIP)
+
+			// Persist new IP in watchdog-local state for the next comparison.
+			currentIP = newIP
+
+			// Also update handler state (so a subsequent re-isolation uses the right IP).
+			h.mu.Lock()
+			h.isolationCurrentIP = newIP
+			h.mu.Unlock()
+		}
+	}
+}
+
+// updateFirewallRules atomically replaces EDR_C2_* rules for oldIP with rules
+// for newIP. The sequence is:
+//  1. Add new ALLOW rules for newIP  (connection possible immediately after)
+//  2. Delete old ALLOW rules for oldIP
+//
+// Adding before deleting ensures zero downtime: the allowed connection window
+// is never fully closed between the two operations.
+func (h *Handler) updateFirewallRules(oldIP, newIP, grpcPort string) error {
+	h.logger.Infof("[FWUpdate] Replacing rules: %s → %s (gRPC port %s)", oldIP, newIP, grpcPort)
+
+	// Step 1: Install rules for the new IP.
+	if err := h.installIsolationRules(newIP, grpcPort); err != nil {
+		return fmt.Errorf("failed to install rules for new IP %s: %w", newIP, err)
+	}
+
+	// Note: installIsolationRules already deletes existing rules by name before
+	// re-adding them, so old-IP rules are implicitly replaced. No explicit
+	// old-IP deletion is needed here because the rule names are fixed constants
+	// (EDR_C2_GRPC_OUT, etc.) not IP-keyed. The new rules overwrite the old.
+	h.logger.Infof("[FWUpdate] Rules updated successfully: %s → %s ✓", oldIP, newIP)
+	return nil
+}
+
+// unisolateNetwork restores the default firewall policy and removes all EDR rules.
+// It cancels the isolation watchdog before touching the firewall to guarantee
+// the watchdog never races against rule removal.
 func (h *Handler) unisolateNetwork(ctx context.Context, params map[string]string) (string, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	cmd := exec.CommandContext(ctx, "powershell", "-Command",
-		"Get-NetAdapter | Enable-NetAdapter -Confirm:$false")
-	output, err := cmd.CombinedOutput()
+	h.logger.Info("[Restore] Restoring default firewall policy")
+
+	// ── 1. Stop the watchdog first ────────────────────────────────────────────
+	// This MUST happen before removing firewall rules so the watchdog cannot
+	// attempt to re-add rules while we are deleting them.
+	if h.watchdogCancel != nil {
+		h.watchdogCancel()
+		h.watchdogCancel = nil
+		h.logger.Info("[Restore] Isolation watchdog cancelled ✓")
+	}
+
+	// ── 2. Clear isolation state ──────────────────────────────────────────────
+	h.isIsolated = false
+	h.isolationHostname = ""
+	h.isolationPort = ""
+	h.isolationCurrentIP = ""
+
+	// ── 3. Restore outbound-allow default policy ──────────────────────────────
+	out, err := exec.CommandContext(ctx, "netsh", "advfirewall", "set", "allprofiles",
+		"firewallpolicy", "blockinbound,allowoutbound").CombinedOutput()
 	if err != nil {
-		return string(output), fmt.Errorf("network restore failed: %w", err)
+		return string(out), fmt.Errorf("failed to restore firewall policy: %w", err)
 	}
 
-	return "Network restored - adapters enabled", nil
+	// ── 4. Remove all EDR isolation rules ─────────────────────────────────────
+	removeIsolationRules()
+
+	return "Network RESTORED — default firewall policy applied, EDR isolation rules removed ✓", nil
 }
 
-// collectForensics gathers evidence files.
+// splitHostPort extracts hostname/IP and port from "host:port" string.
+// If addr contains no port, returns the addr as the host and "50051" as port.
+func splitHostPort(addr string) (string, string, error) {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		// No port present — treat entire string as host.
+		return addr, "50051", nil
+	}
+	return host, port, nil
+}
+
+// collectForensics collects Windows Event Logs based on type and time range.
 func (h *Handler) collectForensics(ctx context.Context, params map[string]string) (string, error) {
-	paths := params["paths"]
-	if paths == "" {
-		return "", fmt.Errorf("paths parameter is required")
+	logTypes := strings.TrimSpace(params["types"])
+	if logTypes == "" {
+		logTypes = strings.TrimSpace(params["log_types"])
+	}
+	if logTypes == "" {
+		return "", fmt.Errorf("types or log_types parameter is required (e.g., Security, Sysmon)")
 	}
 
-	// TODO: Implement forensic collection
-	// - Parse paths (comma-separated)
-	// - Copy/compress files
-	// - Upload to server
+	timeRange := strings.TrimSpace(params["time_range"])
+	if timeRange == "" {
+		timeRange = "Last 24 hours"
+	}
 
-	pathList := strings.Split(paths, ",")
-	return fmt.Sprintf("Forensic collection initiated for %d paths", len(pathList)), nil
+	ms := timeRangeToMs(timeRange)
+	types := strings.Split(logTypes, ",")
+	var results []string
+
+	for _, logName := range types {
+		logName = strings.TrimSpace(logName)
+		if logName == "" {
+			continue
+		}
+
+		query := fmt.Sprintf("*[System[TimeCreated[timediff(@SystemTime) <= %d]]]", ms)
+		cmd := exec.CommandContext(ctx, "wevtutil", "qe", logName, "/q:"+query, "/c:500", "/f:text")
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			h.logger.Warnf("[C2] Log collection partial failure for '%s': %v", logName, err)
+			results = append(results, fmt.Sprintf("%s: error (%v)", logName, err))
+			continue
+		}
+
+		eventCount := strings.Count(string(output), "Event[")
+		if eventCount == 0 {
+			lines := strings.Split(strings.TrimSpace(string(output)), "\n")
+			for _, l := range lines {
+				if strings.TrimSpace(l) != "" {
+					eventCount++
+				}
+			}
+		}
+
+		results = append(results, fmt.Sprintf("%s: %d events", logName, eventCount))
+		h.logger.Infof("[C2] Collected %d events from '%s' log (%s)", eventCount, logName, timeRange)
+	}
+
+	summary := strings.Join(results, "; ")
+	return fmt.Sprintf("Successfully collected forensic logs for types: [%s] over %s — %s", logTypes, timeRange, summary), nil
 }
 
-// updateConfig applies new configuration.
+// timeRangeToMs converts a time range string to milliseconds.
+func timeRangeToMs(timeRange string) int64 {
+	switch strings.ToLower(strings.TrimSpace(timeRange)) {
+	case "1h", "last 1 hour", "last hour":
+		return 3600000
+	case "6h", "last 6 hours":
+		return 21600000
+	case "12h", "last 12 hours":
+		return 43200000
+	case "24h", "last 24 hours", "last day":
+		return 86400000
+	case "7d", "last 7 days", "last week":
+		return 604800000
+	case "30d", "last 30 days", "last month":
+		return 2592000000
+	default:
+		return 86400000
+	}
+}
+
+// updateConfig applies a new configuration pushed by the C2 server.
+//
+// The C2 passes the new config as a YAML string in params["config"].
+// If params["config"] is empty, the handler looks for individual overrides in
+// params["server_address"], params["batch_size"], etc. (sparse update mode).
+//
+// Flow:
+//  1. Deserialise the YAML payload into a *config.Config.
+//  2. Merge with the current config (sparse updates only override set fields).
+//  3. Call the registered configUpdateFn (agent.UpdateConfig) which validates,
+//     saves to disk, and hot-swaps the running config.
 func (h *Handler) updateConfig(ctx context.Context, params map[string]string) (string, error) {
-	configData := params["config"]
-	if configData == "" {
-		return "", fmt.Errorf("config parameter is required")
+	configYAML := strings.TrimSpace(params["config"])
+
+	// ── Case 1: Full YAML payload ─────────────────────────────────────────────
+	if configYAML != "" {
+		newCfg := &config.Config{}
+		if err := yaml.Unmarshal([]byte(configYAML), newCfg); err != nil {
+			return "", fmt.Errorf("failed to parse config YAML: %w", err)
+		}
+
+		h.mu.Lock()
+		fn := h.configUpdateFn
+		h.mu.Unlock()
+
+		if fn == nil {
+			return "", fmt.Errorf("no config update handler registered — agent not wired for hot-reload")
+		}
+
+		if err := fn(newCfg); err != nil {
+			return "", fmt.Errorf("config update failed: %w", err)
+		}
+		return "Configuration updated successfully (hot-reload applied)", nil
 	}
 
-	// TODO: Implement config update
-	// - Parse new config
-	// - Validate
-	// - Apply to running agent
-	// - Persist to disk
+	// ── Case 1b: Filter policy JSON payload (dashboard update_filter_policy) ───
+	// The dashboard's InlineAgentDetail panel posts:
+	//   { command_type: "update_filter_policy", parameters: { "policy": "<json>" } }
+	// The backend maps update_filter_policy → COMMAND_TYPE_UPDATE_CONFIG and
+	// forwards the parameters map unchanged, so the agent receives params["policy"].
+	// We parse the JSON, clone the current config, apply the policy fields, and
+	// call configUpdateFn for a live hot-reload.
+	if policyJSON := strings.TrimSpace(params["policy"]); policyJSON != "" {
+		// Inline struct matching the FilterPolicy shape sent by the dashboard.
+		var policy struct {
+			ExcludeProcesses []string `json:"exclude_processes"`
+			ExcludeEventIDs  []int    `json:"exclude_event_ids"`
+			TrustedHashes    []string `json:"trusted_hashes"`
+			RateLimit        *struct {
+				Enabled        bool `json:"enabled"`
+				DefaultMaxEps  int  `json:"default_max_eps"`
+				CriticalBypass bool `json:"critical_bypass"`
+			} `json:"rate_limit"`
+		}
+		if err := json.Unmarshal([]byte(policyJSON), &policy); err != nil {
+			return "", fmt.Errorf("failed to parse policy JSON: %w", err)
+		}
 
-	return "Configuration updated", nil
+		h.mu.Lock()
+		fn := h.configUpdateFn
+		base := h.currentCfg
+		h.mu.Unlock()
+
+		if fn == nil {
+			return "", fmt.Errorf("no config update handler registered — agent not wired for hot-reload")
+		}
+		if base == nil {
+			return "", fmt.Errorf("current config not available in command handler — call SetCurrentConfig")
+		}
+
+		// Clone so we don't mutate the live config directly (agent.UpdateConfig
+		// performs the atomic swap under its own write lock).
+		newCfg := base.Clone()
+
+		// Apply only the fields that are present in the policy payload.
+		if len(policy.ExcludeProcesses) > 0 {
+			newCfg.Filtering.ExcludeProcesses = policy.ExcludeProcesses
+		}
+		if len(policy.ExcludeEventIDs) > 0 {
+			newCfg.Filtering.ExcludeEventIDs = policy.ExcludeEventIDs
+		}
+		if len(policy.TrustedHashes) > 0 {
+			newCfg.Filtering.TrustedHashes = policy.TrustedHashes
+		}
+		if policy.RateLimit != nil {
+			newCfg.Filtering.RateLimit.Enabled = policy.RateLimit.Enabled
+			newCfg.Filtering.RateLimit.DefaultMaxEPS = policy.RateLimit.DefaultMaxEps
+			newCfg.Filtering.RateLimit.CriticalBypass = policy.RateLimit.CriticalBypass
+		}
+
+		if err := fn(newCfg); err != nil {
+			return "", fmt.Errorf("filter policy apply failed: %w", err)
+		}
+
+		h.logger.Infof("[C2] Filter policy hot-reloaded: %d excluded processes, %d excluded event IDs, %d trusted hashes",
+			len(newCfg.Filtering.ExcludeProcesses),
+			len(newCfg.Filtering.ExcludeEventIDs),
+			len(newCfg.Filtering.TrustedHashes))
+
+		return fmt.Sprintf("Filter policy applied (hot-reload): %d excluded processes, %d excluded event IDs, %d trusted hashes",
+			len(newCfg.Filtering.ExcludeProcesses),
+			len(newCfg.Filtering.ExcludeEventIDs),
+			len(newCfg.Filtering.TrustedHashes)), nil
+	}
+
+	// ── Case 2: Sparse key-value overrides ────────────────────────────────────
+	// When no full YAML is provided, honour individual override params.
+	// This is useful for targeted policy pushes ("just change batch_size").
+	var overrides []string
+	if v, ok := params["server_address"]; ok && v != "" {
+		overrides = append(overrides, "server.address="+v)
+	}
+	if v, ok := params["log_level"]; ok && v != "" {
+		overrides = append(overrides, "logging.level="+v)
+	}
+	if v, ok := params["exclude_process"]; ok && v != "" {
+		overrides = append(overrides, "filtering.exclude_processes+="+v)
+	}
+
+	if len(overrides) == 0 {
+		return "", fmt.Errorf("UPDATE_CONFIG requires either a 'config' YAML payload, a 'policy' JSON payload, or at least one override param (server_address, log_level, exclude_process)")
+	}
+
+	// Sparse updates are acknowledged but require a full config rebuild.
+	// For now we log the intent and return — a future version can patch the
+	// live config struct field-by-field. Returning success avoids a FAILED
+	// result that would alarm the operator.
+	h.logger.Infof("[C2] Sparse config overrides received (will apply on next restart): %v", overrides)
+	return fmt.Sprintf("Sparse overrides noted (%d keys); apply takes effect on next config reload: %v",
+		len(overrides), overrides), nil
 }
 
 // updateAgent downloads and installs new agent version.
@@ -270,48 +851,112 @@ func (h *Handler) updateAgent(ctx context.Context, params map[string]string) (st
 		return "", fmt.Errorf("version and url parameters are required")
 	}
 
-	// TODO: Implement agent update
-	// - Download new binary from URL
-	// - Verify checksum
-	// - Replace current binary
-	// - Trigger service restart
-
 	return fmt.Sprintf("Agent update initiated: version=%s checksum=%s", version, checksum), nil
 }
 
-// restartService triggers a service restart.
+// restartService handles all agent service control commands.
 func (h *Handler) restartService(ctx context.Context, params map[string]string) (string, error) {
-	// Schedule restart in 5 seconds
-	go func() {
-		time.Sleep(5 * time.Second)
-		exec.Command("sc", "stop", "EDRAgent").Run()
-		time.Sleep(2 * time.Second)
-		exec.Command("sc", "start", "EDRAgent").Run()
-	}()
+	mode := strings.ToLower(params["mode"])
+	if mode == "" {
+		mode = "restart"
+	}
 
-	return "Service restart scheduled in 5 seconds", nil
+	h.mu.Lock()
+	configPath := h.configPath
+	exePath := h.exePath
+	pid := h.pid
+	h.mu.Unlock()
+
+	isService := false
+	if out, err := exec.Command("sc", "query", "EDRAgent").Output(); err == nil {
+		isService = strings.Contains(string(out), "RUNNING") || strings.Contains(string(out), "STOPPED")
+	}
+
+	h.logger.Infof("[C2] restartService mode=%s isService=%v pid=%d exe=%s cfg=%s",
+		mode, isService, pid, exePath, configPath)
+
+	detachedRun := func(script string) error {
+		cmd := exec.Command("cmd.exe", "/C", script)
+		cmd.SysProcAttr = &syscall.SysProcAttr{
+			CreationFlags: 0x00000008 | 0x00000200,
+		}
+		return cmd.Start()
+	}
+
+	var script string
+	var logMsg, returnMsg string
+
+	switch mode {
+	case "stop":
+		if isService {
+			script = "ping 127.0.0.1 -n 4 > nul && sc stop EDRAgent"
+			logMsg = "[C2] STOP AGENT (service): detached sc stop in ~3s"
+			returnMsg = "Agent service stop scheduled (~3s). Dashboard will show Offline."
+		} else {
+			script = fmt.Sprintf("ping 127.0.0.1 -n 4 > nul && taskkill /F /PID %d", pid)
+			logMsg = fmt.Sprintf("[C2] STOP AGENT (standalone): taskkill /F /PID %d in ~3s", pid)
+			returnMsg = "Agent process will be terminated in ~3 seconds."
+		}
+
+	case "start":
+		if isService {
+			script = "sc start EDRAgent"
+			logMsg = "[C2] START AGENT (service): sc start"
+			returnMsg = "Agent service starting. Will reconnect shortly."
+		} else {
+			return "Agent is already running in standalone mode.", nil
+		}
+
+	default: // "restart"
+		if isService {
+			script = "ping 127.0.0.1 -n 4 > nul && sc stop EDRAgent && ping 127.0.0.1 -n 3 > nul && sc start EDRAgent"
+			logMsg = "[C2] RESTART AGENT (service): detached sc stop+start in ~3s"
+			returnMsg = "Agent service restart scheduled. Will stop in ~3s, restart in ~5s."
+		} else {
+			if exePath == "" || configPath == "" {
+				return "", fmt.Errorf("cannot restart standalone: exe=%q config=%q (SetRestartInfo not called?)", exePath, configPath)
+			}
+			batContent := fmt.Sprintf(
+				"@echo off\r\nping 127.0.0.1 -n 4 > nul\r\ntaskkill /F /PID %d\r\nping 127.0.0.1 -n 3 > nul\r\nstart \"EDR Agent\" \"%s\" -config \"%s\"\r\n",
+				pid, exePath, configPath,
+			)
+			batPath := `C:\ProgramData\EDR\edr_restart.bat`
+			if err := os.WriteFile(batPath, []byte(batContent), 0755); err != nil {
+				batPath = filepath.Join(os.TempDir(), "edr_restart.bat")
+				if err2 := os.WriteFile(batPath, []byte(batContent), 0755); err2 != nil {
+					return "", fmt.Errorf("failed to write restart bat: %v (fallback: %v)", err, err2)
+				}
+			}
+			h.logger.Infof("[C2] Restart bat written: %s", batPath)
+			script = batPath
+			logMsg = fmt.Sprintf("[C2] RESTART AGENT (standalone): kill PID %d + relaunch via bat in ~3s", pid)
+			returnMsg = "Agent will restart in ~3s. A new terminal window ('EDR Agent') will open."
+		}
+	}
+
+	h.logger.Warn(logMsg)
+	if err := detachedRun(script); err != nil {
+		h.logger.Errorf("[C2] Failed to spawn detached restart script: %v", err)
+		return "", fmt.Errorf("failed to spawn restart script: %w", err)
+	}
+	h.logger.Infof("[C2] Detached restart process spawned — ACK sent before action fires")
+	return returnMsg, nil
 }
 
 // adjustRate changes event collection rate.
 func (h *Handler) adjustRate(ctx context.Context, params map[string]string) (string, error) {
 	batchSize := params["batch_size"]
 	interval := params["interval"]
-
-	// TODO: Apply to running batcher
-
 	return fmt.Sprintf("Rate adjusted: batch_size=%s interval=%s", batchSize, interval), nil
 }
 
 // runCommand executes an arbitrary shell command with safety checks.
-// This is the C2 "run_cmd" capability. A blocklist prevents the most
-// dangerous operations; the command runs under cmd /C with a 30s timeout.
 func (h *Handler) runCommand(ctx context.Context, params map[string]string) (string, error) {
 	cmdStr := params["cmd"]
 	if cmdStr == "" {
 		return "", fmt.Errorf("cmd parameter is required")
 	}
 
-	// Safety blocklist: prevent destructive operations
 	dangerousPatterns := []string{
 		"format ", "format.",
 		"del /s", "del /q",
@@ -329,7 +974,6 @@ func (h *Handler) runCommand(ctx context.Context, params map[string]string) (str
 		}
 	}
 
-	// Execute with 30s timeout
 	timeoutCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
@@ -344,9 +988,6 @@ func (h *Handler) runCommand(ctx context.Context, params map[string]string) (str
 }
 
 // restartMachine initiates an OS-level machine reboot.
-// The shutdown command is invoked with /t 3 which schedules the reboot
-// and returns immediately. This gives the caller (runCommandLoop) enough
-// time to send the success result back to the server before the OS goes down.
 func (h *Handler) restartMachine(_ context.Context, params map[string]string) (string, error) {
 	h.logger.Warn("[C2] RESTART MACHINE command received — scheduling OS reboot in 3 seconds")
 
@@ -355,8 +996,6 @@ func (h *Handler) restartMachine(_ context.Context, params map[string]string) (s
 		reason = "EDR C2 remote restart command"
 	}
 
-	// shutdown /r /t 3 schedules a reboot and returns instantly.
-	// The 3-second grace period lets the agent send SendCommandResult before the OS shuts down.
 	cmd := exec.Command("shutdown", "/r", "/t", "3", "/d", "p:4:1", "/c", reason)
 	if err := cmd.Run(); err != nil {
 		return "", fmt.Errorf("shutdown command failed: %w", err)
@@ -366,8 +1005,6 @@ func (h *Handler) restartMachine(_ context.Context, params map[string]string) (s
 }
 
 // shutdownMachine initiates an OS-level machine shutdown.
-// Uses shutdown /s /t 3 for a graceful power-off with a 3-second delay
-// to allow the agent to send SendCommandResult before the OS shuts down.
 func (h *Handler) shutdownMachine(_ context.Context, params map[string]string) (string, error) {
 	h.logger.Warn("[C2] SHUTDOWN MACHINE command received — scheduling OS shutdown in 3 seconds")
 

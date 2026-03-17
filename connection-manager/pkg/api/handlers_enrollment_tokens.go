@@ -137,5 +137,8 @@ func (h *Handlers) RevokeEnrollmentToken(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to revoke token"})
 	}
 
+	// Audit: token revoked
+	h.fireAudit(c, models.AuditActionTokenRevoked, "token", id, "", false, "")
+
 	return c.JSON(http.StatusOK, map[string]string{"status": "revoked"})
 }

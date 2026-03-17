@@ -68,6 +68,30 @@ const (
 	AuditActionLoginSuccess = "user_login"
 	AuditActionLoginFailed  = "user_login_failed"
 
+	// Command actions (resource_type = "command")
+	AuditActionCommandExecuted = "execute_command"
+	AuditActionIsolate         = "isolate_network"
+	AuditActionUnisolate       = "restore_network"
+
+	// Alert actions (resource_type = "alert")
+	AuditActionAlertAcknowledged = "acknowledge_alert"
+	AuditActionAlertResolved     = "resolve_alert"
+	AuditActionAlertDeleted      = "alert_deleted"
+
+	// Policy actions (resource_type = "policy")
+	AuditActionPolicyCreated = "policy_created"
+	AuditActionPolicyUpdated = "policy_updated"
+	AuditActionPolicyDeleted = "policy_deleted"
+	AuditActionDeployPolicy  = "deploy_policy"
+
+	// Rule actions (resource_type = "rule")
+	AuditActionRuleCreated = "rule_created"
+	AuditActionRuleUpdated = "rule_updated"
+	AuditActionRuleDeleted = "rule_deleted"
+
+	// Settings actions (resource_type = "settings")
+	AuditActionChangeSettings = "change_settings"
+
 	// System actions
 	AuditActionRateLimitTriggered = "rate_limit_triggered"
 	AuditActionAuthFailed         = "auth_failed"

@@ -14,8 +14,10 @@ type PerformanceMetricsProvider interface {
 	GetEventsPerSecond() float64
 	GetAlertsPerSecond() float64
 	GetAverageLatencyMs() float64
-	GetProcessingErrors() uint64
 	GetEventsProcessed() uint64
+	GetProcessingErrors() uint64
+	GetAverageDatabaseQueryMs() float64
+	GetAverageRuleMatchingMs() float64
 }
 
 // StatsHandler handles statistics API endpoints.
@@ -53,8 +55,8 @@ type AlertStatsResponse struct {
 	ByStatus      map[string]int64 `json:"by_status"`
 	ByRule        map[string]int64 `json:"by_rule,omitempty"`
 	ByAgent       map[string]int64 `json:"by_agent,omitempty"`
-	Alerts24h     int64            `json:"alerts_24h"`
-	Alerts7d      int64            `json:"alerts_7d"`
+	Alerts24h     int64            `json:"last_24h"`
+	Alerts7d      int64            `json:"last_7d"`
 	AvgConfidence float64          `json:"avg_confidence"`
 }
 
@@ -147,8 +149,8 @@ func (h *StatsHandler) PerformanceStats(w http.ResponseWriter, r *http.Request) 
 			EventsPerSecond:    h.perfMetrics.GetEventsPerSecond(),
 			AlertsPerSecond:    h.perfMetrics.GetAlertsPerSecond(),
 			AvgEventLatencyMs:  h.perfMetrics.GetAverageLatencyMs(),
-			AvgRuleMatchingMs:  h.perfMetrics.GetAverageLatencyMs(), // Same as event latency for now
-			AvgDatabaseQueryMs: 0,
+			AvgRuleMatchingMs:  h.perfMetrics.GetAverageRuleMatchingMs(),
+			AvgDatabaseQueryMs: h.perfMetrics.GetAverageDatabaseQueryMs(),
 			ActiveConnections:  0,
 			WebSocketClients:   0,
 			KafkaConsumerLag:   0,
@@ -161,12 +163,25 @@ func (h *StatsHandler) PerformanceStats(w http.ResponseWriter, r *http.Request) 
 }
 
 // TimelineStats handles GET /api/v1/sigma/stats/timeline
-// Returns timeline data for the alert timeline chart. Currently returns an
-// empty array stub to prevent 404 errors and frontend rendering crashes.
 func (h *StatsHandler) TimelineStats(w http.ResponseWriter, r *http.Request) {
-	// TODO: Implement real timeline aggregation from sigma_alerts table using
-	// the "from", "to", and "granularity" query parameters.
+	ctx := r.Context()
+	from := r.URL.Query().Get("from")
+	to := r.URL.Query().Get("to")
+	granularity := r.URL.Query().Get("granularity")
+
+	if from == "" || to == "" {
+		writeJSON(w, http.StatusOK, map[string]interface{}{"data": []interface{}{}})
+		return
+	}
+
+	timeline, err := h.alertRepo.GetTimeline(ctx, from, to, granularity)
+	if err != nil {
+		logger.Errorf("Failed to get timeline stats: %v", err)
+		writeError(w, http.StatusInternalServerError, "Failed to get timeline stats")
+		return
+	}
+
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"data": []interface{}{},
+		"data": timeline,
 	})
 }

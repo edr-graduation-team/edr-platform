@@ -20,7 +20,7 @@ type EnrollmentToken struct {
 	IsActive    bool       `db:"is_active"   json:"is_active"`
 	ExpiresAt   *time.Time `db:"expires_at"  json:"expires_at"` // nil = never expires
 	UseCount    int        `db:"use_count"   json:"use_count"`
-	MaxUses     *int       `db:"max_uses"    json:"max_uses"`   // nil = unlimited
+	MaxUses     *int       `db:"max_uses"    json:"max_uses"` // nil = unlimited
 	CreatedBy   string     `db:"created_by"  json:"created_by"`
 	CreatedAt   time.Time  `db:"created_at"  json:"created_at"`
 	RevokedAt   *time.Time `db:"revoked_at"  json:"revoked_at"`

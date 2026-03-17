@@ -35,6 +35,7 @@ type Agent struct {
 
 	// Network telemetry
 	IPAddresses []string `db:"ip_addresses" json:"ip_addresses"`
+	IsIsolated  bool     `db:"is_isolated" json:"is_isolated"` // Smart network isolation active
 
 	// Certificate
 	CurrentCertID *uuid.UUID `db:"current_cert_id" json:"current_cert_id"`

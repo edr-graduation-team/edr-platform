@@ -119,7 +119,7 @@ func (s *authServiceImpl) Login(ctx context.Context, username, password string) 
 	}
 
 	// Generate tokens
-	tokenPair, err := s.jwtManager.GenerateTokenPair(user.ID.String(), []string{user.Role})
+	tokenPair, err := s.jwtManager.GenerateTokenPair(user.ID.String(), user.Username, []string{user.Role})
 	if err != nil {
 		s.logger.WithError(err).Error("Failed to generate tokens")
 		return nil, ErrInternal

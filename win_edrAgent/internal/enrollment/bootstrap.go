@@ -18,7 +18,7 @@ const (
 	caFetchTimeout    = 15 * time.Second
 	caFetchMaxRetries = 3
 	caFetchRetryDelay = 2 * time.Second
-	caHTTPPort        = "8090"
+	caHTTPPort        = "8082" // Connection Manager HTTP/REST port
 	caEndpoint        = "/api/v1/agent/ca"
 )
 
@@ -27,7 +27,7 @@ const (
 // can bootstrap TLS trust without manually pre-distributing the CA file.
 //
 // serverAddr is the gRPC address (e.g. "192.168.129.1:50051"); the host is
-// extracted and the HTTP port (8090) is used for the REST API call.
+// extracted and the HTTP port (8082) is used for the REST API call.
 //
 // If caPath already exists, this function is a no-op.
 func FetchCACertificate(serverAddr, caPath string, logger *logging.Logger) error {

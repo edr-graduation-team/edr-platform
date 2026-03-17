@@ -1,0 +1,145 @@
+?   	github.com/edr-platform/sigma-engine/cmd/sigma-engine	[no test files]
+?   	github.com/edr-platform/sigma-engine/cmd/sigma-engine-kafka	[no test files]
+?   	github.com/edr-platform/sigma-engine/cmd/sigma-engine-live	[no test files]
+?   	github.com/edr-platform/sigma-engine/internal/analytics	[no test files]
+?   	github.com/edr-platform/sigma-engine/internal/application/alert	[no test files]
+ok  	github.com/edr-platform/sigma-engine/internal/application/baselines	(cached)
+ok  	github.com/edr-platform/sigma-engine/internal/application/detection	(cached)
+?   	github.com/edr-platform/sigma-engine/internal/application/mapping	[no test files]
+?   	github.com/edr-platform/sigma-engine/internal/application/monitoring	[no test files]
+ok  	github.com/edr-platform/sigma-engine/internal/application/rules	(cached)
+ok  	github.com/edr-platform/sigma-engine/internal/application/scoring	(cached)
+ok  	github.com/edr-platform/sigma-engine/internal/automation	(cached)
+ok  	github.com/edr-platform/sigma-engine/internal/domain	(cached)
+ok  	github.com/edr-platform/sigma-engine/internal/handlers	(cached)
+ok  	github.com/edr-platform/sigma-engine/internal/infrastructure/api	(cached)
+ok  	github.com/edr-platform/sigma-engine/internal/infrastructure/cache	(cached)
+?   	github.com/edr-platform/sigma-engine/internal/infrastructure/config	[no test files]
+ok  	github.com/edr-platform/sigma-engine/internal/infrastructure/database	(cached)
+ok  	github.com/edr-platform/sigma-engine/internal/infrastructure/kafka	(cached)
+?   	github.com/edr-platform/sigma-engine/internal/infrastructure/logger	[no test files]
+?   	github.com/edr-platform/sigma-engine/internal/infrastructure/monitoring	[no test files]
+?   	github.com/edr-platform/sigma-engine/internal/infrastructure/output	[no test files]
+?   	github.com/edr-platform/sigma-engine/internal/infrastructure/processor	[no test files]
+?   	github.com/edr-platform/sigma-engine/internal/infrastructure/utils	[no test files]
+ok  	github.com/edr-platform/sigma-engine/internal/integrations	(cached)
+?   	github.com/edr-platform/sigma-engine/internal/metrics	[no test files]
+ok  	github.com/edr-platform/sigma-engine/internal/ml	(cached)
+ok  	github.com/edr-platform/sigma-engine/internal/optimization	(cached)
+ok  	github.com/edr-platform/sigma-engine/internal/rules	(cached)
+?   	github.com/edr-platform/sigma-engine/internal/user	[no test files]
+?   	github.com/edr-platform/sigma-engine/pkg/ports	[no test files]
+?   	github.com/edr-platform/sigma-engine/pkg/rules	[no test files]
+?   	github.com/edr-platform/sigma-engine/test/helpers	[no test files]
+{"level":"info","msg":"Loaded 1 rules into detection engine","time":"2026-03-17T00:14:57.205+03:00"}
+--- FAIL: TestEndToEndDetection (0.00s)
+    e2e_detection_test.go:55: 
+        	Error Trace:	D:/EDR_Platform/sigma_engine_go/test/integration/e2e_detection_test.go:55
+        	Error:      	"0" is not greater than "0"
+        	Test:       	TestEndToEndDetection
+        	Messages:   	Should detect at least one rule
+{"level":"info","msg":"Loaded 3 rules into detection engine","time":"2026-03-17T00:14:57.206+03:00"}
+--- FAIL: TestDetectionWithMultipleRules (0.00s)
+    e2e_detection_test.go:97: 
+        	Error Trace:	D:/EDR_Platform/sigma_engine_go/test/integration/e2e_detection_test.go:97
+        	Error:      	"0" is not greater than "0"
+        	Test:       	TestDetectionWithMultipleRules
+        	Messages:   	Should match at least one rule
+{"level":"info","msg":"Loaded 1 rules into detection engine","time":"2026-03-17T00:14:57.206+03:00"}
+{"level":"info","msg":"Loaded 1 rules into detection engine","time":"2026-03-17T00:14:57.207+03:00"}
+{"level":"info","msg":"Loaded 50 rules into detection engine","time":"2026-03-17T00:14:57.209+03:00"}
+--- FAIL: TestDetectionWithRealSigmaRules (0.00s)
+    e2e_detection_test.go:256: 
+        	Error Trace:	D:/EDR_Platform/sigma_engine_go/test/integration/e2e_detection_test.go:256
+        	Error:      	Expected value not to be nil.
+        	Test:       	TestDetectionWithRealSigmaRules
+{"level":"info","msg":"Loaded 2 rules into detection engine","time":"2026-03-17T00:14:57.368+03:00"}
+{"level":"info","msg":"Loaded 1 rules into detection engine","time":"2026-03-17T00:14:57.371+03:00"}
+{"level":"info","msg":"Loaded 1 rules into detection engine","time":"2026-03-17T00:14:57.371+03:00"}
+{"level":"info","msg":"Loaded 1 rules into detection engine","time":"2026-03-17T00:14:57.373+03:00"}
+{"level":"info","msg":"Loaded 1 rules into detection engine","time":"2026-03-17T00:14:57.374+03:00"}
+{"level":"info","msg":"Detection engine shutdown complete","time":"2026-03-17T00:14:57.374+03:00"}
+{"level":"info","msg":"Loaded 2 rules into detection engine","time":"2026-03-17T00:14:57.374+03:00"}
+FAIL
+FAIL	github.com/edr-platform/sigma-engine/test/integration	1.787s
+--- FAIL: TestBaselineLoad (30.00s)
+    load_test.go:237: Results:
+        {
+          "total_requests": 2974,
+          "success_count": 0,
+          "error_count": 2974,
+          "duration": 30002720400,
+          "rps": 99.12434473775251,
+          "avg_latency_ms": 0,
+          "p50_latency_ms": 0,
+          "p95_latency_ms": 0,
+          "p99_latency_ms": 0,
+          "min_latency_ms": 0,
+          "max_latency_ms": 0,
+          "error_rate": 1
+        }
+    load_test.go:240: 
+        	Error Trace:	D:/EDR_Platform/sigma_engine_go/test/load/load_test.go:240
+        	Error:      	"1" is not less than "0.01"
+        	Test:       	TestBaselineLoad
+        	Messages:   	Error rate should be <1%
+--- FAIL: TestRampLoad (50.02s)
+    --- FAIL: TestRampLoad/RPS_10 (10.00s)
+        load_test.go:273: RPS 10: actual=10.0, p95=0.0ms, errors=100.00%
+        load_test.go:276: 
+            	Error Trace:	D:/EDR_Platform/sigma_engine_go/test/load/load_test.go:276
+            	Error:      	"1" is not less than "0.05"
+            	Test:       	TestRampLoad/RPS_10
+            	Messages:   	Error rate should be <5%
+    --- FAIL: TestRampLoad/RPS_50 (10.00s)
+        load_test.go:273: RPS 50: actual=49.7, p95=0.0ms, errors=100.00%
+        load_test.go:276: 
+            	Error Trace:	D:/EDR_Platform/sigma_engine_go/test/load/load_test.go:276
+            	Error:      	"1" is not less than "0.05"
+            	Test:       	TestRampLoad/RPS_50
+            	Messages:   	Error rate should be <5%
+    --- FAIL: TestRampLoad/RPS_100 (10.01s)
+        load_test.go:273: RPS 100: actual=99.9, p95=0.0ms, errors=100.00%
+        load_test.go:276: 
+            	Error Trace:	D:/EDR_Platform/sigma_engine_go/test/load/load_test.go:276
+            	Error:      	"1" is not less than "0.05"
+            	Test:       	TestRampLoad/RPS_100
+            	Messages:   	Error rate should be <5%
+    --- FAIL: TestRampLoad/RPS_200 (10.00s)
+        load_test.go:273: RPS 200: actual=198.1, p95=0.0ms, errors=100.00%
+        load_test.go:276: 
+            	Error Trace:	D:/EDR_Platform/sigma_engine_go/test/load/load_test.go:276
+            	Error:      	"1" is not less than "0.05"
+            	Test:       	TestRampLoad/RPS_200
+            	Messages:   	Error rate should be <5%
+    --- FAIL: TestRampLoad/RPS_500 (10.00s)
+        load_test.go:273: RPS 500: actual=497.6, p95=0.0ms, errors=100.00%
+        load_test.go:276: 
+            	Error Trace:	D:/EDR_Platform/sigma_engine_go/test/load/load_test.go:276
+            	Error:      	"1" is not less than "0.05"
+            	Test:       	TestRampLoad/RPS_500
+            	Messages:   	Error rate should be <5%
+--- FAIL: TestSustainedLoad (300.00s)
+    load_test.go:304: Sustained Results:
+        {
+          "total_requests": 58227,
+          "success_count": 0,
+          "error_count": 58227,
+          "duration": 300002390300,
+          "rps": 194.0884535678981,
+          "avg_latency_ms": 0,
+          "p50_latency_ms": 0,
+          "p95_latency_ms": 0,
+          "p99_latency_ms": 0,
+          "min_latency_ms": 0,
+          "max_latency_ms": 0,
+          "error_rate": 1
+        }
+    load_test.go:307: 
+        	Error Trace:	D:/EDR_Platform/sigma_engine_go/test/load/load_test.go:307
+        	Error:      	"1" is not less than "0.01"
+        	Test:       	TestSustainedLoad
+        	Messages:   	Error rate should be <1%
+FAIL
+FAIL	github.com/edr-platform/sigma-engine/test/load	381.964s
+FAIL

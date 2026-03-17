@@ -23,6 +23,31 @@ services:
       timeout: 5s
       retries: 5
 
+  # Redis — Process Lineage Cache for Context-Aware Detection (Phase 1)
+  # TTL-based key expiry ensures bounded memory consumption.
+  # maxmemory-policy = allkeys-lru: when RAM limit is reached, evicts the
+  # Least Recently Used key — safe because lineage entries are write-once,
+  # expire naturally, and a miss is non-fatal for the scoring pipeline.
+  redis:
+    image: redis:7-alpine
+    container_name: sigma-redis
+    command: >
+      redis-server
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+      --save ""
+      --appendonly no
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
   # Zookeeper for Kafka
   zookeeper:
     image: confluentinc/cp-zookeeper:7.5.0
@@ -71,6 +96,7 @@ services:
 
 volumes:
   postgres_data:
+  redis_data:
 
 # Networks for service communication
 networks:

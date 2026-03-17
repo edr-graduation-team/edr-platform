@@ -27,9 +27,10 @@ type JWTManager struct {
 // Claims represents the JWT claims for agent authentication.
 type Claims struct {
 	jwt.RegisteredClaims
-	AgentID string   `json:"agent_id"`
-	Roles   []string `json:"roles,omitempty"`
-	Type    string   `json:"type"` // "access" or "refresh"
+	AgentID  string   `json:"agent_id"`
+	Username string   `json:"username,omitempty"` // human-readable login name
+	Roles    []string `json:"roles,omitempty"`
+	Type     string   `json:"type"` // "access" or "refresh"
 }
 
 // TokenPair contains both access and refresh tokens.
@@ -98,20 +99,22 @@ func NewJWTManager(privateKeyPath, publicKeyPath, issuer, audience string, acces
 	}, nil
 }
 
-// GenerateTokenPair creates a new access and refresh token pair for an agent.
-func (m *JWTManager) GenerateTokenPair(agentID string, roles []string) (*TokenPair, error) {
+// GenerateTokenPair creates a new access and refresh token pair for a user.
+// agentID is the user's UUID (stored as JWT Subject).
+// username is the human-readable login name embedded in the token claims.
+func (m *JWTManager) GenerateTokenPair(agentID string, username string, roles []string) (*TokenPair, error) {
 	now := time.Now()
 	accessExp := now.Add(m.accessTTL)
 	refreshExp := now.Add(m.refreshTTL)
 
 	// Generate access token
-	accessToken, err := m.generateToken(agentID, roles, "access", accessExp)
+	accessToken, err := m.generateToken(agentID, username, roles, "access", accessExp)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate access token: %w", err)
 	}
 
 	// Generate refresh token
-	refreshToken, err := m.generateToken(agentID, roles, "refresh", refreshExp)
+	refreshToken, err := m.generateToken(agentID, username, roles, "refresh", refreshExp)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate refresh token: %w", err)
 	}
@@ -125,7 +128,7 @@ func (m *JWTManager) GenerateTokenPair(agentID string, roles []string) (*TokenPa
 }
 
 // generateToken creates a single JWT token.
-func (m *JWTManager) generateToken(agentID string, roles []string, tokenType string, expiresAt time.Time) (string, error) {
+func (m *JWTManager) generateToken(agentID string, username string, roles []string, tokenType string, expiresAt time.Time) (string, error) {
 	claims := &Claims{
 		RegisteredClaims: jwt.RegisteredClaims{
 			ID:        uuid.New().String(),
@@ -135,9 +138,10 @@ func (m *JWTManager) generateToken(agentID string, roles []string, tokenType str
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
 			ExpiresAt: jwt.NewNumericDate(expiresAt),
 		},
-		AgentID: agentID,
-		Roles:   roles,
-		Type:    tokenType,
+		AgentID:  agentID,
+		Username: username,
+		Roles:    roles,
+		Type:     tokenType,
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
@@ -191,7 +195,7 @@ func (m *JWTManager) RefreshAccessToken(refreshToken string) (string, time.Time,
 
 	// Generate new access token
 	accessExp := time.Now().Add(m.accessTTL)
-	accessToken, err := m.generateToken(claims.AgentID, claims.Roles, "access", accessExp)
+	accessToken, err := m.generateToken(claims.AgentID, claims.Username, claims.Roles, "access", accessExp)
 	if err != nil {
 		return "", time.Time{}, err
 	}

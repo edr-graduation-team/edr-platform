@@ -26,8 +26,8 @@ services:
       context: ./connection-manager
       dockerfile: Dockerfile
     ports:
-      - "50051:50051"  # gRPC (agent ↔ server)
-      - "8082:8082"    # REST API / health
+      - "47051:50051"  # gRPC (agent ↔ server)
+      - "30082:8082"    # REST API / health
     environment:
       LOG_LEVEL: debug
       DATABASE_URL: "postgres://edr:edr@postgres:5432/edr?sslmode=disable"
@@ -35,6 +35,7 @@ services:
       KAFKA_BROKERS: "kafka:9092"        # INTERNAL listener (containers)
       GRPC_PORT: "50051"
       HTTP_PORT: "8082"
+      C2_GRPC_ADDRESS: "edr.local:47051"
     volumes:
       - ./connection-manager/certs:/app/certs:ro
       - ./connection-manager/config:/app/config:ro
@@ -63,7 +64,7 @@ services:
       context: ./sigma_engine_go
       dockerfile: Dockerfile
     ports:
-      - "8080:8080"
+      - "30080:8080"
     environment:
       # --- Kafka (MUST enable + point to INTERNAL listener) ---
       KAFKA_ENABLED: "true"
@@ -72,6 +73,8 @@ services:
       KAFKA_PRODUCER_TOPIC: "alerts"
       # --- Database ---
       DATABASE_URL: "postgresql://edr:edr@postgres:5432/edr?sslmode=disable"
+      # --- Redis (lineage cache + burst tracker) ---
+      REDIS_ADDR: "redis:6379"
       # --- API ---
       API_PORT: "8080"
       JWT_PUBLIC_KEY_PATH: "/app/certs/jwt_public.pem"
@@ -109,7 +112,7 @@ services:
         VITE_CONNECTION_MANAGER_URL: ""
         VITE_WS_URL: ""
     ports:
-      - "8088:80"
+      - "30088:80"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -134,7 +137,7 @@ services:
       POSTGRES_PASSWORD: edr
       POSTGRES_DB: edr
     ports:
-      - "5433:5432"
+      - "6100:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./connection-manager/internal/database/migrations:/docker-entrypoint-initdb.d/01-connection-manager:ro
@@ -155,7 +158,7 @@ services:
     image: redis:7-alpine
     ports:
       - "6379:6379"
-    command: redis-server --appendonly yes
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
     volumes:
       - redis_data:/data
     healthcheck:
@@ -267,20 +270,20 @@ services:
   # ============================================================================
   # KAFKA UI — Debugging / Monitoring (optional)
   # ============================================================================
-  kafka-ui:
-    image: provectuslabs/kafka-ui:latest
-    depends_on:
-      kafka:
-        condition: service_healthy
-    environment:
-      KAFKA_CLUSTERS_0_NAME: edr-local
-      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
-      KAFKA_CLUSTERS_0_ZOOKEEPER: zookeeper:2181
-    ports:
-      - "8081:8080"
-    restart: unless-stopped
-    networks:
-      - edr-network
+  # kafka-ui:
+  #   image: provectuslabs/kafka-ui:latest
+  #   depends_on:
+  #     kafka:
+  #       condition: service_healthy
+  #   environment:
+  #     KAFKA_CLUSTERS_0_NAME: edr-local
+  #     KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+  #     KAFKA_CLUSTERS_0_ZOOKEEPER: zookeeper:2181
+  #   ports:
+  #     - "8081:8080"
+  #   restart: unless-stopped
+  #   networks:
+  #     - edr-network
 
 # ==============================================================================
 # VOLUMES

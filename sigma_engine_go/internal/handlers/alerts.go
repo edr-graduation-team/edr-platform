@@ -15,12 +15,35 @@ import (
 
 // AlertHandler handles alert management API endpoints.
 type AlertHandler struct {
-	repo database.AlertRepository
+	repo        database.AlertRepository
+	auditLogger *database.AuditLogger
 }
 
 // NewAlertHandler creates a new alert handler.
-func NewAlertHandler(repo database.AlertRepository) *AlertHandler {
-	return &AlertHandler{repo: repo}
+func NewAlertHandler(repo database.AlertRepository, auditLogger *database.AuditLogger) *AlertHandler {
+	return &AlertHandler{repo: repo, auditLogger: auditLogger}
+}
+
+// getAuditContext extracts common audit fields.
+func getAuditContext(r *http.Request) (string, string, string) {
+	ctx := r.Context()
+	userID := ""
+	username := "system"
+	ip := r.Header.Get("X-Forwarded-For")
+	if ip == "" {
+		ip = r.Header.Get("X-Real-IP")
+	}
+	if ip == "" {
+		ip = strings.Split(r.RemoteAddr, ":")[0]
+	}
+
+	if v, ok := ctx.Value("user_id").(string); ok {
+		userID = v
+	}
+	if v, ok := ctx.Value("username").(string); ok {
+		username = v
+	}
+	return userID, username, ip
 }
 
 // RegisterRoutes registers alert routes on the router.
@@ -56,6 +79,20 @@ type AlertResponse struct {
 	FalsePositiveRisk *float64               `json:"false_positive_risk,omitempty"`
 	CreatedAt         time.Time              `json:"created_at"`
 	UpdatedAt         time.Time              `json:"updated_at"`
+
+	// ── Context-Aware Risk Scoring (Phase 1) ─────────────────────────────────
+	// These fields are computed by RiskScorer and persisted as JSONB in the DB.
+	// They were previously omitted from this struct, causing an empty Context tab.
+	RiskScore       int                    `json:"risk_score"`
+	ContextSnapshot map[string]interface{} `json:"context_snapshot,omitempty"`
+	ScoreBreakdown  map[string]interface{} `json:"score_breakdown,omitempty"`
+
+	// ── Alert Aggregation metadata ───────────────────────────────────────────
+	MatchCount         *int     `json:"match_count,omitempty"`
+	RelatedRules       []string `json:"related_rules,omitempty"`
+	CombinedConfidence *float64 `json:"combined_confidence,omitempty"`
+	SeverityPromoted   *bool    `json:"severity_promoted,omitempty"`
+	OriginalSeverity   string   `json:"original_severity,omitempty"`
 }
 
 // AlertsListResponse is the API response for listing alerts.
@@ -211,6 +248,11 @@ func (h *AlertHandler) UpdateAlertStatus(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	if h.auditLogger != nil {
+		userID, username, ip := getAuditContext(r)
+		_ = h.auditLogger.Log(ctx, "update_alert_status", "Alert", alertID, username, userID, ip, "success", "Updated alert status to "+req.Status)
+	}
+
 	existing.Status = req.Status
 	existing.ResolutionNotes = req.Notes
 	writeJSON(w, http.StatusOK, toAlertResponse(existing))
@@ -233,6 +275,11 @@ func (h *AlertHandler) AcknowledgeAlert(w http.ResponseWriter, r *http.Request) 
 		logger.Errorf("Failed to acknowledge alert: %v", err)
 		writeError(w, http.StatusInternalServerError, "Failed to acknowledge alert")
 		return
+	}
+
+	if h.auditLogger != nil {
+		userID, username, ip := getAuditContext(r)
+		_ = h.auditLogger.Log(ctx, "acknowledge_alert", "Alert", alertID, username, userID, ip, "success", "Acknowledged alert")
 	}
 
 	existing.Status = "acknowledged"
@@ -258,10 +305,19 @@ func (h *AlertHandler) DeleteAlert(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if h.auditLogger != nil {
+		userID, username, ip := getAuditContext(r)
+		_ = h.auditLogger.Log(ctx, "delete_alert", "Alert", alertID, username, userID, ip, "success", "Deleted alert")
+	}
+
 	w.WriteHeader(http.StatusNoContent)
 }
 
 // toAlertResponse converts a database alert to API response.
+// IMPORTANT: All context-aware risk scoring fields MUST be mapped here.
+// Previously risk_score, context_snapshot, score_breakdown were stored in the
+// DB but silently dropped at this conversion step, causing the empty Context
+// tab on the dashboard. All fields are now forwarded.
 func toAlertResponse(alert *database.Alert) *AlertResponse {
 	return &AlertResponse{
 		ID:                alert.ID,
@@ -284,6 +340,16 @@ func toAlertResponse(alert *database.Alert) *AlertResponse {
 		FalsePositiveRisk: alert.FalsePositiveRisk,
 		CreatedAt:         alert.CreatedAt,
 		UpdatedAt:         alert.UpdatedAt,
+		// Context-Aware Risk Scoring — previously missing, causing empty Context tab
+		RiskScore:          alert.RiskScore,
+		ContextSnapshot:    alert.ContextSnapshot,
+		ScoreBreakdown:     alert.ScoreBreakdown,
+		// Aggregation metadata
+		MatchCount:         alert.MatchCount,
+		RelatedRules:       alert.RelatedRules,
+		CombinedConfidence: alert.CombinedConfidence,
+		SeverityPromoted:   alert.SeverityPromoted,
+		OriginalSeverity:   alert.OriginalSeverity,
 	}
 }
 
@@ -296,6 +362,7 @@ type BulkUpdateRequest struct {
 
 // BulkUpdateAlertStatus handles PATCH /api/v1/sigma/alerts/bulk/status
 func (h *AlertHandler) BulkUpdateAlertStatus(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
 	if h.repo == nil {
 		writeError(w, http.StatusServiceUnavailable, "Database unavailable")
 		return
@@ -327,10 +394,17 @@ func (h *AlertHandler) BulkUpdateAlertStatus(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	if err := h.repo.BulkUpdateStatus(r.Context(), ids, req.Status); err != nil {
+	if err := h.repo.BulkUpdateStatus(ctx, ids, req.Status); err != nil {
 		logger.Errorf("Failed to bulk update alert status: %v", err)
 		writeError(w, http.StatusInternalServerError, "Failed to bulk update alert status")
 		return
+	}
+
+	if h.auditLogger != nil {
+		userID, username, ip := getAuditContext(r)
+		for _, v := range ids {
+			_ = h.auditLogger.Log(ctx, "bulk_update_alert_status", "Alert", v, username, userID, ip, "success", "Bulk updated alert status to "+req.Status)
+		}
 	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{

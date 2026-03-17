@@ -99,17 +99,34 @@ type AgentListResponse struct {
 }
 
 // AgentSummary for list views.
+// NOTE: The dashboard renders agent details from the list API data,
+// so this DTO must include ALL fields the frontend needs.
 type AgentSummary struct {
-	ID              uuid.UUID  `json:"id"`
-	Hostname        string     `json:"hostname"`
-	Status          string     `json:"status"`
-	OSType          string     `json:"os_type"`
-	OSVersion       string     `json:"os_version"`
-	AgentVersion    string     `json:"agent_version"`
-	LastSeen        time.Time  `json:"last_seen"`
-	HealthScore     float64    `json:"health_score"`
-	EventsDelivered int64      `json:"events_delivered"`
-	CertExpiresAt   *time.Time `json:"cert_expires_at,omitempty"`
+	ID              uuid.UUID         `json:"id"`
+	Hostname        string            `json:"hostname"`
+	Status          string            `json:"status"`
+	OSType          string            `json:"os_type"`
+	OSVersion       string            `json:"os_version"`
+	AgentVersion    string            `json:"agent_version"`
+	LastSeen        time.Time         `json:"last_seen"`
+	HealthScore     float64           `json:"health_score"`
+	EventsDelivered int64             `json:"events_delivered"`
+	CertExpiresAt   *time.Time        `json:"cert_expires_at,omitempty"`
+	CPUCount        int               `json:"cpu_count"`
+	MemoryMB        int64             `json:"memory_mb"`
+	IPAddresses     []string          `json:"ip_addresses"`
+	IsIsolated      bool              `json:"is_isolated"`
+	EventsCollected int64             `json:"events_collected"`
+	EventsDropped   int64             `json:"events_dropped"`
+	CPUUsage        float64           `json:"cpu_usage"`
+	MemoryUsedMB    int64             `json:"memory_used_mb"`
+	QueueDepth      int               `json:"queue_depth"`
+	CurrentCertID   *uuid.UUID        `json:"current_cert_id,omitempty"`
+	InstalledDate   *time.Time        `json:"installed_date,omitempty"`
+	CreatedAt       time.Time         `json:"created_at"`
+	UpdatedAt       time.Time         `json:"updated_at"`
+	Tags            map[string]string `json:"tags,omitempty"`
+	Metadata        map[string]string `json:"metadata,omitempty"`
 }
 
 // AgentDetailResponse for single agent.
@@ -267,12 +284,15 @@ type AlertNoteRequest struct {
 
 // AlertStatsResponse for alert statistics.
 type AlertStatsResponse struct {
-	Total      int            `json:"total"`
-	Open       int            `json:"open"`
-	InProgress int            `json:"in_progress"`
-	Resolved   int            `json:"resolved"`
-	BySeverity map[string]int `json:"by_severity"`
-	Meta       ResponseMeta   `json:"meta"`
+	Total         int            `json:"total"`
+	Alerts24h     int            `json:"alerts_24h"`
+	AvgConfidence float64        `json:"avg_confidence"`
+	Open          int            `json:"open"`
+	InProgress    int            `json:"in_progress"`
+	Resolved      int            `json:"resolved"`
+	ByStatus      map[string]int `json:"by_status"`
+	BySeverity    map[string]int `json:"by_severity"`
+	Meta          ResponseMeta   `json:"meta"`
 }
 
 // ============================================================================
@@ -281,13 +301,15 @@ type AlertStatsResponse struct {
 
 // UserResponse for user data.
 type UserResponse struct {
-	ID        uuid.UUID `json:"id"`
-	Username  string    `json:"username"`
-	Email     string    `json:"email"`
-	FullName  string    `json:"full_name"`
-	Role      string    `json:"role"`
-	Status    string    `json:"status"`
-	LastLogin time.Time `json:"last_login,omitempty"`
+	ID        uuid.UUID  `json:"id"`
+	Username  string     `json:"username"`
+	Email     string     `json:"email"`
+	FullName  string     `json:"full_name"`
+	Role      string     `json:"role"`
+	Status    string     `json:"status"`
+	LastLogin *time.Time `json:"last_login,omitempty"`
+	CreatedAt time.Time  `json:"created_at"`
+	UpdatedAt time.Time  `json:"updated_at"`
 }
 
 // UserCreateRequest for creating user.
@@ -311,6 +333,39 @@ type UserUpdateRequest struct {
 type PasswordChangeRequest struct {
 	OldPassword string `json:"old_password" validate:"required"`
 	NewPassword string `json:"new_password" validate:"required,min=12"`
+}
+
+// ============================================================================
+// ROLE & PERMISSION MODELS
+// ============================================================================
+
+// RoleResponse for role data.
+type RoleResponse struct {
+	ID          uuid.UUID            `json:"id"`
+	Name        string               `json:"name"`
+	Description string               `json:"description"`
+	IsBuiltIn   bool                 `json:"is_built_in"`
+	Permissions []PermissionResponse `json:"permissions,omitempty"`
+}
+
+// RoleCreateRequest for creating a custom role.
+type RoleCreateRequest struct {
+	Name          string      `json:"name" validate:"required,min=2,max=50"`
+	Description   string      `json:"description"`
+	PermissionIDs []uuid.UUID `json:"permission_ids"`
+}
+
+// RoleUpdatePermissionsRequest for updating role permissions.
+type RoleUpdatePermissionsRequest struct {
+	PermissionIDs []uuid.UUID `json:"permission_ids" validate:"required"`
+}
+
+// PermissionResponse for permission data.
+type PermissionResponse struct {
+	ID          uuid.UUID `json:"id"`
+	Resource    string    `json:"resource"`
+	Action      string    `json:"action"`
+	Description string    `json:"description"`
 }
 
 // ============================================================================

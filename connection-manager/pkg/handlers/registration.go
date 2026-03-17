@@ -72,28 +72,47 @@ func (h *RegistrationHandler) RegisterAgent(ctx context.Context, req *edrv1.Agen
 		return nil, status.Error(codes.Unauthenticated, "installation token is expired or already used")
 	}
 
-	// 3. Check for duplicate registration by hostname
+	// 3. Check for existing registration by hostname.
+	//    NEW AGENT    → existingAgent == nil → fresh INSERT via UpsertByHostname.
+	//    RE-ENROLLMENT→ existingAgent != nil → UPDATE in place via UpsertByHostname
+	//                   (re-image, re-install, or agent corruption scenario).
 	existingAgent, err := h.agentRepo.GetByHostname(ctx, req.Hostname)
 	if err != nil && !errors.Is(err, repository.ErrNotFound) {
 		logger.WithError(err).Error("Failed to check for existing agent")
 		return nil, status.Error(codes.Internal, "failed to check agent registration")
 	}
-	if existingAgent != nil {
-		logger.Warn("Duplicate registration attempt for hostname")
-		return nil, status.Error(codes.AlreadyExists, "agent with this hostname is already registered")
+
+	isReEnrollment := existingAgent != nil
+	if isReEnrollment {
+		logger.WithFields(logrus.Fields{
+			"old_agent_id": existingAgent.ID.String(),
+			"hostname":     req.Hostname,
+		}).Warn("Re-enrollment detected for existing hostname — updating agent record in place")
 	}
 
-	// 4. Generate agent ID if not provided
+	// 4. Generate (or reuse) agent ID.
+	//    On re-enrollment we always mint a new UUID so the old ID is fully
+	//    invalidated server-side (heartbeats / streams with the stale UUID will
+	//    get Unauthenticated and the new agent will re-connect with the new ID).
 	agentUUID := uuid.New()
-	if req.AgentId != "" {
-		parsed, err := uuid.Parse(req.AgentId)
-		if err == nil {
+	if !isReEnrollment && req.AgentId != "" {
+		if parsed, err := uuid.Parse(req.AgentId); err == nil {
 			agentUUID = parsed
 		}
 	}
 
-	// 5. Create agent record in database (status: pending)
+	// 5. Build the agent model. For re-enrollments we carry over the old agent
+	//    UUID as metadata so the audit trail is preserved.
 	now := time.Now()
+	metadata := map[string]string{
+		"ip_addresses": joinStrings(req.IpAddresses),
+		"mac_address":  req.MacAddress,
+	}
+	if isReEnrollment {
+		metadata["previous_agent_id"] = existingAgent.ID.String()
+		metadata["re_enrolled_at"] = now.UTC().Format("2006-01-02T15:04:05Z")
+	}
+
 	agent := &models.Agent{
 		ID:            agentUUID,
 		Hostname:      req.Hostname,
@@ -106,53 +125,71 @@ func (h *RegistrationHandler) RegisterAgent(ctx context.Context, req *edrv1.Agen
 		InstalledDate: &now,
 		LastSeen:      now,
 		Tags:          req.Tags,
-		Metadata: map[string]string{
-			"ip_addresses": joinStrings(req.IpAddresses),
-			"mac_address":  req.MacAddress,
-		},
+		Metadata:      metadata,
 	}
 
-	if err := h.agentRepo.Create(ctx, agent); err != nil {
-		logger.WithError(err).Error("Failed to create agent record in database")
+	// 6. Upsert: single atomic INSERT … ON CONFLICT DO UPDATE.
+	//    Works for both first-time registrations and re-enrollments.
+	if err := h.agentRepo.UpsertByHostname(ctx, agent); err != nil {
+		logger.WithError(err).Error("Failed to upsert agent record")
 		return nil, status.Error(codes.Internal, "failed to register agent")
 	}
 
-	logger.WithFields(logrus.Fields{
+	logFields := logrus.Fields{
 		"agent_id":   agentUUID.String(),
 		"os_type":    req.OsType,
 		"os_version": req.OsVersion,
 		"cpu_count":  req.CpuCount,
 		"memory_mb":  req.MemoryMb,
-	}).Info("Agent record created in database")
+		"re_enroll":  isReEnrollment,
+	}
+	if isReEnrollment {
+		logFields["old_agent_id"] = existingAgent.ID.String()
+	}
+	logger.WithFields(logFields).Info("Agent upserted in database")
 
-	// 6. Store CSR for later admin approval
+	// 7. Retire old CSR (if any) then store the new one.
+	if isReEnrollment {
+		if oldCSR, err := h.csrRepo.GetByAgentID(ctx, existingAgent.ID); err == nil && oldCSR != nil {
+			if delErr := h.csrRepo.Delete(ctx, oldCSR.ID); delErr != nil {
+				logger.WithError(delErr).Warn("Failed to delete old CSR during re-enrollment (non-fatal)")
+			}
+		}
+	}
+
 	csr := &models.CSR{
 		ID:        uuid.New(),
 		AgentID:   agentUUID,
 		CSRData:   req.Csr,
 		CreatedAt: now,
-		ExpiresAt: now.Add(24 * time.Hour), // CSR valid for 24 hours
+		ExpiresAt: now.Add(24 * time.Hour),
 	}
-
 	if err := h.csrRepo.Create(ctx, csr); err != nil {
 		logger.WithError(err).Error("Failed to store CSR")
 		// Non-fatal — agent is registered, CSR can be resubmitted
 	}
 
-	// 7. Mark installation token as used
+	// 8. Mark installation token as used.
 	if err := h.tokenRepo.MarkUsed(ctx, token.ID, agentUUID); err != nil {
 		logger.WithError(err).Warn("Failed to mark installation token as used")
-		// Non-fatal — token might be reusable but agent is already registered
 	}
 
-	// 8. Notify dashboard of pending agent via Redis pub/sub (skip when Redis unavailable)
+	// 9. Notify dashboard via Redis pub/sub.
+	channel := "agents:pending"
+	if isReEnrollment {
+		channel = "agents:re-enrolled"
+	}
 	if h.redis != nil {
-		if err := h.redis.Publish(ctx, "agents:pending", agentUUID.String()); err != nil {
-			logger.WithError(err).Warn("Failed to notify dashboard of pending agent")
+		if err := h.redis.Publish(ctx, channel, agentUUID.String()); err != nil {
+			logger.WithError(err).Warn("Failed to notify dashboard (non-fatal)")
 		}
 	}
 
-	logger.Info("Agent registered successfully (pending approval)")
+	if isReEnrollment {
+		logger.WithField("agent_id", agentUUID.String()).Info("Agent re-enrolled successfully (pending approval)")
+	} else {
+		logger.Info("Agent registered successfully (pending approval)")
+	}
 
 	return &edrv1.AgentRegistrationResponse{
 		AgentId: agentUUID.String(),

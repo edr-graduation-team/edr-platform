@@ -28,6 +28,13 @@ type ServerConfig struct {
 	ReconnectDelay    time.Duration `yaml:"reconnect_delay"`
 	MaxReconnectDelay time.Duration `yaml:"max_reconnect_delay"`
 	HeartbeatInterval time.Duration `yaml:"heartbeat_interval"`
+
+	// TLSServerName overrides the hostname used for TLS certificate SAN validation.
+	// Use this when the server cert is issued for an internal service name
+	// (e.g. "edr-connection-manager") but the agent connects via a custom deployment
+	// domain (e.g. "edr.internal" or a raw IP). Leaving this empty uses the hostname
+	// from Server.Address as-is.
+	TLSServerName string `yaml:"tls_server_name"`
 }
 
 // AgentConfig defines agent behavior settings.
@@ -37,8 +44,8 @@ type AgentConfig struct {
 	BatchSize      int           `yaml:"batch_size"`
 	BatchInterval  time.Duration `yaml:"batch_interval"`
 	BufferSize     int           `yaml:"buffer_size"`
-	Compression    string        `yaml:"compression"`    // "snappy", "gzip", "none"
-	QueueDir       string        `yaml:"queue_dir"`     // Offline disk queue directory (WAL)
+	Compression    string        `yaml:"compression"`       // "snappy", "gzip", "none"
+	QueueDir       string        `yaml:"queue_dir"`         // Offline disk queue directory (WAL)
 	MaxQueueSizeMB int           `yaml:"max_queue_size_mb"` // Max disk queue size in MB
 }
 
@@ -124,6 +131,7 @@ func DefaultConfig() *Config {
 			ReconnectDelay:    1 * time.Second,
 			MaxReconnectDelay: 30 * time.Second,
 			HeartbeatInterval: 30 * time.Second,
+			TLSServerName:     "edr-connection-manager",
 		},
 		Agent: AgentConfig{
 			ID:             uuid.New().String(),

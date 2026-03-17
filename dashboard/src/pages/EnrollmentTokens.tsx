@@ -218,10 +218,10 @@ function isMaxedOut(token: EnrollmentToken): boolean {
 }
 
 function getStatusBadge(token: EnrollmentToken): { label: string; color: string; icon: typeof CheckCircle } {
-    if (!token.is_active) return { label: 'Revoked', color: 'badge-danger', icon: XCircle };
-    if (isExpired(token)) return { label: 'Expired', color: 'badge-warning', icon: Clock };
-    if (isMaxedOut(token)) return { label: 'Max Uses', color: 'badge-warning', icon: Hash };
-    return { label: 'Active', color: 'badge-success', icon: CheckCircle };
+    if (!token.is_active) return { label: 'Revoked', color: 'bg-rose-500/10 text-rose-500 border border-rose-500/20', icon: XCircle };
+    if (isExpired(token)) return { label: 'Expired', color: 'bg-orange-500/10 text-orange-500 border border-orange-500/20', icon: Clock };
+    if (isMaxedOut(token)) return { label: 'Max Uses', color: 'bg-yellow-500/10 text-yellow-500 border border-yellow-500/20', icon: Hash };
+    return { label: 'Active', color: 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/20', icon: CheckCircle };
 }
 
 // --------------------------------------------------------------------------
@@ -295,162 +295,173 @@ export default function EnrollmentTokens() {
     }
 
     return (
-        <div className="space-y-6">
-            {/* Header */}
-            <div className="flex items-center justify-between">
-                <div>
-                    <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Enrollment Tokens</h1>
-                    <p className="text-gray-500 mt-1">Manage tokens for agent zero-touch provisioning</p>
-                </div>
-                {canManage && (
-                    <button
-                        onClick={() => setShowGenerateModal(true)}
-                        className="btn btn-primary flex items-center gap-2"
-                    >
-                        <Plus className="w-4 h-4" />
-                        Generate Token
-                    </button>
-                )}
-            </div>
+        <div className="relative flex flex-col min-h-[calc(100vh-2rem)] lg:min-h-[calc(100vh-1rem)] h-full -mx-4 sm:-mx-6 lg:-mx-8 -my-4 sm:-my-6 lg:-my-8 p-4 sm:p-6 lg:p-8 bg-slate-50 dark:bg-gradient-to-br dark:from-slate-900 dark:via-[#0b1120] dark:to-slate-900 transition-colors overflow-hidden">
+            {/* Background ambient glow matching Alerts/Endpoints */}
+            <div className="absolute top-0 right-0 w-[500px] h-[500px] pointer-events-none mix-blend-screen" style={{ background: 'radial-gradient(circle, rgba(6,182,212,0.08) 0%, transparent 70%)' }} />
 
-            {/* Stats */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <div className="card">
-                    <div className="flex items-center gap-3">
-                        <div className="p-2 bg-green-100 dark:bg-green-900/30 rounded-lg">
-                            <Key className="w-5 h-5 text-green-600" />
-                        </div>
-                        <div>
-                            <p className="text-2xl font-bold text-gray-900 dark:text-white">{activeCount}</p>
-                            <p className="text-sm text-gray-500">Active Tokens</p>
-                        </div>
+            <div className="relative flex-1 flex flex-col min-h-0 space-y-4 lg:space-y-6 max-w-[1600px] mx-auto w-full">
+                {/* Header */}
+                <div className="flex items-center justify-between shrink-0">
+                    <div>
+                        <h1 className="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-gray-900 to-gray-600 dark:from-white dark:to-gray-300">
+                            Enrollment Tokens
+                        </h1>
+                        <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Manage tokens for agent zero-touch provisioning</p>
                     </div>
+                    {canManage && (
+                        <button
+                            onClick={() => setShowGenerateModal(true)}
+                            className="btn bg-cyan-600 hover:bg-cyan-700 text-white shadow-lg shadow-cyan-500/20 border-0 flex items-center gap-2"
+                        >
+                            <Plus className="w-4 h-4" />
+                            Generate Token
+                        </button>
+                    )}
                 </div>
-                <div className="card">
-                    <div className="flex items-center gap-3">
-                        <div className="p-2 bg-red-100 dark:bg-red-900/30 rounded-lg">
-                            <ShieldOff className="w-5 h-5 text-red-600" />
-                        </div>
-                        <div>
-                            <p className="text-2xl font-bold text-gray-900 dark:text-white">{revokedCount}</p>
-                            <p className="text-sm text-gray-500">Revoked</p>
-                        </div>
-                    </div>
-                </div>
-                <div className="card">
-                    <div className="flex items-center gap-3">
-                        <div className="p-2 bg-blue-100 dark:bg-blue-900/30 rounded-lg">
-                            <Hash className="w-5 h-5 text-blue-600" />
-                        </div>
-                        <div>
-                            <p className="text-2xl font-bold text-gray-900 dark:text-white">{totalUses}</p>
-                            <p className="text-sm text-gray-500">Total Enrollments</p>
-                        </div>
-                    </div>
-                </div>
-            </div>
 
-            {/* Tokens Table */}
-            <div className="card overflow-hidden p-0">
-                {isLoading ? (
-                    <div className="p-4">
-                        <SkeletonTable rows={5} columns={7} />
+                {/* Stats */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 shrink-0">
+                    <div className="relative bg-white/60 dark:bg-slate-900/40 backdrop-blur-md border border-slate-200/80 dark:border-slate-700/50 rounded-xl p-6 shadow-sm overflow-hidden group">
+                        <div className="absolute top-0 right-0 w-32 h-32 -mr-10 -mt-10 transition-opacity group-hover:opacity-100 opacity-50" style={{ background: 'radial-gradient(circle, rgba(16,185,129,0.1) 0%, transparent 70%)' }} />
+                        <div className="relative flex items-center gap-4">
+                            <div className="p-3 bg-emerald-500/10 dark:bg-emerald-500/20 rounded-xl border border-emerald-500/20 shrink-0 shadow-[0_0_15px_rgba(16,185,129,0.15)]">
+                                <Key className="w-6 h-6 text-emerald-600 dark:text-emerald-400" />
+                            </div>
+                            <div>
+                                <p className="text-3xl font-bold text-slate-900 dark:text-white">{activeCount}</p>
+                                <p className="text-sm font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider mt-1">Active Tokens</p>
+                            </div>
+                        </div>
                     </div>
-                ) : tokens.length === 0 ? (
-                    <div className="text-center py-12">
-                        <Key className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-                        <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">
-                            No Enrollment Tokens
-                        </h3>
-                        <p className="text-gray-500 mb-4">
-                            Generate a token to start enrolling agents automatically.
-                        </p>
-                        {canManage && (
-                            <button
-                                onClick={() => setShowGenerateModal(true)}
-                                className="btn btn-primary"
-                            >
-                                Generate First Token
-                            </button>
-                        )}
+                    
+                    <div className="relative bg-white/60 dark:bg-slate-900/40 backdrop-blur-md border border-slate-200/80 dark:border-slate-700/50 rounded-xl p-6 shadow-sm overflow-hidden group">
+                        <div className="absolute top-0 right-0 w-32 h-32 -mr-10 -mt-10 transition-opacity group-hover:opacity-100 opacity-50" style={{ background: 'radial-gradient(circle, rgba(244,63,94,0.1) 0%, transparent 70%)' }} />
+                        <div className="relative flex items-center gap-4">
+                            <div className="p-3 bg-rose-500/10 dark:bg-rose-500/20 rounded-xl border border-rose-500/20 shrink-0 shadow-[0_0_15px_rgba(244,63,94,0.15)]">
+                                <ShieldOff className="w-6 h-6 text-rose-600 dark:text-rose-400" />
+                            </div>
+                            <div>
+                                <p className="text-3xl font-bold text-slate-900 dark:text-white">{revokedCount}</p>
+                                <p className="text-sm font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider mt-1">Revoked</p>
+                            </div>
+                        </div>
                     </div>
-                ) : (
-                    <div className="overflow-x-auto">
-                        <table className="table">
-                            <thead className="bg-gray-50 dark:bg-gray-800">
-                                <tr>
-                                    <th>Status</th>
-                                    <th>Description</th>
-                                    <th>Token</th>
-                                    <th>Uses</th>
-                                    <th>Created</th>
-                                    <th>Expires</th>
-                                    <th>Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+                    
+                    <div className="relative bg-white/60 dark:bg-slate-900/40 backdrop-blur-md border border-slate-200/80 dark:border-slate-700/50 rounded-xl p-6 shadow-sm overflow-hidden group">
+                        <div className="absolute top-0 right-0 w-32 h-32 -mr-10 -mt-10 transition-opacity group-hover:opacity-100 opacity-50" style={{ background: 'radial-gradient(circle, rgba(6,182,212,0.1) 0%, transparent 70%)' }} />
+                        <div className="relative flex items-center gap-4">
+                            <div className="p-3 bg-cyan-500/10 dark:bg-cyan-500/20 rounded-xl border border-cyan-500/20 shrink-0 shadow-[0_0_15px_rgba(6,182,212,0.15)]">
+                                <Hash className="w-6 h-6 text-cyan-600 dark:text-cyan-400" />
+                            </div>
+                            <div>
+                                <p className="text-3xl font-bold text-slate-900 dark:text-white">{totalUses}</p>
+                                <p className="text-sm font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider mt-1">Total Enrollments</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                {/* Tokens Table */}
+                <div className="relative flex-1 flex flex-col min-h-0 bg-white dark:bg-slate-800/70 rounded-2xl border border-slate-200 dark:border-slate-700/60 shadow-sm overflow-hidden">
+                    {isLoading ? (
+                        <div className="p-4">
+                            <SkeletonTable rows={5} columns={7} />
+                        </div>
+                    ) : tokens.length === 0 ? (
+                        <div className="text-center py-12 flex-1 flex flex-col justify-center items-center">
+                            <Key className="w-12 h-12 text-slate-400 mx-auto mb-4 opacity-50" />
+                            <h3 className="text-lg font-medium text-slate-900 dark:text-white mb-2">
+                                No Enrollment Tokens
+                            </h3>
+                            <p className="text-slate-500 mb-6">
+                                Generate a token to start enrolling agents automatically.
+                            </p>
+                            {canManage && (
+                                <button
+                                    onClick={() => setShowGenerateModal(true)}
+                                    className="btn bg-cyan-600 hover:bg-cyan-700 text-white shadow-lg shadow-cyan-500/20 border-0"
+                                >
+                                    Generate First Token
+                                </button>
+                            )}
+                        </div>
+                    ) : (
+                        <div className="flex-1 overflow-auto custom-scrollbar">
+                            <table className="w-full text-left border-collapse">
+                                <thead className="sticky top-0 z-10 bg-slate-100 dark:bg-slate-800 border-b-2 border-slate-200 dark:border-slate-700/80">
+                                    <tr>
+                                        <th className="py-3 px-4 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Status</th>
+                                        <th className="py-3 px-4 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Description</th>
+                                        <th className="py-3 px-4 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Token</th>
+                                        <th className="py-3 px-4 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Uses</th>
+                                        <th className="py-3 px-4 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Created</th>
+                                        <th className="py-3 px-4 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Expires</th>
+                                        <th className="py-3 px-4 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider text-right">Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
                                 {tokens.map((token) => {
                                     const status = getStatusBadge(token);
                                     const StatusIcon = status.icon;
 
                                     return (
-                                        <tr key={token.id} className="hover:bg-gray-50 dark:hover:bg-gray-800">
-                                            <td>
-                                                <span className={`badge ${status.color} flex items-center gap-1 w-fit`}>
-                                                    <StatusIcon className="w-3 h-3" />
+                                        <tr key={token.id} className="border-b border-slate-100 dark:border-slate-800/60 hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors group">
+                                            <td className="py-4 px-4">
+                                                <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-bold tracking-wide uppercase shadow-sm ${status.color}`}>
+                                                    <StatusIcon className="w-3.5 h-3.5" />
                                                     {status.label}
                                                 </span>
                                             </td>
-                                            <td>
-                                                <p className="font-medium text-gray-900 dark:text-white text-sm">
+                                            <td className="py-4 px-4">
+                                                <p className="font-semibold text-slate-900 dark:text-slate-200 text-sm">
                                                     {token.description || 'No description'}
                                                 </p>
-                                                <p className="text-xs text-gray-500">by {token.created_by}</p>
+                                                <p className="text-xs text-slate-500 font-medium mt-0.5">by {token.created_by}</p>
                                             </td>
-                                            <td>
-                                                <code className="text-xs font-mono text-gray-600 dark:text-gray-400">
+                                            <td className="py-4 px-4">
+                                                <code className="px-2 py-1 text-[11px] font-mono bg-slate-100 dark:bg-slate-900 text-slate-600 dark:text-slate-300 rounded border border-slate-200 dark:border-slate-700 select-all">
                                                     {token.token.slice(0, 16)}...
                                                 </code>
                                             </td>
-                                            <td>
-                                                <span className="text-sm text-gray-900 dark:text-white">
+                                            <td className="py-4 px-4">
+                                                <span className="text-sm font-semibold text-slate-900 dark:text-slate-200">
                                                     {token.use_count}
                                                     {token.max_uses !== null && (
-                                                        <span className="text-gray-500"> / {token.max_uses}</span>
+                                                        <span className="text-slate-500 font-normal"> / {token.max_uses}</span>
                                                     )}
                                                 </span>
                                             </td>
-                                            <td>
-                                                <div className="text-sm text-gray-900 dark:text-white">
+                                            <td className="py-4 px-4">
+                                                <div className="text-sm font-medium text-slate-900 dark:text-slate-200">
                                                     {new Date(token.created_at).toLocaleDateString()}
                                                 </div>
-                                                <div className="text-xs text-gray-500">
+                                                <div className="text-xs text-slate-500 mt-0.5">
                                                     {new Date(token.created_at).toLocaleTimeString()}
                                                 </div>
                                             </td>
-                                            <td>
+                                            <td className="py-4 px-4">
                                                 {token.expires_at ? (
                                                     <div>
-                                                        <div className={`text-sm ${isExpired(token) ? 'text-red-600' : 'text-gray-900 dark:text-white'}`}>
+                                                        <div className={`text-sm font-medium ${isExpired(token) ? 'text-rose-600 dark:text-rose-400' : 'text-slate-900 dark:text-slate-200'}`}>
                                                             {new Date(token.expires_at).toLocaleDateString()}
                                                         </div>
-                                                        <div className="text-xs text-gray-500">
+                                                        <div className="text-xs text-slate-500 mt-0.5">
                                                             {new Date(token.expires_at).toLocaleTimeString()}
                                                         </div>
                                                     </div>
                                                 ) : (
-                                                    <span className="text-sm text-gray-500">Never</span>
+                                                    <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold tracking-wide uppercase bg-slate-100 dark:bg-slate-800 text-slate-500 border border-slate-200 dark:border-slate-700">Never</span>
                                                 )}
                                             </td>
-                                            <td>
-                                                <div className="flex items-center gap-1">
+                                            <td className="py-4 px-4 text-right">
+                                                <div className="flex items-center justify-end gap-1">
                                                     <button
                                                         onClick={() => handleCopyToken(token.token, token.id)}
-                                                        className="p-1.5 text-gray-500 hover:text-primary-600 hover:bg-gray-100 dark:hover:bg-gray-700 rounded"
+                                                        className="p-1.5 text-slate-400 hover:text-cyan-500 hover:bg-cyan-50 dark:hover:bg-cyan-500/10 rounded transition-colors"
                                                         title="Copy Token"
                                                     >
                                                         {copiedId === token.id ? (
-                                                            <CheckCircle className="w-4 h-4 text-green-600" />
+                                                            <CheckCircle className="w-4 h-4 text-emerald-500" />
                                                         ) : (
                                                             <Copy className="w-4 h-4" />
                                                         )}
@@ -459,7 +470,7 @@ export default function EnrollmentTokens() {
                                                         <button
                                                             onClick={() => handleRevoke(token.id)}
                                                             disabled={revokeMutation.isPending}
-                                                            className="p-1.5 text-gray-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded disabled:opacity-50"
+                                                            className="p-1.5 text-slate-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-500/10 rounded transition-colors disabled:opacity-50"
                                                             title="Revoke Token"
                                                         >
                                                             <ShieldOff className="w-4 h-4" />
@@ -475,15 +486,15 @@ export default function EnrollmentTokens() {
                     </div>
                 )}
 
-                {/* Footer */}
+                {/* Footer Strip */}
                 {tokens.length > 0 && (
-                    <div className="px-4 py-3 bg-gray-50 dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 text-sm text-gray-500">
-                        Showing {tokens.length} tokens
+                    <div className="shrink-0 px-4 py-3 bg-slate-50/50 dark:bg-slate-900/40 border-t border-slate-200 dark:border-slate-800/60 text-sm text-slate-500 flex justify-between items-center">
+                        <span>Showing {tokens.length} provisioning tokens</span>
                     </div>
                 )}
             </div>
 
-            {/* Modals */}
+            {/* Generate Token Modal */}
             <GenerateTokenModal
                 isOpen={showGenerateModal}
                 onClose={() => setShowGenerateModal(false)}
@@ -494,6 +505,7 @@ export default function EnrollmentTokens() {
                 isOpen={!!createdToken}
                 onClose={() => setCreatedToken(null)}
             />
+        </div>
         </div>
     );
 }

@@ -50,6 +50,16 @@ type AgentRepository interface {
 	// MarkStaleOffline marks agents as offline if their last_seen timestamp is older than the threshold.
 	// Returns the number of agents that were marked offline.
 	MarkStaleOffline(ctx context.Context, threshold time.Duration) (int64, error)
+
+	// SetIsolation updates the is_isolated flag on an agent.
+	SetIsolation(ctx context.Context, id uuid.UUID, isolated bool) error
+
+	// UpsertByHostname performs an INSERT ... ON CONFLICT (hostname) DO UPDATE,
+	// atomically creating or replacing the agent record for the given hostname.
+	// On collision (re-install / re-image scenario), the old agent ID is replaced
+	// by the new one in a single statement, preserving DB integrity without a
+	// manual delete step. Returns the final agent as stored.
+	UpsertByHostname(ctx context.Context, agent *models.Agent) error
 }
 
 // AgentFilter defines filters for listing agents.
@@ -193,6 +203,31 @@ type UserFilter struct {
 	Search *string
 	Limit  int
 	Offset int
+}
+
+// RoleRepository defines the interface for role and permission data access.
+type RoleRepository interface {
+	// ListRoles retrieves all roles with their permissions.
+	ListRoles(ctx context.Context) ([]*models.Role, error)
+
+	// GetRoleByName retrieves a single role by name, including permissions.
+	GetRoleByName(ctx context.Context, name string) (*models.Role, error)
+
+	// CreateRole creates a new custom role.
+	CreateRole(ctx context.Context, role *models.Role) error
+
+	// UpdateRolePermissions replaces the permission set for a role.
+	UpdateRolePermissions(ctx context.Context, roleID uuid.UUID, permissionIDs []uuid.UUID) error
+
+	// DeleteRole deletes a custom role (built-in roles cannot be deleted).
+	DeleteRole(ctx context.Context, id uuid.UUID) error
+
+	// ListPermissions retrieves all available permissions.
+	ListPermissions(ctx context.Context) ([]*models.Permission, error)
+
+	// GetPermissionsForRoleName retrieves the permission keys for a role name.
+	// Returns slice of "resource:action" strings.
+	GetPermissionsForRoleName(ctx context.Context, roleName string) ([]string, error)
 }
 
 // AuditLogRepository defines the interface for audit log data access.

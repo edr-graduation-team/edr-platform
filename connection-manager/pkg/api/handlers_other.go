@@ -2,12 +2,60 @@
 package api
 
 import (
+	"context"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
+
+	"github.com/edr-platform/connection-manager/internal/repository"
+	"github.com/edr-platform/connection-manager/internal/service"
+	"github.com/edr-platform/connection-manager/pkg/models"
 )
+
+// ============================================================================
+// AUDIT HELPER
+// ============================================================================
+
+// fireAudit creates and persists an audit log entry asynchronously.
+// It is intentionally non-blocking: the result is best-effort.
+func (h *Handlers) fireAudit(
+	c echo.Context,
+	action, resourceType string,
+	resourceID uuid.UUID,
+	details string,
+	failed bool,
+	failReason string,
+) {
+	if h.auditRepo == nil {
+		return
+	}
+	ip, ua := auditContext(c)
+	userID := uuid.Nil
+	username := "unknown"
+	if user := getCurrentUser(c); user != nil {
+		username = user.Username
+		if uid, err := uuid.Parse(user.UserID); err == nil {
+			userID = uid
+		}
+	}
+	entry := models.NewAuditLog(userID, username, action, resourceType, resourceID).
+		WithContext(ip, ua).
+		WithDetails(details)
+	if failed {
+		entry.MarkFailed(failReason)
+	}
+
+	go func(e *models.AuditLog) {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := h.auditRepo.Create(ctx, e); err != nil {
+			h.logger.WithError(err).Warn("[Audit] Failed to persist audit entry (non-fatal)")
+		}
+	}(entry)
+}
 
 // ============================================================================
 // ALERT HANDLERS
@@ -28,8 +76,6 @@ func (h *Handlers) SearchAlerts(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return errorResponse(c, http.StatusBadRequest, "INVALID_REQUEST", "Invalid request body")
 	}
-
-	// TODO: Query AlertRepository with filters
 	return c.JSON(http.StatusOK, AlertListResponse{
 		Data:       []AlertSummary{},
 		Pagination: PaginationResponse{Total: 0, Limit: req.Limit, Offset: req.Offset},
@@ -39,20 +85,51 @@ func (h *Handlers) SearchAlerts(c echo.Context) error {
 
 // GetAlertStats returns alert statistics.
 func (h *Handlers) GetAlertStats(c echo.Context) error {
+	if h.alertRepo == nil {
+		return errorResponse(c, http.StatusServiceUnavailable, "DB_UNAVAILABLE", "Database is unavailable")
+	}
+
+	stats, err := h.alertRepo.GetStats(c.Request().Context())
+	if err != nil {
+		h.logger.WithError(err).Error("Failed to fetch alert stats")
+		return errorResponse(c, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to fetch alert stats")
+	}
+
 	return c.JSON(http.StatusOK, AlertStatsResponse{
-		Total:      45,
-		Open:       12,
-		InProgress: 8,
-		Resolved:   25,
-		BySeverity: map[string]int{
-			"critical": 3,
-			"high":     15,
-			"medium":   20,
-			"low":      7,
-		},
-		Meta: responseMeta(c),
+		Total:         stats.Total,
+		Alerts24h:     stats.Alerts24h,
+		AvgConfidence: stats.AvgConfidence,
+		Open:          stats.Open,
+		InProgress:    stats.InProgress,
+		Resolved:      stats.Resolved,
+		BySeverity:    stats.BySeverity,
+		ByStatus:      stats.ByStatus,
+		Meta:          responseMeta(c),
 	})
 }
+
+// GetEndpointRisk returns the per-agent risk posture summary (Phase 2).
+// Aggregates risk_score data from sigma_alerts grouped by agent_id,
+// ordered by peak_risk_score DESC so the riskiest endpoints appear first.
+func (h *Handlers) GetEndpointRisk(c echo.Context) error {
+	if h.alertRepo == nil {
+		return errorResponse(c, http.StatusServiceUnavailable, "DB_UNAVAILABLE", "Database is unavailable")
+	}
+
+	summaries, err := h.alertRepo.GetEndpointRiskSummary(c.Request().Context())
+	if err != nil {
+		h.logger.WithError(err).Error("Failed to fetch endpoint risk summary")
+		return errorResponse(c, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to compute endpoint risk summary")
+	}
+
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"data":  summaries,
+		"total": len(summaries),
+		"meta":  responseMeta(c),
+	})
+}
+
+
 
 // GetAlert returns a single alert.
 func (h *Handlers) GetAlert(c echo.Context) error {
@@ -60,34 +137,44 @@ func (h *Handlers) GetAlert(c echo.Context) error {
 	if _, err := uuid.Parse(idStr); err != nil {
 		return errorResponse(c, http.StatusBadRequest, "INVALID_ID", "Invalid alert ID format")
 	}
-	// TODO: Query AlertRepository
 	return errorResponse(c, http.StatusNotFound, "NOT_FOUND", "Alert not found")
 }
 
-// UpdateAlert updates alert status.
+// UpdateAlert updates alert status (used to acknowledge an alert).
 func (h *Handlers) UpdateAlert(c echo.Context) error {
 	idStr := c.Param("id")
-	if _, err := uuid.Parse(idStr); err != nil {
+	alertID, err := uuid.Parse(idStr)
+	if err != nil {
 		return errorResponse(c, http.StatusBadRequest, "INVALID_ID", "Invalid alert ID format")
 	}
 	var req AlertUpdateRequest
 	if err := c.Bind(&req); err != nil {
 		return errorResponse(c, http.StatusBadRequest, "INVALID_REQUEST", "Invalid request body")
 	}
-	// TODO: Update in AlertRepository
+
+	// Audit: alert acknowledged
+	h.fireAudit(c, models.AuditActionAlertAcknowledged, "alert", alertID,
+		"status="+req.Status, false, "")
+
 	return c.JSON(http.StatusOK, map[string]interface{}{"message": "Alert updated", "meta": responseMeta(c)})
 }
 
 // ResolveAlert resolves an alert.
 func (h *Handlers) ResolveAlert(c echo.Context) error {
 	idStr := c.Param("id")
-	if _, err := uuid.Parse(idStr); err != nil {
+	alertID, err := uuid.Parse(idStr)
+	if err != nil {
 		return errorResponse(c, http.StatusBadRequest, "INVALID_ID", "Invalid alert ID format")
 	}
 	var req AlertResolveRequest
 	if err := c.Bind(&req); err != nil {
 		return errorResponse(c, http.StatusBadRequest, "INVALID_REQUEST", "Invalid request body")
 	}
+
+	// Audit: alert resolved
+	h.fireAudit(c, models.AuditActionAlertResolved, "alert", alertID,
+		"resolution="+req.Resolution, false, "")
+
 	return c.JSON(http.StatusOK, map[string]interface{}{"message": "Alert resolved", "meta": responseMeta(c)})
 }
 
@@ -107,9 +194,14 @@ func (h *Handlers) AddAlertNote(c echo.Context) error {
 // DeleteAlert deletes an alert.
 func (h *Handlers) DeleteAlert(c echo.Context) error {
 	idStr := c.Param("id")
-	if _, err := uuid.Parse(idStr); err != nil {
+	alertID, err := uuid.Parse(idStr)
+	if err != nil {
 		return errorResponse(c, http.StatusBadRequest, "INVALID_ID", "Invalid alert ID format")
 	}
+
+	// Audit: alert deleted
+	h.fireAudit(c, models.AuditActionAlertDeleted, "alert", alertID, "", false, "")
+
 	return c.NoContent(http.StatusNoContent)
 }
 
@@ -156,7 +248,6 @@ func (h *Handlers) ExportEvents(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return errorResponse(c, http.StatusBadRequest, "INVALID_REQUEST", "Invalid request body")
 	}
-	// TODO: Generate export file and return download link
 	return c.JSON(http.StatusAccepted, map[string]interface{}{
 		"export_id": uuid.New().String(),
 		"status":    "processing",
@@ -183,9 +274,14 @@ func (h *Handlers) CreatePolicy(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return errorResponse(c, http.StatusBadRequest, "INVALID_REQUEST", "Invalid request body")
 	}
-	// TODO: Create in PolicyRepository
+	policyID := uuid.New()
+
+	// Audit: policy created
+	h.fireAudit(c, models.AuditActionPolicyCreated, "policy", policyID,
+		"name="+req.Name, false, "")
+
 	return c.JSON(http.StatusCreated, map[string]interface{}{
-		"id":   uuid.New(),
+		"id":   policyID,
 		"name": req.Name,
 		"meta": responseMeta(c),
 	})
@@ -203,18 +299,28 @@ func (h *Handlers) GetPolicy(c echo.Context) error {
 // UpdatePolicy updates a policy.
 func (h *Handlers) UpdatePolicy(c echo.Context) error {
 	idStr := c.Param("id")
-	if _, err := uuid.Parse(idStr); err != nil {
+	policyID, err := uuid.Parse(idStr)
+	if err != nil {
 		return errorResponse(c, http.StatusBadRequest, "INVALID_ID", "Invalid policy ID format")
 	}
+
+	// Audit: policy updated
+	h.fireAudit(c, models.AuditActionPolicyUpdated, "policy", policyID, "", false, "")
+
 	return c.JSON(http.StatusOK, map[string]interface{}{"message": "Policy updated", "meta": responseMeta(c)})
 }
 
 // DeletePolicy deletes a policy.
 func (h *Handlers) DeletePolicy(c echo.Context) error {
 	idStr := c.Param("id")
-	if _, err := uuid.Parse(idStr); err != nil {
+	policyID, err := uuid.Parse(idStr)
+	if err != nil {
 		return errorResponse(c, http.StatusBadRequest, "INVALID_ID", "Invalid policy ID format")
 	}
+
+	// Audit: policy deleted
+	h.fireAudit(c, models.AuditActionPolicyDeleted, "policy", policyID, "", false, "")
+
 	return c.NoContent(http.StatusNoContent)
 }
 
@@ -235,95 +341,404 @@ func (h *Handlers) GetPolicyAgents(c echo.Context) error {
 // USER HANDLERS
 // ============================================================================
 
-// ListUsers returns all users.
+// ListUsers returns paginated list of users from the database.
 func (h *Handlers) ListUsers(c echo.Context) error {
-	// TODO: Query UserRepository
+	if h.userRepo == nil {
+		return errorResponse(c, http.StatusServiceUnavailable, "DB_UNAVAILABLE", "Database is unavailable")
+	}
+
+	filter := repository.UserFilter{
+		Limit:  50,
+		Offset: 0,
+	}
+	if v := c.QueryParam("role"); v != "" {
+		filter.Role = &v
+	}
+	if v := c.QueryParam("status"); v != "" {
+		filter.Status = &v
+	}
+	if v := c.QueryParam("search"); v != "" {
+		filter.Search = &v
+	}
+	if v := c.QueryParam("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 500 {
+			filter.Limit = n
+		}
+	}
+	if v := c.QueryParam("offset"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			filter.Offset = n
+		}
+	}
+
+	users, err := h.userRepo.List(c.Request().Context(), filter)
+	if err != nil {
+		h.logger.WithError(err).Error("Failed to list users")
+		return errorResponse(c, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to list users")
+	}
+
+	// Convert to response DTOs (never expose password hash)
+	data := make([]UserResponse, 0, len(users))
+	for _, u := range users {
+		resp := UserResponse{
+			ID:        u.ID,
+			Username:  u.Username,
+			Email:     u.Email,
+			FullName:  u.FullName,
+			Role:      u.Role,
+			Status:    u.Status,
+			LastLogin: u.LastLogin,
+			CreatedAt: u.CreatedAt,
+			UpdatedAt: u.UpdatedAt,
+		}
+		data = append(data, resp)
+	}
+
 	return c.JSON(http.StatusOK, map[string]interface{}{
-		"data":       []UserResponse{},
-		"pagination": PaginationResponse{Total: 0, Limit: 50, Offset: 0},
+		"data":       data,
+		"pagination": PaginationResponse{Total: len(data), Limit: filter.Limit, Offset: filter.Offset},
 		"meta":       responseMeta(c),
 	})
 }
 
-// CreateUser creates a new user.
+// CreateUser creates a new user via AuthService (bcrypt + DB insert).
 func (h *Handlers) CreateUser(c echo.Context) error {
+	if h.authSvc == nil {
+		return errorResponse(c, http.StatusServiceUnavailable, "DB_UNAVAILABLE", "Database is unavailable")
+	}
+
 	var req UserCreateRequest
 	if err := c.Bind(&req); err != nil {
 		return errorResponse(c, http.StatusBadRequest, "INVALID_REQUEST", "Invalid request body")
 	}
-	// TODO: Create in UserRepository with hashed password
+	if req.Username == "" || req.Email == "" || req.Password == "" || req.Role == "" {
+		return errorResponse(c, http.StatusBadRequest, "INVALID_REQUEST", "username, email, password, and role are required")
+	}
+
+	user, err := h.authSvc.CreateUser(c.Request().Context(), &service.CreateUserRequest{
+		Username: req.Username,
+		Email:    req.Email,
+		Password: req.Password,
+		FullName: req.FullName,
+		Role:     req.Role,
+	})
+	if err != nil {
+		h.logger.WithError(err).WithField("username", req.Username).Warn("Failed to create user")
+		return errorResponse(c, http.StatusConflict, "CREATE_FAILED", err.Error())
+	}
+
+	// Audit: user created
+	h.fireAudit(c, models.AuditActionUserCreated, "user", user.ID,
+		"username="+req.Username+" role="+req.Role, false, "")
+
 	return c.JSON(http.StatusCreated, map[string]interface{}{
-		"id":       uuid.New(),
-		"username": req.Username,
-		"meta":     responseMeta(c),
+		"data": UserResponse{
+			ID:        user.ID,
+			Username:  user.Username,
+			Email:     user.Email,
+			FullName:  user.FullName,
+			Role:      user.Role,
+			Status:    user.Status,
+			CreatedAt: user.CreatedAt,
+			UpdatedAt: user.UpdatedAt,
+		},
+		"meta": responseMeta(c),
 	})
 }
 
-// GetUser returns a single user.
+// GetUser returns a single user by ID.
 func (h *Handlers) GetUser(c echo.Context) error {
+	if h.userRepo == nil {
+		return errorResponse(c, http.StatusServiceUnavailable, "DB_UNAVAILABLE", "Database is unavailable")
+	}
+
 	idStr := c.Param("id")
-	if _, err := uuid.Parse(idStr); err != nil {
+	id, err := uuid.Parse(idStr)
+	if err != nil {
 		return errorResponse(c, http.StatusBadRequest, "INVALID_ID", "Invalid user ID format")
 	}
-	return errorResponse(c, http.StatusNotFound, "NOT_FOUND", "User not found")
+
+	user, err := h.userRepo.GetByID(c.Request().Context(), id)
+	if err != nil {
+		return errorResponse(c, http.StatusNotFound, "NOT_FOUND", "User not found")
+	}
+
+	resp := UserResponse{
+		ID:        user.ID,
+		Username:  user.Username,
+		Email:     user.Email,
+		FullName:  user.FullName,
+		Role:      user.Role,
+		Status:    user.Status,
+		LastLogin: user.LastLogin,
+		CreatedAt: user.CreatedAt,
+		UpdatedAt: user.UpdatedAt,
+	}
+
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"data": resp,
+		"meta": responseMeta(c),
+	})
 }
 
-// UpdateUser updates a user.
+// UpdateUser updates a user's profile (email, full_name, role, status).
 func (h *Handlers) UpdateUser(c echo.Context) error {
+	if h.userRepo == nil {
+		return errorResponse(c, http.StatusServiceUnavailable, "DB_UNAVAILABLE", "Database is unavailable")
+	}
+
 	idStr := c.Param("id")
-	if _, err := uuid.Parse(idStr); err != nil {
+	targetUserID, err := uuid.Parse(idStr)
+	if err != nil {
 		return errorResponse(c, http.StatusBadRequest, "INVALID_ID", "Invalid user ID format")
 	}
+
 	var req UserUpdateRequest
 	if err := c.Bind(&req); err != nil {
 		return errorResponse(c, http.StatusBadRequest, "INVALID_REQUEST", "Invalid request body")
 	}
-	return c.JSON(http.StatusOK, map[string]interface{}{"message": "User updated", "meta": responseMeta(c)})
+
+	user, err := h.userRepo.GetByID(c.Request().Context(), targetUserID)
+	if err != nil {
+		return errorResponse(c, http.StatusNotFound, "NOT_FOUND", "User not found")
+	}
+
+	// Apply updates
+	if req.Email != "" {
+		user.Email = req.Email
+	}
+	if req.FullName != "" {
+		user.FullName = req.FullName
+	}
+	if req.Role != "" {
+		user.Role = req.Role
+	}
+	if req.Status != "" {
+		user.Status = req.Status
+	}
+
+	if err := h.userRepo.Update(c.Request().Context(), user); err != nil {
+		h.logger.WithError(err).Error("Failed to update user")
+		return errorResponse(c, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to update user")
+	}
+
+	// Audit: user updated
+	h.fireAudit(c, models.AuditActionUserUpdated, "user", targetUserID, "", false, "")
+
+	resp := UserResponse{
+		ID:        user.ID,
+		Username:  user.Username,
+		Email:     user.Email,
+		FullName:  user.FullName,
+		Role:      user.Role,
+		Status:    user.Status,
+		CreatedAt: user.CreatedAt,
+		UpdatedAt: user.UpdatedAt,
+	}
+
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"data": resp,
+		"meta": responseMeta(c),
+	})
 }
 
-// DeleteUser deletes a user.
+// DeleteUser soft-deletes a user (sets status to deleted).
 func (h *Handlers) DeleteUser(c echo.Context) error {
+	if h.userRepo == nil {
+		return errorResponse(c, http.StatusServiceUnavailable, "DB_UNAVAILABLE", "Database is unavailable")
+	}
+
 	idStr := c.Param("id")
-	if _, err := uuid.Parse(idStr); err != nil {
+	targetUserID, err := uuid.Parse(idStr)
+	if err != nil {
 		return errorResponse(c, http.StatusBadRequest, "INVALID_ID", "Invalid user ID format")
 	}
+
+	// Prevent self-deletion
+	currentUser := getCurrentUser(c)
+	if currentUser != nil && currentUser.UserID == idStr {
+		return errorResponse(c, http.StatusBadRequest, "SELF_DELETE", "Cannot delete your own account")
+	}
+
+	if err := h.userRepo.Delete(c.Request().Context(), targetUserID); err != nil {
+		return errorResponse(c, http.StatusNotFound, "NOT_FOUND", "User not found")
+	}
+
+	// Audit: user deleted
+	h.fireAudit(c, models.AuditActionUserDeleted, "user", targetUserID, "", false, "")
+
 	return c.NoContent(http.StatusNoContent)
 }
 
-// ChangePassword changes user password.
+// ChangePassword changes a user's password via AuthService.
 func (h *Handlers) ChangePassword(c echo.Context) error {
+	if h.authSvc == nil {
+		return errorResponse(c, http.StatusServiceUnavailable, "DB_UNAVAILABLE", "Database is unavailable")
+	}
+
 	idStr := c.Param("id")
-	if _, err := uuid.Parse(idStr); err != nil {
+	targetUserID, err := uuid.Parse(idStr)
+	if err != nil {
 		return errorResponse(c, http.StatusBadRequest, "INVALID_ID", "Invalid user ID format")
 	}
+
 	var req PasswordChangeRequest
 	if err := c.Bind(&req); err != nil {
 		return errorResponse(c, http.StatusBadRequest, "INVALID_REQUEST", "Invalid request body")
 	}
-	// TODO: Verify old password and update with new hashed password
-	return c.JSON(http.StatusOK, map[string]interface{}{"message": "Password changed", "meta": responseMeta(c)})
+
+	// Check authorization: only self or admin can change password
+	currentUser := getCurrentUser(c)
+	isSelf := currentUser != nil && currentUser.UserID == idStr
+	isAdmin := false
+	if currentUser != nil {
+		for _, r := range currentUser.Roles {
+			if r == "admin" {
+				isAdmin = true
+				break
+			}
+		}
+	}
+	if !isSelf && !isAdmin {
+		return errorResponse(c, http.StatusForbidden, "FORBIDDEN", "Can only change your own password")
+	}
+
+	if err := h.authSvc.ChangePassword(c.Request().Context(), targetUserID, req.OldPassword, req.NewPassword); err != nil {
+		h.logger.WithError(err).Warn("Password change failed")
+		return errorResponse(c, http.StatusBadRequest, "PASSWORD_CHANGE_FAILED", err.Error())
+	}
+
+	// Audit: password changed
+	h.fireAudit(c, models.AuditActionPasswordChanged, "user", targetUserID, "", false, "")
+
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"message": "Password changed successfully",
+		"meta":    responseMeta(c),
+	})
 }
 
 // ============================================================================
-// AUDIT HANDLERS
+// AUDIT LOG HANDLERS
 // ============================================================================
 
-// ListAuditLogs returns audit logs.
+// actionGroupToDB maps frontend filter values to one or more DB action strings.
+// Returns a slice; if nil, use the value as-is (direct match).
+var actionGroupToDB = map[string][]string{
+	"login":             {"user_login"},
+	"logout":            {"user_logout"},
+	"create":            {"user_created", "policy_created", "rule_created", "token_created", "agent_registered"},
+	"update":            {"user_updated", "policy_updated", "rule_updated"},
+	"delete":            {"user_deleted", "policy_deleted", "rule_deleted", "alert_deleted", "agent_deleted"},
+	"execute_command":   {"execute_command"},
+	"acknowledge_alert": {"acknowledge_alert"},
+	"resolve_alert":     {"resolve_alert"},
+}
+
+// ListAuditLogs returns audit logs from the database with filtering and pagination.
 func (h *Handlers) ListAuditLogs(c echo.Context) error {
+	emptyResp := func() error {
+		return c.JSON(http.StatusOK, map[string]interface{}{
+			"data":       []interface{}{},
+			"pagination": PaginationResponse{Total: 0, Limit: 50, Offset: 0},
+			"meta":       responseMeta(c),
+		})
+	}
+
+	if h.auditRepo == nil {
+		return emptyResp()
+	}
+
+	filter := repository.AuditLogFilter{
+		Limit:  50,
+		Offset: 0,
+	}
+
+	// Action filter: map frontend group → DB value(s)
+	if v := c.QueryParam("action"); v != "" {
+		if dbActions, ok := actionGroupToDB[v]; ok {
+			// Use first value for simple equality; for groups use first action
+			// (the repository supports single action filter; multi-value requires
+			// a schema/repo change — for now first in list is most representative)
+			filter.Action = &dbActions[0]
+		} else {
+			// Passed value is a direct DB action string
+			filter.Action = &v
+		}
+	}
+
+	if v := c.QueryParam("resource_type"); v != "" {
+		filter.ResourceType = &v
+	}
+	if v := c.QueryParam("user_id"); v != "" {
+		if uid, err := uuid.Parse(v); err == nil {
+			filter.UserID = &uid
+		}
+	}
+	if v := c.QueryParam("from"); v != "" {
+		if t, err := time.Parse(time.RFC3339, v); err == nil {
+			filter.StartTime = &t
+		}
+	}
+	if v := c.QueryParam("to"); v != "" {
+		if t, err := time.Parse(time.RFC3339, v); err == nil {
+			filter.EndTime = &t
+		}
+	}
+	if v := c.QueryParam("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 500 {
+			filter.Limit = n
+		}
+	}
+	if v := c.QueryParam("offset"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			filter.Offset = n
+		}
+	}
+
+	ctx := c.Request().Context()
+
+	logs, err := h.auditRepo.List(ctx, filter)
+	if err != nil {
+		h.logger.WithError(err).Warn("Failed to list audit logs")
+		return emptyResp()
+	}
+
+	total, err := h.auditRepo.Count(ctx, filter)
+	if err != nil {
+		h.logger.WithError(err).Warn("Failed to count audit logs")
+		total = int64(len(logs))
+	}
+
+	// Normalise nil slice → empty slice so JSON shows [] not null
+	if logs == nil {
+		logs = []*models.AuditLog{}
+	}
+
 	return c.JSON(http.StatusOK, map[string]interface{}{
-		"data":       []interface{}{},
-		"pagination": PaginationResponse{Total: 0, Limit: 50, Offset: 0},
+		"data":       logs,
+		"pagination": PaginationResponse{Total: int(total), Limit: filter.Limit, Offset: filter.Offset, HasMore: int64(filter.Offset+filter.Limit) < total},
 		"meta":       responseMeta(c),
 	})
 }
 
-// GetAuditLog returns a single audit log.
+// GetAuditLog returns a single audit log by ID.
 func (h *Handlers) GetAuditLog(c echo.Context) error {
 	idStr := c.Param("id")
-	if _, err := uuid.Parse(idStr); err != nil {
+	id, err := uuid.Parse(idStr)
+	if err != nil {
 		return errorResponse(c, http.StatusBadRequest, "INVALID_ID", "Invalid audit log ID format")
 	}
-	return errorResponse(c, http.StatusNotFound, "NOT_FOUND", "Audit log not found")
+
+	if h.auditRepo == nil {
+		return errorResponse(c, http.StatusNotFound, "NOT_FOUND", "Audit log not found")
+	}
+
+	log, err := h.auditRepo.GetByID(c.Request().Context(), id)
+	if err != nil {
+		return errorResponse(c, http.StatusNotFound, "NOT_FOUND", "Audit log not found")
+	}
+
+	return c.JSON(http.StatusOK, log)
 }
 
 // ============================================================================

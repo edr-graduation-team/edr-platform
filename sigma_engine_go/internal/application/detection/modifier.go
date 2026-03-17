@@ -63,7 +63,7 @@ func (mr *ModifierRegistry) Get(name string) (ModifierFunc, bool) {
 
 // ApplyModifier applies a modifier to a field value.
 // Returns true if the modifier matches, false otherwise.
-// Handles the special "all" modifier for AND logic.
+// Handles the special "all" modifier for AND logic and array field values.
 func (mr *ModifierRegistry) ApplyModifier(
 	fieldValue interface{},
 	patternValues []interface{},
@@ -72,6 +72,20 @@ func (mr *ModifierRegistry) ApplyModifier(
 ) (bool, error) {
 	if fieldValue == nil {
 		return false, nil
+	}
+
+	// Extract array values if fieldValue is a slice/array
+	var fieldValues []interface{}
+	switch v := fieldValue.(type) {
+	case []interface{}:
+		fieldValues = v
+	case []string:
+		fieldValues = make([]interface{}, len(v))
+		for i, s := range v {
+			fieldValues[i] = s
+		}
+	default:
+		fieldValues = []interface{}{fieldValue}
 	}
 
 	// Check for "all" modifier (AND logic)
@@ -85,54 +99,69 @@ func (mr *ModifierRegistry) ApplyModifier(
 
 	// Apply modifiers to each pattern value
 	for _, patternValue := range patternValues {
-		matched := false
-		var err error
+		patternMatched := false
 
-		// Try each modifier
-		for _, modName := range modifiers {
-			if strings.EqualFold(modName, "all") {
-				continue
+		// For a given pattern, it matches if ANY of the field values match it
+		for _, fval := range fieldValues {
+			matched := false
+			var err error
+
+			hasValidModifier := false
+			// Try each modifier
+			for _, modName := range modifiers {
+				if strings.EqualFold(modName, "all") {
+					continue
+				}
+				hasValidModifier = true
+
+				fn, ok := mr.Get(modName)
+				if !ok {
+					// Unknown modifier, try default behavior (contains)
+					matched, err = mr.modifierContains(fval, patternValue, caseInsensitive)
+				} else {
+					matched, err = fn(fval, patternValue, caseInsensitive)
+				}
+
+				if err != nil {
+					return false, fmt.Errorf("modifier %q error: %w", modName, err)
+				}
+
+				if matched {
+					break // For this fval, matching one modifier is enough (OR logic between modifiers per existing design)
+				}
 			}
 
-			fn, ok := mr.Get(modName)
-			if !ok {
-				// Unknown modifier, try default behavior (contains)
-				matched, err = mr.modifierContains(fieldValue, patternValue, caseInsensitive)
-			} else {
-				matched, err = fn(fieldValue, patternValue, caseInsensitive)
-			}
-
-			if err != nil {
-				return false, fmt.Errorf("modifier %q error: %w", modName, err)
+			// If no valid modifier or no match, fallback to default contains
+			if !hasValidModifier && !matched {
+				matched, err = mr.modifierContains(fval, patternValue, caseInsensitive)
+				if err != nil {
+					return false, err
+				}
 			}
 
 			if matched {
-				if !requireAll {
-					return true, nil // OR logic: any match succeeds
-				}
-				break // AND logic: continue checking other patterns
+				patternMatched = true
+				break // Found a field value matching this pattern
 			}
 		}
 
-		// For AND logic, if any pattern doesn't match, return false
-		if requireAll && !matched {
+		// Handle pattern match results
+		if requireAll && !patternMatched {
+			// AND logic: all pattern values must match
 			return false, nil
 		}
-
-		// For OR logic, if no modifier matched, try default contains
-		if !requireAll && !matched {
-			matched, err = mr.modifierContains(fieldValue, patternValue, caseInsensitive)
-			if err == nil && matched {
-				return true, nil
-			}
+		if !requireAll && patternMatched {
+			// OR logic: any pattern value matches
+			return true, nil
 		}
 	}
 
-	// For AND logic, all patterns matched
+	// For AND logic, all patterns successfully matched
 	if requireAll {
 		return true, nil
 	}
 
+	// For OR logic, no patterns matched
 	return false, nil
 }
 
@@ -174,6 +203,10 @@ func (mr *ModifierRegistry) modifierEndsWith(fieldValue, patternValue interface{
 func (mr *ModifierRegistry) modifierRegex(fieldValue, patternValue interface{}, caseInsensitive bool) (bool, error) {
 	fieldStr := toString(fieldValue)
 	patternStr := toString(patternValue)
+
+	if caseInsensitive && !strings.HasPrefix(patternStr, "(?i)") {
+		patternStr = "(?i)" + patternStr
+	}
 
 	// Try to get pre-compiled regex from cache first (if available)
 	// This is a fallback for when pre-compiled regex is not available

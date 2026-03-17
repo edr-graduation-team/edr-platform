@@ -56,7 +56,7 @@ func TestJWTManager_GenerateAndValidate(t *testing.T) {
 
 	// Test token generation
 	t.Run("GenerateTokenPair", func(t *testing.T) {
-		tokenPair, err := jwtManager.GenerateTokenPair("agent-123", []string{"data_collector"})
+		tokenPair, err := jwtManager.GenerateTokenPair("agent-123", "testuser", []string{"data_collector"})
 		require.NoError(t, err)
 		assert.NotEmpty(t, tokenPair.AccessToken)
 		assert.NotEmpty(t, tokenPair.RefreshToken)
@@ -66,7 +66,7 @@ func TestJWTManager_GenerateAndValidate(t *testing.T) {
 
 	// Test token validation
 	t.Run("ValidateToken", func(t *testing.T) {
-		tokenPair, err := jwtManager.GenerateTokenPair("agent-456", []string{"admin"})
+		tokenPair, err := jwtManager.GenerateTokenPair("agent-456", "admin-user", []string{"admin"})
 		require.NoError(t, err)
 
 		claims, err := jwtManager.ValidateToken(tokenPair.AccessToken)
@@ -84,7 +84,7 @@ func TestJWTManager_GenerateAndValidate(t *testing.T) {
 
 	// Test refresh token
 	t.Run("RefreshAccessToken", func(t *testing.T) {
-		tokenPair, err := jwtManager.GenerateTokenPair("agent-789", []string{"data_collector"})
+		tokenPair, err := jwtManager.GenerateTokenPair("agent-789", "testuser", []string{"data_collector"})
 		require.NoError(t, err)
 
 		newAccessToken, newExp, err := jwtManager.RefreshAccessToken(tokenPair.RefreshToken)
@@ -101,7 +101,7 @@ func TestJWTManager_GenerateAndValidate(t *testing.T) {
 
 	// Test access token cannot be used as refresh
 	t.Run("RefreshWithAccessTokenFails", func(t *testing.T) {
-		tokenPair, err := jwtManager.GenerateTokenPair("agent-aaa", []string{})
+		tokenPair, err := jwtManager.GenerateTokenPair("agent-aaa", "", []string{})
 		require.NoError(t, err)
 
 		_, _, err = jwtManager.RefreshAccessToken(tokenPair.AccessToken)
@@ -111,7 +111,7 @@ func TestJWTManager_GenerateAndValidate(t *testing.T) {
 
 	// Test GetTokenID
 	t.Run("GetTokenID", func(t *testing.T) {
-		tokenPair, err := jwtManager.GenerateTokenPair("agent-bbb", []string{})
+		tokenPair, err := jwtManager.GenerateTokenPair("agent-bbb", "", []string{})
 		require.NoError(t, err)
 
 		jti, err := jwtManager.GetTokenID(tokenPair.AccessToken)

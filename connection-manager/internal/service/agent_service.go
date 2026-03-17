@@ -41,6 +41,9 @@ type AgentService interface {
 
 	// Approve approves a pending agent.
 	Approve(ctx context.Context, id uuid.UUID, approvedBy uuid.UUID) error
+
+	// SetIsolation updates the is_isolated flag for an agent.
+	SetIsolation(ctx context.Context, id uuid.UUID, isolated bool) error
 }
 
 // RegisterAgentRequest contains registration request data.
@@ -339,4 +342,9 @@ func (s *agentServiceImpl) Approve(ctx context.Context, id uuid.UUID, approvedBy
 	s.auditRepo.Create(ctx, audit)
 
 	return nil
+}
+
+// SetIsolation updates the is_isolated flag for an agent.
+func (s *agentServiceImpl) SetIsolation(ctx context.Context, id uuid.UUID, isolated bool) error {
+	return s.agentRepo.SetIsolation(ctx, id, isolated)
 }

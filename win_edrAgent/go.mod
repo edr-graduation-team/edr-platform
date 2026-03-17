@@ -3,6 +3,7 @@ module github.com/edr-platform/win-agent
 go 1.24
 
 require (
+	github.com/bi-zone/etw v0.0.0-20210519083747-fe9042eb0ea8
 	github.com/golang/snappy v0.0.4
 	github.com/google/uuid v1.6.0
 	golang.org/x/sys v0.26.0

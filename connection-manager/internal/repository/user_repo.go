@@ -216,7 +216,7 @@ func (r *PostgresUserRepository) UpdatePassword(ctx context.Context, id uuid.UUI
 
 // Delete soft-deletes a user.
 func (r *PostgresUserRepository) Delete(ctx context.Context, id uuid.UUID) error {
-	query := `UPDATE users SET status = 'inactive', updated_at = $2 WHERE id = $1`
+	query := `UPDATE users SET status = 'deleted', updated_at = $2 WHERE id = $1`
 
 	result, err := r.pool.Exec(ctx, query, id, time.Now())
 	if err != nil {
@@ -252,6 +252,9 @@ func (r *PostgresUserRepository) List(ctx context.Context, filter UserFilter) ([
 		query += fmt.Sprintf(" AND status = $%d", argNum)
 		args = append(args, *filter.Status)
 		argNum++
+	} else {
+		// By default, do not return deleted users
+		query += " AND status != 'deleted'"
 	}
 
 	if filter.Search != nil {

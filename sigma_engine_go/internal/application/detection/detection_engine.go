@@ -2,8 +2,8 @@ package detection
 
 import (
 	"context"
+	"fmt"
 	"math"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -98,53 +98,22 @@ func NewSigmaDetectionEngine(
 }
 
 // LoadRules loads rules into the detection engine and builds the index.
+// Quality filtering (status, level, experimental) is performed by the
+// RuleLoader; this method only applies minimal structural sanity checks.
 func (e *SigmaDetectionEngine) LoadRules(rules []*domain.SigmaRule) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
-	// Apply rule quality filtering for production stability
+	// Minimal structural sanity checks — quality filtering was already done by the loader
 	filtered := make([]*domain.SigmaRule, 0, len(rules))
 	for _, rule := range rules {
 		if rule == nil {
 			continue
 		}
-
-		// Must have detection selections
+		// Must have detection selections to be evaluable
 		if len(rule.Detection.Selections) == 0 {
 			continue
 		}
-
-		// Must be documented (reduces low-quality rules)
-		if strings.TrimSpace(rule.Title) == "" || strings.TrimSpace(rule.Description) == "" {
-			continue
-		}
-
-		// Skip experimental rules by default (configurable)
-		if e.quality.RuleQuality.SkipExperimental && strings.EqualFold(rule.Status, "experimental") {
-			continue
-		}
-
-		// Allowed statuses (if configured)
-		if len(e.quality.RuleQuality.AllowedStatus) > 0 && strings.TrimSpace(rule.Status) != "" {
-			allowed := false
-			for _, st := range e.quality.RuleQuality.AllowedStatus {
-				if strings.EqualFold(strings.TrimSpace(rule.Status), strings.TrimSpace(st)) {
-					allowed = true
-					break
-				}
-			}
-			if !allowed {
-				continue
-			}
-		}
-
-		// Minimum level (informational/low spam reduction)
-		if strings.TrimSpace(e.quality.RuleQuality.MinLevel) != "" {
-			if levelRank(rule.Level) < levelRank(e.quality.RuleQuality.MinLevel) {
-				continue
-			}
-		}
-
 		filtered = append(filtered, rule)
 	}
 
@@ -306,6 +275,10 @@ func (e *SigmaDetectionEngine) evaluateRuleForAggregation(
 	rule *domain.SigmaRule,
 	event *domain.LogEvent,
 ) *domain.RuleMatch {
+	// Sampled tracing: log first candidate of every 5000th event
+	evtCount := e.stats.TotalEvents()
+	traceThis := (evtCount%5000 == 1)
+
 	// Step 1: Evaluate all selections
 	selectionResults := make(map[string]bool)
 	matchedFields := make(map[string]interface{})
@@ -316,17 +289,42 @@ func (e *SigmaDetectionEngine) evaluateRuleForAggregation(
 		selectionResults[selectionName] = matches
 	}
 
+	if traceThis {
+		// Log selection results for first candidate per sampled event
+		logger.Infof("🔬 TRACE [rule=%s] selections=%v", rule.ID, selectionResults)
+		// Log first few fields from event for context
+		img, _ := e.getStringField(event, "Image")
+		cmd, _ := e.getStringField(event, "CommandLine")
+		logger.Infof("🔬 TRACE [rule=%s] Image=%q CommandLine=%q", rule.ID, img, truncate(cmd, 80))
+		for selName, sel := range rule.Detection.Selections {
+			for _, f := range sel.Fields {
+				val, _, _ := e.fieldMapper.ResolveField(event.RawData, f.FieldName)
+				logger.Infof("🔬 TRACE [rule=%s][%s] field=%s val=%q expected=%v mods=%v",
+					rule.ID, selName, f.FieldName, truncate(fmt.Sprintf("%v", val), 80), f.Values, f.Modifiers)
+			}
+		}
+	}
+
 	// Step 2: Evaluate condition against selection results
 	selectionNames := rule.GetSelectionNames()
 	conditionAST, err := e.conditionParser.Parse(rule.Detection.Condition, selectionNames)
 	if err != nil {
-		// Condition parse errors are common for invalid rules - don't log
+		if traceThis {
+			logger.Infof("🔬 TRACE [rule=%s] DROPPED at condition parse: %v", rule.ID, err)
+		}
 		return nil
 	}
 
 	conditionResult := conditionAST.Evaluate(selectionResults)
 	if !conditionResult {
+		if traceThis {
+			logger.Infof("🔬 TRACE [rule=%s] DROPPED at condition eval (false)", rule.ID)
+		}
 		return nil // Rule did not match
+	}
+
+	if traceThis {
+		logger.Infof("🔬 TRACE [rule=%s] ✅ CONDITION MATCHED! Checking filters...", rule.ID)
 	}
 
 	// Step 3: Evaluate filters (suppression for false positive prevention)
@@ -335,7 +333,9 @@ func (e *SigmaDetectionEngine) evaluateRuleForAggregation(
 			if isFilterSelection(selectionName) {
 				filterMatches := e.selectionEval.Evaluate(selection, event)
 				if filterMatches {
-					// Filter suppression is expected behavior - don't log
+					if traceThis {
+						logger.Infof("🔬 TRACE [rule=%s] DROPPED by filter: %s", rule.ID, selectionName)
+					}
 					return nil
 				}
 			}
@@ -345,7 +345,14 @@ func (e *SigmaDetectionEngine) evaluateRuleForAggregation(
 	// Step 4: Calculate confidence
 	confidence := e.calculateConfidence(rule, event, matchedFields)
 	if confidence < e.quality.MinConfidence {
+		if traceThis {
+			logger.Infof("🔬 TRACE [rule=%s] DROPPED by confidence gate: %.3f < %.3f", rule.ID, confidence, e.quality.MinConfidence)
+		}
 		return nil // Below confidence threshold
+	}
+
+	if traceThis {
+		logger.Infof("🔬 TRACE [rule=%s] ✅ ALERT EMITTED confidence=%.3f", rule.ID, confidence)
 	}
 
 	// Step 5: Return RuleMatch
@@ -468,11 +475,16 @@ func (e *SigmaDetectionEngine) calculateConfidence(
 	// Base confidence from rule level
 	baseConf := getLevelConfidence(rule.Level)
 
-	// Field match factor: more fields = higher confidence
+	// Field match factor: more fields = higher confidence.
+	// IMPORTANT: only count fields from positive (non-filter) selections.
+	// Filter selections are suppression patterns — including their fields
+	// in totalFields deflates the ratio and causes false-negative confidence drops.
 	fieldCount := len(matchedFields)
 	totalFields := 0
-	for _, selection := range rule.Detection.Selections {
-		totalFields += len(selection.Fields)
+	for selName, selection := range rule.Detection.Selections {
+		if !isFilterSelection(selName) {
+			totalFields += len(selection.Fields)
+		}
 	}
 
 	fieldFactor := 1.0
@@ -570,30 +582,23 @@ func (e *SigmaDetectionEngine) getStringField(event *domain.LogEvent, fieldName 
 
 // isWhitelistedEvent returns true if the event matches any configured whitelist rule.
 // Whitelisting is evaluated before rule matching to reduce false positives and CPU load.
+//
+// NOTE (RC-2 fix): User and ParentImage whitelisting have been removed.
+// - User whitelist (e.g. "NT AUTHORITY\SYSTEM") was far too broad: it silently
+//   dropped the vast majority of Windows process events before Sigma rules could
+//   evaluate them, creating massive detection blind spots.
+// - ParentImage whitelist (e.g. explorer.exe, services.exe) suppressed events
+//   for legitimate attacker parent processes (many tools are spawned by explorer
+//   or services). Sigma rules themselves contain fine-grained filter selections
+//   that handle false positive suppression per-rule.
 func (e *SigmaDetectionEngine) isWhitelistedEvent(event *domain.LogEvent) bool {
 	if !e.quality.Filtering.Enabled || event == nil {
 		return false
 	}
 
-	// Process image
+	// Process image whitelist only (exact binary paths like svchost.exe, lsass.exe)
 	if image, ok := e.getStringField(event, "Image"); ok {
 		if matchAnyPathPattern(image, e.quality.Filtering.WhitelistedProcesses) {
-			return true
-		}
-	}
-
-	// User
-	if user, ok := e.getStringField(event, "User"); ok {
-		for _, wu := range e.quality.Filtering.WhitelistedUsers {
-			if strings.EqualFold(strings.TrimSpace(user), strings.TrimSpace(wu)) {
-				return true
-			}
-		}
-	}
-
-	// Parent image
-	if parent, ok := e.getStringField(event, "ParentImage"); ok {
-		if matchAnyPathPattern(parent, e.quality.Filtering.WhitelistedParentProcesses) {
 			return true
 		}
 	}
@@ -601,22 +606,57 @@ func (e *SigmaDetectionEngine) isWhitelistedEvent(event *domain.LogEvent) bool {
 	return false
 }
 
+// matchAnyPathPattern returns true if `path` matches any of the whitelist
+// patterns. This is a pure-string implementation that works identically on
+// Linux (Docker) and Windows, unlike filepath.Match/filepath.Clean which
+// interpret backslashes differently across platforms.
+//
+// Supported pattern syntax:
+//   - Leading `*\` or `*\\` — suffix match ("ends with").
+//   - Trailing `*`           — prefix match ("starts with").
+//   - No wildcards            — exact match.
 func matchAnyPathPattern(path string, patterns []string) bool {
 	if path == "" || len(patterns) == 0 {
 		return false
 	}
-	normalized := strings.ToLower(filepath.Clean(path))
+	// Normalize: lowercase + unify separators to backslash for Windows paths
+	normalized := strings.ToLower(strings.ReplaceAll(path, "/", "\\"))
 	for _, p := range patterns {
 		p = strings.TrimSpace(p)
 		if p == "" {
 			continue
 		}
-		pLower := strings.ToLower(filepath.Clean(p))
-		if ok, _ := filepath.Match(pLower, normalized); ok {
-			return true
+		pLower := strings.ToLower(strings.ReplaceAll(p, "/", "\\"))
+
+		// Wildcard at both ends: *text* — contains
+		if strings.HasPrefix(pLower, "*") && strings.HasSuffix(pLower, "*") {
+			core := strings.Trim(pLower, "*")
+			if core != "" && strings.Contains(normalized, core) {
+				return true
+			}
+			continue
 		}
-		// Also try matching without Clean in case patterns intentionally include wildcards with separators.
-		if ok, _ := filepath.Match(strings.ToLower(p), strings.ToLower(path)); ok {
+
+		// Leading wildcard: *\thing.exe — suffix / ends-with
+		if strings.HasPrefix(pLower, "*") {
+			suffix := pLower[1:] // strip leading *
+			if strings.HasSuffix(normalized, suffix) {
+				return true
+			}
+			continue
+		}
+
+		// Trailing wildcard: C:\Program Files\Microsoft* — prefix / starts-with
+		if strings.HasSuffix(pLower, "*") {
+			prefix := pLower[:len(pLower)-1] // strip trailing *
+			if strings.HasPrefix(normalized, prefix) {
+				return true
+			}
+			continue
+		}
+
+		// Exact match (no wildcards)
+		if normalized == pLower {
 			return true
 		}
 	}

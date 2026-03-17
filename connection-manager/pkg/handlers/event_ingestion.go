@@ -20,6 +20,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/edr-platform/connection-manager/internal/cache"
+	"github.com/edr-platform/connection-manager/internal/repository"
 	"github.com/edr-platform/connection-manager/internal/service"
 	"github.com/edr-platform/connection-manager/pkg/contextkeys"
 	"github.com/edr-platform/connection-manager/pkg/kafka"
@@ -41,9 +42,10 @@ type EventHandler struct {
 	rateLimiter   *cache.RateLimiter
 	kafkaProducer *kafka.EventProducer
 	metrics       *metrics.Metrics
-	fallbackStore *EventFallbackStore  // PostgreSQL fallback when Kafka is unavailable
-	registry      *AgentRegistry       // Live agent presence and command routing
-	agentService  service.AgentService // Persists status to PostgreSQL
+	fallbackStore *EventFallbackStore          // PostgreSQL fallback when Kafka is unavailable
+	registry      *AgentRegistry               // Live agent presence and command routing
+	agentService  service.AgentService         // Persists status to PostgreSQL
+	commandRepo   repository.CommandRepository // Re-delivers pending commands on reconnect
 }
 
 // NewEventHandler creates a new event handler.
@@ -73,6 +75,13 @@ func (h *EventHandler) SetAgentRegistry(registry *AgentRegistry) {
 // SetAgentService sets the AgentService for PostgreSQL status persistence.
 func (h *EventHandler) SetAgentService(svc service.AgentService) {
 	h.agentService = svc
+}
+
+// SetCommandRepo sets the CommandRepository for pending command re-delivery.
+// When set, on every agent stream open (including reconnects) the handler will
+// query for any commands in status pending/sent and re-push them to the agent.
+func (h *EventHandler) SetCommandRepo(repo repository.CommandRepository) {
+	h.commandRepo = repo
 }
 
 // SetFallbackStore sets the PostgreSQL fallback store.
@@ -126,7 +135,18 @@ func (h *EventHandler) StreamEvents(stream edrv1.EventIngestionService_StreamEve
 	// 3. Persist 'online' status to PostgreSQL (source of truth)
 	h.updateAgentDBStatus(agentID, "online")
 
+	// 4. Re-deliver any commands that were lost during previous stream disconnect.
+	//    Query for pending/sent commands and push them into the command channel so
+	//    the agent receives them even after a reconnect.
+	if h.commandRepo != nil && cmdChan != nil {
+		go h.redeliverPendingCommands(ctx, agentID, cmdChan)
+	}
+
 	// 4. Ensure we mark agent offline when stream closes (graceful or crash)
+	//    EXCEPTION: if agent was deliberately stopped (stop_agent command),
+	//    SendCommandResult already set status='suspended'. We must NOT overwrite
+	//    it with 'offline', as that would lose the distinction between
+	//    "machine off" and "agent service stopped, machine still on".
 	defer func() {
 		h.logger.WithField("agent_id", agentID).Info("=== Agent went OFFLINE (stream closed/timeout) ===")
 
@@ -135,7 +155,7 @@ func (h *EventHandler) StreamEvents(stream edrv1.EventIngestionService_StreamEve
 			h.registry.Deregister(agentID)
 		}
 
-		// Update Redis
+		// Update Redis (always mark offline in Redis — short TTL cache)
 		if h.redis != nil {
 			offlineCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
@@ -144,8 +164,15 @@ func (h *EventHandler) StreamEvents(stream edrv1.EventIngestionService_StreamEve
 			}
 		}
 
-		// Persist 'offline' to PostgreSQL
-		h.updateAgentDBStatus(agentID, "offline")
+		// Persist to PostgreSQL — but only if agent is NOT already 'suspended'.
+		// stop_agent sets suspended in SendCommandResult BEFORE the stream closes;
+		// we must preserve that state so the dashboard knows it's intentional.
+		currentStatus := h.fetchAgentStatus(agentID)
+		if currentStatus != "suspended" {
+			h.updateAgentDBStatus(agentID, "offline")
+		} else {
+			h.logger.WithField("agent_id", agentID).Info("Stream closed but agent is SUSPENDED — skipping offline write")
+		}
 	}()
 
 	// 5. Keepalive ticker: refreshes Redis TTL and PostgreSQL last_seen every
@@ -159,12 +186,21 @@ func (h *EventHandler) StreamEvents(stream edrv1.EventIngestionService_StreamEve
 			case <-ctx.Done():
 				return
 			case <-keepAliveTicker.C:
+				// Read current DB status to avoid overwriting deliberate states
+				// (e.g. 'suspended' from stop_agent command).
+				currentStatus := h.fetchAgentStatus(agentID)
+				statusToWrite := "online"
+				if currentStatus == "suspended" {
+					statusToWrite = "suspended"
+				}
 				if h.redis != nil {
-					if err := h.redis.SetAgentStatus(ctx, agentID, "online", 10*time.Minute); err != nil {
+					if err := h.redis.SetAgentStatus(ctx, agentID, statusToWrite, 10*time.Minute); err != nil {
 						h.logger.WithError(err).WithField("agent_id", agentID).Debug("Keepalive: failed to refresh Redis TTL")
 					}
 				}
-				h.updateAgentDBStatus(agentID, "online")
+				if currentStatus != "suspended" {
+					h.updateAgentDBStatus(agentID, "online")
+				}
 				h.logger.WithField("agent_id", agentID).Debug("Keepalive: refreshed Redis TTL and DB last_seen")
 			}
 		}
@@ -347,6 +383,121 @@ func (h *EventHandler) updateAgentDBStatus(agentID, status string) {
 			"agent_id": agentID,
 			"status":   status,
 		}).Info("Agent status updated in PostgreSQL")
+	}
+}
+
+// fetchAgentStatus reads the current agent status from DB.
+// Called by the stream-close defer to avoid overwriting 'suspended' with 'offline'.
+// Returns "" (empty) when agentService is nil or UUID is invalid (treated as non-suspended).
+func (h *EventHandler) fetchAgentStatus(agentID string) string {
+	if h.agentService == nil {
+		return ""
+	}
+	agentUUID, err := uuid.Parse(agentID)
+	if err != nil {
+		return ""
+	}
+	dbCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	agent, err := h.agentService.GetByID(dbCtx, agentUUID)
+	if err != nil || agent == nil {
+		return ""
+	}
+	return agent.Status
+}
+
+// redeliverPendingCommands queries the DB for commands in status pending/sent
+// for the given agent and pushes them back into the command channel so the
+// agent receives them after a reconnect. This closes the race window where the
+// gRPC stream disconnects between Send() and actual delivery.
+func (h *EventHandler) redeliverPendingCommands(ctx context.Context, agentID string, cmdChan chan *edrv1.Command) {
+	agentUUID, err := uuid.Parse(agentID)
+	if err != nil {
+		return
+	}
+
+	dbCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	pendingCmds, err := h.commandRepo.GetPendingForAgent(dbCtx, agentUUID)
+	if err != nil {
+		h.logger.WithError(err).WithField("agent_id", agentID).Warn("[C2] Failed to query pending commands for re-delivery")
+		return
+	}
+
+	if len(pendingCmds) == 0 {
+		return
+	}
+
+	h.logger.WithFields(logrus.Fields{
+		"agent_id": agentID,
+		"count":    len(pendingCmds),
+	}).Infof("[C2] Re-delivering %d pending command(s) to reconnected agent", len(pendingCmds))
+
+	for _, dbCmd := range pendingCmds {
+		// Map DB command_type string back to proto enum
+		cmdType := mapDBCommandTypeToProto(string(dbCmd.CommandType))
+
+		// Build proto Command from DB record
+		params := make(map[string]string)
+		for k, v := range dbCmd.Parameters {
+			if str, ok := v.(string); ok {
+				params[k] = str
+			}
+		}
+
+		cmd := &edrv1.Command{
+			CommandId:  dbCmd.ID.String(),
+			Timestamp:  timestamppb.New(dbCmd.IssuedAt),
+			Type:       cmdType,
+			Parameters: params,
+			Priority:   int32(dbCmd.Priority),
+		}
+
+		select {
+		case cmdChan <- cmd:
+			h.logger.WithFields(logrus.Fields{
+				"agent_id":   agentID,
+				"command_id": dbCmd.ID,
+				"type":       dbCmd.CommandType,
+			}).Info("[C2] Pending command re-queued for delivery")
+		case <-ctx.Done():
+			h.logger.WithField("agent_id", agentID).Warn("[C2] Context done during pending command re-delivery")
+			return
+		default:
+			h.logger.WithField("agent_id", agentID).Warn("[C2] Command channel full — skipping re-delivery for this command")
+		}
+	}
+}
+
+// mapDBCommandTypeToProto maps the human-readable DB command type strings back
+// to proto CommandType values for re-delivery after agent reconnect.
+func mapDBCommandTypeToProto(cmdType string) edrv1.CommandType {
+	switch cmdType {
+	case "terminate_process", "kill_process":
+		return edrv1.CommandType_COMMAND_TYPE_TERMINATE_PROCESS
+	case "collect_forensics", "collect_logs", "quarantine_file", "scan_file", "scan_memory":
+		return edrv1.CommandType_COMMAND_TYPE_COLLECT_FORENSICS
+	case "isolate_network", "isolate":
+		return edrv1.CommandType_COMMAND_TYPE_ISOLATE
+	case "restore_network", "unisolate_network", "unisolate":
+		return edrv1.CommandType_COMMAND_TYPE_UNISOLATE
+	case "restart_service", "restart_agent":
+		return edrv1.CommandType_COMMAND_TYPE_RESTART_SERVICE
+	case "update_agent":
+		return edrv1.CommandType_COMMAND_TYPE_UPDATE_AGENT
+	case "update_config", "update_policy", "update_filter_policy":
+		return edrv1.CommandType_COMMAND_TYPE_UPDATE_CONFIG
+	case "adjust_rate":
+		return edrv1.CommandType_COMMAND_TYPE_ADJUST_RATE
+	case "run_cmd", "custom":
+		return 9
+	case "restart", "restart_machine":
+		return 10
+	case "shutdown", "shutdown_machine":
+		return 11
+	default:
+		return edrv1.CommandType_COMMAND_TYPE_UNSPECIFIED
 	}
 }
 

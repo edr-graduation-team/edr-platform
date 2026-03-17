@@ -105,17 +105,26 @@ func (s *Server) RegisterRoutes(handlers *Handlers) {
 	agents.GET("/:id/events", handlers.GetAgentEvents)
 	agents.GET("/:id/commands", handlers.GetAgentCommands)
 	agents.POST("/:id/commands", handlers.ExecuteAgentCommand)
+	// Backward-compat alias: some clients may omit the trailing 's'
+	agents.POST("/:id/command", handlers.ExecuteAgentCommand)
+
+	// Command history endpoints (Action Center)
+	commands := protected.Group("/commands")
+	commands.GET("", handlers.ListCommands)
+	commands.GET("/stats", handlers.GetCommandStats)
 
 	// Alert endpoints
 	alerts := protected.Group("/alerts")
 	alerts.GET("", handlers.ListAlerts)
 	alerts.POST("/search", handlers.SearchAlerts)
 	alerts.GET("/stats", handlers.GetAlertStats)
+	alerts.GET("/endpoint-risk", handlers.GetEndpointRisk)
 	alerts.GET("/:id", handlers.GetAlert)
 	alerts.PATCH("/:id", handlers.UpdateAlert)
 	alerts.POST("/:id/resolve", handlers.ResolveAlert)
 	alerts.POST("/:id/notes", handlers.AddAlertNote)
 	alerts.DELETE("/:id", handlers.DeleteAlert)
+
 
 	// Event endpoints
 	events := protected.Group("/events")
@@ -133,25 +142,35 @@ func (s *Server) RegisterRoutes(handlers *Handlers) {
 	policies.DELETE("/:id", handlers.DeletePolicy)
 	policies.GET("/:id/agents", handlers.GetPolicyAgents)
 
-	// User endpoints (admin only)
+	// User endpoints (granular permission-based access)
 	users := protected.Group("/users")
-	users.GET("", handlers.ListUsers, handlers.RequireRole("admin"))
-	users.POST("", handlers.CreateUser, handlers.RequireRole("admin"))
-	users.GET("/:id", handlers.GetUser)
-	users.PATCH("/:id", handlers.UpdateUser)
-	users.DELETE("/:id", handlers.DeleteUser, handlers.RequireRole("admin"))
+	users.GET("", handlers.ListUsers, handlers.RequirePermission("users", "read"))
+	users.POST("", handlers.CreateUser, handlers.RequirePermission("users", "write"))
+	users.GET("/:id", handlers.GetUser, handlers.RequirePermission("users", "read"))
+	users.PATCH("/:id", handlers.UpdateUser, handlers.RequirePermission("users", "write"))
+	users.DELETE("/:id", handlers.DeleteUser, handlers.RequirePermission("users", "delete"))
 	users.POST("/:id/password", handlers.ChangePassword)
+
+	// Role & Permission endpoints (admin-only for writes)
+	roles := protected.Group("/roles")
+	roles.GET("", handlers.ListRoles, handlers.RequirePermission("roles", "read"))
+	roles.POST("", handlers.CreateRole, handlers.RequirePermission("roles", "write"))
+	roles.PATCH("/:id/permissions", handlers.UpdateRolePermissions, handlers.RequirePermission("roles", "write"))
+	roles.DELETE("/:id", handlers.DeleteRole, handlers.RequirePermission("roles", "write"))
+
+	// Permissions listing (read access for roles:read holders)
+	protected.GET("/permissions", handlers.ListPermissions, handlers.RequirePermission("roles", "read"))
 
 	// Audit endpoints
 	audit := protected.Group("/audit")
-	audit.GET("/logs", handlers.ListAuditLogs, handlers.RequireRole("admin", "security"))
-	audit.GET("/logs/:id", handlers.GetAuditLog, handlers.RequireRole("admin", "security"))
+	audit.GET("/logs", handlers.ListAuditLogs, handlers.RequirePermission("audit", "read"))
+	audit.GET("/logs/:id", handlers.GetAuditLog, handlers.RequirePermission("audit", "read"))
 
-	// Enrollment token management (admin only)
+	// Enrollment token management
 	tokens := protected.Group("/enrollment-tokens")
-	tokens.GET("", handlers.ListEnrollmentTokens, handlers.RequireRole("admin", "security"))
-	tokens.POST("", handlers.GenerateEnrollmentToken, handlers.RequireRole("admin"))
-	tokens.POST("/:id/revoke", handlers.RevokeEnrollmentToken, handlers.RequireRole("admin"))
+	tokens.GET("", handlers.ListEnrollmentTokens, handlers.RequirePermission("tokens", "read"))
+	tokens.POST("", handlers.GenerateEnrollmentToken, handlers.RequirePermission("tokens", "write"))
+	tokens.POST("/:id/revoke", handlers.RevokeEnrollmentToken, handlers.RequirePermission("tokens", "write"))
 }
 
 // healthCheck returns server health status.

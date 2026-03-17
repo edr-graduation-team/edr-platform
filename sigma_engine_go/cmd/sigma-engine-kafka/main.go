@@ -14,9 +14,11 @@ import (
 	"time"
 
 	"github.com/edr-platform/sigma-engine/internal/application/alert"
+	"github.com/edr-platform/sigma-engine/internal/application/baselines"
 	"github.com/edr-platform/sigma-engine/internal/application/detection"
 	"github.com/edr-platform/sigma-engine/internal/application/mapping"
 	"github.com/edr-platform/sigma-engine/internal/application/rules"
+	"github.com/edr-platform/sigma-engine/internal/application/scoring"
 	"github.com/edr-platform/sigma-engine/internal/domain"
 	"github.com/edr-platform/sigma-engine/internal/handlers"
 	"github.com/edr-platform/sigma-engine/internal/infrastructure/cache"
@@ -187,6 +189,7 @@ func main() {
 	var apiServer *handlers.Server
 	var ruleRepo database.RuleRepository
 	var alertRepo database.AlertRepository
+	var auditLogger *database.AuditLogger
 
 	dbCfg := database.LoadFromEnv()
 	dbPool, dbErr := database.NewPool(ctx, dbCfg)
@@ -200,6 +203,7 @@ func main() {
 
 		ruleRepo = database.NewPostgresRuleRepository(dbPool.Pool())
 		alertRepo = database.NewPostgresAlertRepository(dbPool.Pool())
+		auditLogger = database.NewAuditLogger(dbPool.Pool())
 		defer dbPool.Close()
 
 		// Auto-seed rules from disk into the database (idempotent UPSERT)
@@ -207,12 +211,60 @@ func main() {
 			seedRulesToDB(ctx, dbPool.Pool(), ruleIndex)
 		}
 	}
-	apiServer = handlers.NewServer(apiCfg, ruleRepo, alertRepo)
+	apiServer = handlers.NewServer(apiCfg, ruleRepo, alertRepo, auditLogger)
 	go func() {
 		if err := apiServer.Start(); err != nil && err != http.ErrServerClosed {
 			logger.Warnf("REST API server error: %v", err)
 		}
 	}()
+
+	// ── Redis / Lineage Cache + Risk Scoring Setup ────────────────────────────
+	// Attempt to connect to Redis for the Context-Aware Lineage Cache and
+	// Temporal Burst Tracker. If Redis is unavailable the engine degrades:
+	//   - LineageCache → NoopLineageCache (no ancestry context)
+	//   - BurstTracker → InMemoryBurstTracker (per-instance burst only)
+	//   - RiskScorer   → still runs, but with reduced context info
+	var lineageCache cache.LineageCache
+	redisCfg := cache.RedisConfigFromEnv()
+	redisClient, redisErr := cache.NewRedisClient(redisCfg)
+	if redisErr != nil {
+		logger.Warnf("Redis unavailable — lineage cache disabled (context-aware scoring will be limited): %v", redisErr)
+		lineageCache = cache.NewNoopLineageCache()
+	} else {
+		lineageCache = cache.NewRedisLineageCache(redisClient)
+		defer redisClient.Close()
+		logger.Info("Process lineage cache initialised (Redis)")
+	}
+
+	// BurstTracker: prefer Redis (shared across pods), fallback to in-memory.
+	var burstTracker scoring.BurstTracker
+	if redisErr == nil {
+		burstTracker = scoring.NewRedisBurstTracker(redisClient.Client())
+		logger.Info("Burst tracker initialised (Redis)")
+	} else {
+		burstTracker = scoring.NewInMemoryBurstTracker(0) // 0 → uses default 5-min TTL
+		logger.Warn("Burst tracker using in-memory fallback (not shared across pods)")
+	}
+
+	// BaselineRepository + Cache: requires PostgreSQL (graceful noop when unavailable).
+	// The BaselineCache adds a 30-min in-process TTL layer to avoid DB hits per alert.
+	var baselineProvider baselines.BaselineProvider
+	var baselineAggregator *baselines.BaselineAggregator
+	if dbPool != nil {
+		baselineRepo := baselines.NewPostgresBaselineRepository(dbPool.Pool())
+		baselineProvider = baselines.NewBaselineCache(baselineRepo, 0) // 0 → default 30-min TTL
+		baselineAggregator = baselines.NewBaselineAggregator(baselineRepo, 0, 0)
+		baselineAggregator.Start(ctx)
+		logger.Info("Behavioral baseline aggregator started (UEBA active)")
+	} else {
+		baselineProvider = baselines.NoopBaselineProvider{}
+		logger.Warn("Database unavailable — UEBA baseline scoring disabled")
+	}
+
+	// RiskScorer: always constructed — uses the available lineage + burst + baseline impls.
+	riskScorer := scoring.NewDefaultRiskScorer(lineageCache, burstTracker, baselineProvider)
+	logger.Info("RiskScorer initialised — context-aware scoring + UEBA active")
+	// ─────────────────────────────────────────────────────────────────────────
 
 	// Create and start event loop (only when Kafka is available)
 	var eventLoop *infraKafka.EventLoop
@@ -220,6 +272,20 @@ func main() {
 
 	if consumer != nil && producer != nil {
 		eventLoop = infraKafka.NewEventLoop(consumer, producer, detectionEngine, alertGenerator, eventLoopConfig)
+
+		// Inject lineage cache — enables process ancestry hydration in processOneEvent.
+		// This must be set BEFORE eventLoop.Start() to avoid a race between
+		// the worker goroutines and the SetLineageCache call.
+		eventLoop.SetLineageCache(lineageCache)
+
+		// Inject RiskScorer — computes context-aware score after every alert is generated.
+		// Must be set BEFORE Start() for the same race-condition reason.
+		eventLoop.SetRiskScorer(riskScorer)
+
+		// Inject BaselineAggregator — records process events for UEBA behavioral profiling.
+		if baselineAggregator != nil {
+			eventLoop.SetBaselineAggregator(baselineAggregator)
+		}
 
 		// Inject AlertWriter for database persistence (Kafka → PostgreSQL bridge)
 		if alertRepo != nil {

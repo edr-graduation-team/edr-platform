@@ -10,61 +10,66 @@ import (
 // It includes MITRE ATT&CK mapping, severity escalation, and output-ready formatting.
 // Supports atomic event aggregation: multiple rule matches → single aggregated alert.
 type Alert struct {
-	ID              string                 `json:"id"`
-	RuleID          string                 `json:"rule_id"`
-	RuleTitle       string                 `json:"rule_title"`
-	Severity        Severity               `json:"severity"`
-	Confidence      float64                `json:"confidence"`
-	Timestamp       time.Time              `json:"timestamp"`
-	EventID         *string                `json:"event_id,omitempty"`
-	EventCategory   EventCategory          `json:"event_category"`
-	Product         string                 `json:"product"`
-	
+	ID            string        `json:"id"`
+	RuleID        string        `json:"rule_id"`
+	RuleTitle     string        `json:"rule_title"`
+	Severity      Severity      `json:"severity"`
+	Confidence    float64       `json:"confidence"`
+	Timestamp     time.Time     `json:"timestamp"`
+	EventID       *string       `json:"event_id,omitempty"`
+	EventCategory EventCategory `json:"event_category"`
+	Product       string        `json:"product"`
+
 	// MITRE ATT&CK
-	MITRETactics    []string               `json:"mitre_tactics,omitempty"`
-	MITRETechniques []string               `json:"mitre_techniques,omitempty"`
-	
+	MITRETactics    []string `json:"mitre_tactics,omitempty"`
+	MITRETechniques []string `json:"mitre_techniques,omitempty"`
+
 	// Detection details
-	MatchedFields   map[string]interface{} `json:"matched_fields,omitempty"`
-	MatchedSelections []string             `json:"matched_selections,omitempty"`
-	
+	MatchedFields     map[string]interface{} `json:"matched_fields,omitempty"`
+	MatchedSelections []string               `json:"matched_selections,omitempty"`
+
 	// Event data (sanitized)
-	EventData       map[string]interface{} `json:"event_data,omitempty"`
-	
+	EventData map[string]interface{} `json:"event_data,omitempty"`
+
 	// False positive indicators
-	FalsePositiveRisk float64             `json:"false_positive_risk,omitempty"`
-	Suppressed        bool                `json:"suppressed,omitempty"`
-	
+	FalsePositiveRisk float64 `json:"false_positive_risk,omitempty"`
+	Suppressed        bool    `json:"suppressed,omitempty"`
+
 	// Aggregation (legacy)
-	AggregationKey  *string               `json:"aggregation_key,omitempty"`
-	RelatedAlerts   []string              `json:"related_alerts,omitempty"`
+	AggregationKey *string  `json:"aggregation_key,omitempty"`
+	RelatedAlerts  []string `json:"related_alerts,omitempty"`
 
 	// ==========================================================================
 	// Atomic Event Aggregation Fields
-	// When a single event triggers multiple rules, we aggregate into ONE alert.
 	// ==========================================================================
-	
-	// MatchCount is the total number of rules that matched this event.
-	// A value > 1 indicates multiple rule correlation.
-	MatchCount      int                   `json:"match_count"`
-	
-	// RelatedRules contains titles of other rules that matched (excluding primary).
-	// Empty if only one rule matched.
-	RelatedRules    []string              `json:"related_rules,omitempty"`
-	
-	// RelatedRuleIDs contains IDs of other rules that matched (excluding primary).
-	RelatedRuleIDs  []string              `json:"related_rule_ids,omitempty"`
-	
-	// CombinedConfidence is the aggregated confidence score from all matches.
-	// Formula: max(confidence) + multi-match bonus (capped at 1.0)
-	CombinedConfidence float64            `json:"combined_confidence"`
-	
-	// OriginalSeverity is the severity before any promotion.
-	// Useful for audit trail when severity is promoted due to multi-match.
-	OriginalSeverity Severity             `json:"original_severity,omitempty"`
-	
-	// SeverityPromoted indicates if severity was escalated due to multi-match.
-	SeverityPromoted bool                 `json:"severity_promoted,omitempty"`
+
+	MatchCount         int      `json:"match_count"`
+	RelatedRules       []string `json:"related_rules,omitempty"`
+	RelatedRuleIDs     []string `json:"related_rule_ids,omitempty"`
+	CombinedConfidence float64  `json:"combined_confidence"`
+	OriginalSeverity   Severity `json:"original_severity,omitempty"`
+	SeverityPromoted   bool     `json:"severity_promoted,omitempty"`
+
+	// ==========================================================================
+	// Context-Aware Risk Scoring (Phase 1)
+	// Populated by RiskScorer immediately after GenerateAggregatedAlert.
+	// Persisted in sigma_alerts.risk_score / context_snapshot / score_breakdown.
+	// ==========================================================================
+
+	// RiskScore is the final clamped context-aware risk score (0–100).
+	// Zero until RiskScorer.Score() runs; persisted as risk_score INTEGER.
+	RiskScore int `json:"risk_score"`
+
+	// ContextSnapshot is the JSON-serializable forensic evidence captured at
+	// scoring time. Contains the ancestor chain, privilege context, burst count,
+	// and score_breakdown. Stored as context_snapshot JSONB.
+	// Using map[string]any avoids a circular import with the scoring package.
+	ContextSnapshot map[string]any `json:"context_snapshot,omitempty"`
+
+	// ScoreBreakdown stores the component-level score formula for SOC transparency.
+	// Stored as score_breakdown JSONB. Keys: base_score, lineage_bonus,
+	// privilege_bonus, burst_bonus, fp_discount, raw_score, final_score.
+	ScoreBreakdown map[string]any `json:"score_breakdown,omitempty"`
 }
 
 // NewAlert creates a new Alert from a DetectionResult.
@@ -152,15 +157,15 @@ func sanitizeEventData(rawData map[string]interface{}) map[string]interface{} {
 
 	sanitized := make(map[string]interface{})
 	sensitiveFields := map[string]bool{
-		"password": true,
-		"passwd": true,
-		"pwd": true,
-		"secret": true,
-		"token": true,
-		"api_key": true,
-		"apikey": true,
+		"password":    true,
+		"passwd":      true,
+		"pwd":         true,
+		"secret":      true,
+		"token":       true,
+		"api_key":     true,
+		"apikey":      true,
 		"private_key": true,
-		"privatekey": true,
+		"privatekey":  true,
 	}
 
 	for k, v := range rawData {
@@ -179,7 +184,7 @@ func sanitizeEventData(rawData map[string]interface{}) map[string]interface{} {
 // Example: T1059.001 → "Execution"
 func extractTacticsFromTechniques(techniques []string) []string {
 	tacticsMap := make(map[string]bool)
-	
+
 	// MITRE ATT&CK tactic mapping (simplified - full mapping would be more comprehensive)
 	tacticMap := map[string]string{
 		"T1059": "Execution",
@@ -200,7 +205,7 @@ func extractTacticsFromTechniques(techniques []string) []string {
 		if idx := strings.Index(technique, "."); idx > 0 {
 			baseID = technique[:idx]
 		}
-		
+
 		if tactic, ok := tacticMap[baseID]; ok {
 			tacticsMap[tactic] = true
 		}
@@ -212,4 +217,3 @@ func extractTacticsFromTechniques(techniques []string) []string {
 	}
 	return tactics
 }
-

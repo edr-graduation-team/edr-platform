@@ -78,7 +78,7 @@ func (c *NetworkCollector) Stop() error {
 
 // monitorLoop polls for network connections.
 func (c *NetworkCollector) monitorLoop(ctx context.Context) {
-	ticker := time.NewTicker(5 * time.Second)
+	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 
 	for {

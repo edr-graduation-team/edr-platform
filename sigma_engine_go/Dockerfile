@@ -10,7 +10,7 @@ RUN apk add --no-cache git ca-certificates
 COPY go.mod go.sum ./
 
 # Speed up module downloads
-ENV GOPROXY="https://goproxy.io,direct"
+ENV GOPROXY="https://proxy.golang.org,direct"
 
 # Download dependencies
 RUN go mod download

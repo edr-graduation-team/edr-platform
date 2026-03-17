@@ -3,13 +3,18 @@ package kafka
 
 import (
 	"context"
+	"encoding/json"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/edr-platform/sigma-engine/internal/application/alert"
+	"github.com/edr-platform/sigma-engine/internal/application/baselines"
 	"github.com/edr-platform/sigma-engine/internal/application/detection"
+	"github.com/edr-platform/sigma-engine/internal/application/scoring"
 	"github.com/edr-platform/sigma-engine/internal/domain"
+	"github.com/edr-platform/sigma-engine/internal/infrastructure/cache"
 	"github.com/edr-platform/sigma-engine/internal/infrastructure/database"
 	"github.com/edr-platform/sigma-engine/internal/infrastructure/logger"
 )
@@ -41,10 +46,11 @@ type EventLoopMetrics struct {
 	AlertsGenerated  uint64
 	AlertsPublished  uint64
 	AlertsSuppressed uint64
-	ProcessingErrors uint64
-	AverageLatencyMs float64
-	CurrentEPS       float64
-	mu               sync.RWMutex
+	ProcessingErrors      uint64
+	AverageLatencyMs      float64
+	AverageRuleMatchingMs float64
+	CurrentEPS            float64
+	mu                    sync.RWMutex
 }
 
 // Snapshot returns a copy of current metrics.
@@ -57,9 +63,10 @@ func (m *EventLoopMetrics) Snapshot() EventLoopMetrics {
 		AlertsGenerated:  atomic.LoadUint64(&m.AlertsGenerated),
 		AlertsPublished:  atomic.LoadUint64(&m.AlertsPublished),
 		AlertsSuppressed: atomic.LoadUint64(&m.AlertsSuppressed),
-		ProcessingErrors: atomic.LoadUint64(&m.ProcessingErrors),
-		AverageLatencyMs: m.AverageLatencyMs,
-		CurrentEPS:       m.CurrentEPS,
+		ProcessingErrors:      atomic.LoadUint64(&m.ProcessingErrors),
+		AverageLatencyMs:      m.AverageLatencyMs,
+		AverageRuleMatchingMs: m.AverageRuleMatchingMs,
+		CurrentEPS:            m.CurrentEPS,
 	}
 }
 
@@ -141,6 +148,23 @@ type EventLoop struct {
 	suppression     *suppressionCache
 	alertWriter     *database.AlertWriter // Writes alerts to PostgreSQL
 
+	// lineageCache stores the contextual snapshot of every observed process
+	// for a short TTL window. It is hydrated BEFORE Sigma rule evaluation so
+	// that the upcoming RiskScorer can resolve ancestry chains on demand.
+	// If nil (Redis unavailable), lineage hydration is silently skipped.
+	lineageCache cache.LineageCache
+
+	// riskScorer computes the context-aware risk score for every matched alert.
+	// If nil, alerts are forwarded with RiskScore=0 (no context enrichment).
+	riskScorer scoring.RiskScorer
+
+	// baselineAggregator records process events for UEBA behavioral profiling.
+	// Fire-and-forget: it enqueues into a buffered channel and never blocks.
+	// If nil, behavioral baseline aggregation is skipped (no UEBA).
+	baselineAggregator *baselines.BaselineAggregator
+
+	lineageCacheErrors atomic.Uint64 // monotonic counter for cache write failures
+
 	alertChan chan *domain.Alert
 	doneChan  chan struct{}
 
@@ -180,6 +204,25 @@ func NewEventLoop(
 // Call this before Start().
 func (el *EventLoop) SetAlertWriter(writer *database.AlertWriter) {
 	el.alertWriter = writer
+}
+
+// SetLineageCache injects a LineageCache implementation for process context
+// hydration. Call this before Start(). Passing nil disables lineage caching
+// without affecting the rest of the pipeline.
+func (el *EventLoop) SetLineageCache(lc cache.LineageCache) {
+	el.lineageCache = lc
+}
+
+// SetRiskScorer injects a RiskScorer for context-aware alert enrichment.
+// Call this before Start(). When nil, alerts are emitted with RiskScore=0.
+func (el *EventLoop) SetRiskScorer(rs scoring.RiskScorer) {
+	el.riskScorer = rs
+}
+
+// SetBaselineAggregator injects a BaselineAggregator for UEBA behavioral profiling.
+// Call this before Start(). When nil, baseline aggregation is silently skipped.
+func (el *EventLoop) SetBaselineAggregator(agg *baselines.BaselineAggregator) {
+	el.baselineAggregator = agg
 }
 
 // Start begins the event processing loop.
@@ -245,6 +288,11 @@ func (el *EventLoop) detectionWorker(ctx context.Context, workerID int) {
 }
 
 // processOneEvent runs detection on a single event with panic isolation.
+//
+// Execution order:
+//  1. Hydrate the lineage cache unconditionally for process events  ← NEW
+//  2. Run Sigma rule evaluation (DetectAggregated)
+//  3. If matched → generate alert → push to suppression + alertChan
 func (el *EventLoop) processOneEvent(event *domain.LogEvent) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -256,19 +304,75 @@ func (el *EventLoop) processOneEvent(event *domain.LogEvent) {
 	atomic.AddUint64(&el.metrics.EventsReceived, 1)
 	start := time.Now()
 
+	// ── Step 1: LINEAGE CACHE HYDRATION ──────────────────────────────────────
+	// Every process creation event is written to Redis regardless of whether
+	// a Sigma rule matches. This provides a 12-minute ancestry window that
+	// the RiskScorer (Sprint 2) can query for any subsequently matched event.
+	if el.lineageCache != nil {
+		el.hydrateLineageCache(event)
+	}
+
+	// ── Step 1b: UEBA BASELINE AGGREGATION ───────────────────────────────────
+	// Record every process-creation event into the behavioral baseline model.
+	// This is fire-and-forget (buffered channel); the detection pipeline is
+	// never blocked by a slow DB write.
+	if el.baselineAggregator != nil && baselines.ShouldRecord(event.RawData) {
+		agentID, _ := event.GetField("agent_id")
+		agentStr := ""
+		if agentID != nil {
+			agentStr, _ = agentID.(string)
+		}
+		in := baselines.ExtractAggregationInput(agentStr, event.RawData)
+		el.baselineAggregator.Record(in)
+	}
+	// ─────────────────────────────────────────────────────────────────────────
+
+	matchStart := time.Now()
 	matchResult := el.detectionEngine.DetectAggregated(event)
+	matchLatency := float64(time.Since(matchStart).Microseconds()) / 1000.0
 
 	if matchResult != nil && matchResult.HasMatches() {
 		baseAlert := el.alertGenerator.GenerateAggregatedAlert(matchResult)
 		if baseAlert != nil {
 			atomic.AddUint64(&el.metrics.AlertsGenerated, 1)
 
-			// Build suppression key: ruleID|agentID
+			// ── Step 2: CONTEXT-AWARE RISK SCORING ───────────────────────────────
+			// Call RiskScorer immediately after alert generation so it can query
+			// the lineage cache and burst tracker to compute the enriched score.
+			// The scorer is non-blocking: errors are logged but never drop alerts.
 			agentID, _ := event.GetField("agent_id")
 			agentStr := ""
 			if agentID != nil {
 				agentStr, _ = agentID.(string)
 			}
+
+			if el.riskScorer != nil {
+				scoringInput := scoring.ScoringInput{
+					MatchResult: matchResult,
+					Event:       event,
+					AgentID:     agentStr,
+				}
+				scoreOut, scoreErr := el.riskScorer.Score(context.Background(), scoringInput)
+				if scoreErr != nil {
+					logger.Warnf("RiskScorer error for rule %s: %v — using base score", baseAlert.RuleID, scoreErr)
+				} else {
+					baseAlert.RiskScore = scoreOut.RiskScore
+					baseAlert.FalsePositiveRisk = scoreOut.FalsePositiveRisk
+					// Marshal ContextSnapshot and ScoreBreakdown to map[string]any
+					if snap := scoreOut.Snapshot; snap != nil {
+						importJson, _ := json.Marshal(snap)
+						_ = json.Unmarshal(importJson, &baseAlert.ContextSnapshot)
+						// Extract breakdown into its own top-level field for indexed querying
+						bdJson, _ := json.Marshal(snap.ScoreBreakdown)
+						_ = json.Unmarshal(bdJson, &baseAlert.ScoreBreakdown)
+					}
+					logger.Debugf("Risk scored alert %s: score=%d fp=%.2f lineage=%s",
+						baseAlert.RuleID, scoreOut.RiskScore, scoreOut.FalsePositiveRisk,
+						scoreOut.Snapshot.LineageSuspicion)
+				}
+			}
+			// ─────────────────────────────────────────────────────────────────────
+
 			suppressKey := baseAlert.RuleID + "|" + agentStr
 
 			if el.suppression.shouldSuppress(suppressKey) {
@@ -286,9 +390,10 @@ func (el *EventLoop) processOneEvent(event *domain.LogEvent) {
 
 	atomic.AddUint64(&el.metrics.EventsProcessed, 1)
 
-	latency := time.Since(start).Milliseconds()
+	latency := float64(time.Since(start).Microseconds()) / 1000.0
 	el.metrics.mu.Lock()
-	el.metrics.AverageLatencyMs = (el.metrics.AverageLatencyMs*0.9 + float64(latency)*0.1)
+	el.metrics.AverageLatencyMs = (el.metrics.AverageLatencyMs*0.9 + latency*0.1)
+	el.metrics.AverageRuleMatchingMs = (el.metrics.AverageRuleMatchingMs*0.9 + matchLatency*0.1)
 	el.metrics.mu.Unlock()
 }
 
@@ -360,7 +465,17 @@ func (el *EventLoop) statsReporter(ctx context.Context) {
 			producerMetrics := el.producer.Metrics()
 			loopMetrics := el.metrics.Snapshot()
 
-			logger.Infof("📊 Stats | Events: %d | Alerts: %d (suppressed: %d, cache: %d) | EPS: %.1f | Latency: %.1fms | Published: %d | Errors: %d",
+			lineageCacheStatus := "disabled"
+			if el.lineageCache != nil {
+				lineageCacheErrors := el.lineageCacheErrors.Load()
+				if lineageCacheErrors == 0 {
+					lineageCacheStatus = "ok"
+				} else {
+					lineageCacheStatus = "degraded"
+				}
+			}
+
+			logger.Infof("📊 Stats | Events: %d | Alerts: %d (suppressed: %d, cache: %d) | EPS: %.1f | Latency: %.1fms | Published: %d | Errors: %d | LineageCache: %s",
 				loopMetrics.EventsProcessed,
 				loopMetrics.AlertsGenerated,
 				loopMetrics.AlertsSuppressed,
@@ -369,6 +484,7 @@ func (el *EventLoop) statsReporter(ctx context.Context) {
 				loopMetrics.AverageLatencyMs,
 				producerMetrics.AlertsPublished,
 				consumerMetrics.DeserializeErrors+loopMetrics.ProcessingErrors,
+				lineageCacheStatus,
 			)
 
 			lastProcessed = processed
@@ -507,7 +623,112 @@ func (el *EventLoop) GetProcessingErrors() uint64 {
 	return atomic.LoadUint64(&el.metrics.ProcessingErrors)
 }
 
+// GetAverageRuleMatchingMs returns the average rule matching latency in ms.
+func (el *EventLoop) GetAverageRuleMatchingMs() float64 {
+	el.metrics.mu.RLock()
+	defer el.metrics.mu.RUnlock()
+	return el.metrics.AverageRuleMatchingMs
+}
+
+// GetAverageDatabaseQueryMs returns the average database write latency for alerts in ms.
+func (el *EventLoop) GetAverageDatabaseQueryMs() float64 {
+	if el.alertWriter != nil {
+		return el.alertWriter.Metrics().AvgWriteLatencyMs
+	}
+	return 0.0
+}
+
 // GetEventsProcessed returns the total number of events processed.
 func (el *EventLoop) GetEventsProcessed() uint64 {
 	return atomic.LoadUint64(&el.metrics.EventsProcessed)
 }
+
+// =============================================================================
+// Lineage Cache Hydration (Context-Aware Detection — Sprint 1)
+// =============================================================================
+
+// hydrateLineageCache writes the process context of a "process" event into
+// the lineage cache. It is called for every event, before Sigma evaluation.
+//
+// Only events whose event_type == "process" (or that carry a pid field)
+// are cached; other event types are skipped without error.
+//
+// Design notes:
+//   - The write is synchronous and will add ~0.1–0.5ms per event (Redis RTT).
+//     This is acceptable because the detection engine itself is CPU-bound at
+//     ~1–5ms per event. A future optimization could make this async via a
+//     fire-and-forget channel if latency becomes a concern.
+//   - Write errors are counted but never propagate — a lineage cache miss is
+//     far preferable to dropping a security event.
+func (el *EventLoop) hydrateLineageCache(event *domain.LogEvent) {
+	// Only process events carry the context we need.
+	eventType, _ := event.GetField("event_type")
+	if eventType != nil {
+		et, _ := eventType.(string)
+		if !strings.EqualFold(et, "process") {
+			return
+		}
+	} else {
+		// Fallback: skip if there is no pid field
+		if v, ok := event.GetField("pid"); !ok || v == nil {
+			return
+		}
+	}
+
+	// Extract agent_id from the event payload.
+	agentID := ""
+	if v, ok := event.GetField("agent_id"); ok && v != nil {
+		agentID, _ = v.(string)
+	}
+	if agentID == "" {
+		// agent_id may also be on the source sub-object; try a fallback key.
+		if v, ok := event.GetField("source.agent_id"); ok && v != nil {
+			agentID, _ = v.(string)
+		}
+	}
+	if agentID == "" {
+		logger.Warn("[LINEAGE] skipping hydration — agent_id missing from event")
+		return // cannot key the cache without an agent identifier
+	}
+
+	// Build a ProcessLineageEntry from the event's flat RawData map.
+	entry := cache.NewProcessLineageEntry(agentID, event.RawData)
+
+	// ── DIAGNOSTIC LOG ────────────────────────────────────────────────────────
+	// Logs at Info so it is visible in docker compose logs even without -debug.
+	// Search for [LINEAGE] in sigma-engine output to trace the hydration path.
+	logger.Infof("[LINEAGE] hydrate agent=%s pid=%d ppid=%d name=%q exe=%q parentName=%q",
+		agentID[:min(8, len(agentID))], entry.PID, entry.PPID,
+		entry.Name, entry.Executable, entry.ParentName)
+	// ─────────────────────────────────────────────────────────────────────────
+
+	if entry.PID == 0 {
+		logger.Warnf("[LINEAGE] SKIP pid=0 — pid not resolved from event (agent=%s event_type=%v)",
+			agentID[:min(8, len(agentID))], eventType)
+		return // pid is required; skip events where it is missing or zero
+	}
+
+	// Use a short-lived context so a stalled Redis write doesn't block workers.
+	writeCtx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+
+	if err := el.lineageCache.WriteEntry(writeCtx, entry); err != nil {
+		el.lineageCacheErrors.Add(1)
+		if el.lineageCacheErrors.Load()%100 == 1 {
+			// Rate-limit error logging: log the 1st, 101st, 201st, ... error
+			logger.Warnf("lineage cache write error (total=%d): %v",
+				el.lineageCacheErrors.Load(), err)
+		}
+	} else {
+		logger.Debugf("[LINEAGE] wrote key lineage:%s:%d", agentID[:min(8, len(agentID))], entry.PID)
+	}
+}
+
+// min returns the smaller of a and b (Go 1.20 doesn't have built-in min for ints).
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+

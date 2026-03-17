@@ -52,8 +52,12 @@ type Agent struct {
 	wg     sync.WaitGroup
 	mu     sync.RWMutex
 
-	// Config file path for re-enrollment persistence
+	// Config file path for re-enrollment persistence and hot-reload saves.
 	configFilePath string
+
+	// configUpdateFn is an optional hook registered by the C2 command handler
+	// so it can trigger UpdateConfig() without a direct import cycle.
+	configUpdateFn func(newCfg *config.Config) error
 }
 
 // New creates a new Agent instance.
@@ -80,13 +84,21 @@ func New(cfg *config.Config, logger *logging.Logger) (*Agent, error) {
 	}
 	diskQueue := queue.NewDiskQueue(queueDir, maxQueueMB)
 
+	grpcCli := grpcclient.NewClient(cfg, logger)
+	cmdHandler := command.NewHandler(logger, cfg.Server.Address)
+
+	// Wire the gRPC client into the command handler so the isolation watchdog
+	// can probe IsConnected() when the stream drops during isolation, and
+	// trigger self-healing firewall rule updates if the C2 IP has changed.
+	cmdHandler.SetGRPCHealthChecker(grpcCli)
+
 	a := &Agent{
 		cfg:            cfg,
 		logger:         logger,
 		eventChan:      eventChan,
 		batcher:        event.NewBatcher(cfg.Agent.BatchSize, cfg.Agent.BatchInterval, cfg.Agent.Compression, logger),
-		grpcClient:     grpcclient.NewClient(cfg, logger),
-		commandHandler: command.NewHandler(logger),
+		grpcClient:     grpcCli,
+		commandHandler: cmdHandler,
 		diskQueue:      diskQueue,
 		heartbeat:      grpcclient.NewHeartbeat(cfg, logger),
 	}
@@ -255,11 +267,89 @@ func (a *Agent) Stop() error {
 	return nil
 }
 
-// SetConfigFilePath sets the path used to persist config changes during re-enrollment.
+// SetConfigFilePath sets the path used to persist config changes during re-enrollment
+// and hot-reload saves.
 func (a *Agent) SetConfigFilePath(path string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.configFilePath = path
+}
+
+// SetRestartInfo passes the config file path to the command handler so it can
+// relaunch the agent in standalone mode (taskkill /F /PID + start <exe> -config <cfg>).
+// Call this immediately after agent.New() in both standalone and service modes.
+func (a *Agent) SetRestartInfo(configPath string) {
+	a.commandHandler.SetRestartInfo(configPath)
+}
+
+// SetConfigUpdateHandler registers a callback function that the command handler
+// will invoke when a C2 "UPDATE_CONFIG" or "PUSH_POLICY" command arrives.
+// This decouples the command package from the agent package to avoid import cycles.
+//
+// The fn must NOT block — it should apply the config and return quickly.
+// Use UpdateConfig() as the fn in most cases.
+func (a *Agent) SetConfigUpdateHandler(fn func(newCfg *config.Config) error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.configUpdateFn = fn
+	// Wire it into the command handler immediately.
+	a.commandHandler.SetConfigUpdateCallback(fn)
+	// Also give the handler a reference to the live config so it can clone it
+	// when processing filter policy JSON payloads (params["policy"]).
+	a.commandHandler.SetCurrentConfig(a.cfg)
+}
+
+// UpdateConfig atomically applies a validated new configuration to the running agent.
+//
+// Hot-reload behaviour:
+//  1. Validates the incoming config.
+//  2. Persists the new config to disk (overwrites config.yaml).
+//  3. Atomically updates a.cfg under the write lock.
+//  4. Resets the event Batcher so new batch-size / batch-interval take effect
+//     without restarting the Windows Service.
+//
+// Collectors (ETW, WMI, Registry, Network) are NOT restarted here because they
+// run in goroutines bound to a.ctx — restarting them would require cancelling
+// and re-spawning goroutines, which is invasive. Instead, the filter object on
+// each collector can be swapped by watching a.cfg under a read lock.
+// Full collector reconfiguration is deferred to the next service restart.
+func (a *Agent) UpdateConfig(newCfg *config.Config) error {
+	if newCfg == nil {
+		return fmt.Errorf("UpdateConfig: newCfg must not be nil")
+	}
+
+	// 1. Validate before touching anything.
+	if err := newCfg.Validate(); err != nil {
+		return fmt.Errorf("UpdateConfig: validation failed: %w", err)
+	}
+
+	// 2. Persist to disk so the new config survives a service restart.
+	a.mu.RLock()
+	cfgPath := a.configFilePath
+	a.mu.RUnlock()
+
+	if cfgPath == "" {
+		cfgPath = `C:\ProgramData\EDR\config\config.yaml`
+	}
+	if err := newCfg.Save(cfgPath); err != nil {
+		return fmt.Errorf("UpdateConfig: failed to persist config: %w", err)
+	}
+
+	// 3. Atomic config swap.
+	a.mu.Lock()
+	oldCfg := a.cfg
+	a.cfg = newCfg
+	a.mu.Unlock()
+
+	a.logger.Infof("[HotReload] Config updated: server=%s batchSize=%d (was %s/%d)",
+		newCfg.Server.Address, newCfg.Agent.BatchSize,
+		oldCfg.Server.Address, oldCfg.Agent.BatchSize)
+
+	// 4. Reset batcher with new parameters (non-blocking — batcher is goroutine-safe).
+	a.batcher.Reconfigure(newCfg.Agent.BatchSize, newCfg.Agent.BatchInterval, newCfg.Agent.Compression)
+
+	a.logger.Info("[HotReload] Batcher reconfigured — new policy active without service restart")
+	return nil
 }
 
 // watchReEnrollSignal monitors the gRPC client's ReEnrollSignal channel.

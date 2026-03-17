@@ -15,6 +15,7 @@ import (
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/keepalive"
@@ -91,15 +92,45 @@ func (c *Client) ReEnrollSignal() <-chan struct{} {
 }
 
 // Connect establishes connection to Connection Manager.
-// It first tries the configured address, then falls back to
-// auto-discovered addresses (default gateway) if the primary fails.
+//
+// FIX — Split-Brain (hostname-first dialing):
+// The agent config MUST store a DNS hostname (e.g. "edr-c2.local:50051"), NOT a
+// bare IP. When grpc.Dial receives a hostname, Go's internal DNS resolver
+// re-resolves it on every reconnection attempt, so the gRPC transport always
+// dials whatever IP the hostname currently maps to — the same IP that
+// isolateNetwork() whitelists via net.LookupHost. This eliminates the
+// Split-Brain where the firewall allows 129.1 but gRPC dials the stale 152.1.
+//
+// The fallback gateway-IP candidates are kept for the initial bootstrap phase
+// (before the agent enrolls and writes a hostname to config), but once a
+// hostname is in config it will always be tried first.
 func (c *Client) Connect(ctx context.Context) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	// ── ZOMBIE-STATE FIX ──────────────────────────────────────────────────────
+	// Problem: after a docker-compose restart or server-side connection drop,
+	// c.conn is non-nil but the underlying transport is in TransientFailure or
+	// Shutdown state. The old guard `if c.conn != nil { return nil }` caused
+	// Connect() to silently return without re-dialing, making RunReconnector
+	// loop forever without actually fixing the connection.
+	//
+	// Fix: check the REAL transport state. If the conn exists but is no longer
+	// Ready or Connecting, close it and re-dial.
 	if c.conn != nil {
-		return nil // Already connected
+		state := c.conn.GetState()
+		if state == connectivity.Ready || state == connectivity.Connecting {
+			return nil // Genuinely healthy — nothing to do
+		}
+		// Stale / dead connection — close it before re-dialing.
+		c.logger.Infof("Closing stale gRPC connection (state=%s) before re-dial", state)
+		_ = c.conn.Close()
+		c.conn = nil
+		c.serviceClient = nil
+		c.connected.Store(false)
+		c.clearStream()
 	}
+	// ──────────────────────────────────────────────────────────────────────────
 
 	var transportCreds credentials.TransportCredentials
 	if c.cfg.Server.Insecure {
@@ -123,8 +154,11 @@ func (c *Client) Connect(ctx context.Context) error {
 		}),
 	}
 
-	// Build candidate addresses: primary + gateway fallbacks
-	candidates := c.resolveServerAddresses()
+	// Build candidate addresses: hostname FIRST (DNS-based), then gateway fallbacks.
+	// Keeping the hostname raw (not pre-resolved to IP) is the critical change:
+	// grpc.Dial will call os.LookupHost internally on every reconnect attempt,
+	// so it always dials the current IP — matching whatever the firewall allows.
+	candidates := c.buildDialCandidates()
 
 	var lastErr error
 	for _, addr := range candidates {
@@ -142,10 +176,14 @@ func (c *Client) Connect(ctx context.Context) error {
 
 		c.conn = conn
 		c.serviceClient = NewEventIngestionServiceClient(conn)
+		// Do NOT call c.connected.Store(true) here — IsConnected() reads the
+		// transport state directly from conn.GetState() now, so this flag is
+		// only kept for backward compat with RunReconnector's loop condition.
 		c.connected.Store(true)
 		c.logger.Infof("Connected to server at %s", addr)
 
-		// Persist successful address for next reconnection
+		// If we succeeded on a fallback address, persist it so future
+		// reconnections start from the right place.
 		if addr != c.cfg.Server.Address {
 			c.logger.Infof("Updating server address from %s → %s", c.cfg.Server.Address, addr)
 			c.cfg.Server.Address = addr
@@ -157,21 +195,33 @@ func (c *Client) Connect(ctx context.Context) error {
 	return fmt.Errorf("all addresses failed, last error: %w", lastErr)
 }
 
-// resolveServerAddresses returns a list of candidate server addresses.
-// It starts with the configured address, then adds the default gateway
-// with the same port. This makes the agent resilient to network interface
-// changes (NAT → Host-Only, DHCP renews, etc.).
-func (c *Client) resolveServerAddresses() []string {
+// buildDialCandidates returns ordered dial targets for Connect().
+//
+// DESIGN — hostname-first to prevent Split-Brain:
+// The primary address from config MUST be a DNS hostname (e.g. "edr-c2.local:50051").
+// It is passed verbatim to grpc.Dial — we do NOT pre-resolve it to an IP here.
+// This means Go's gRPC resolver calls net.LookupHost on every dial attempt,
+// so it always dials whichever IP the hostname currently resolves to.
+//
+// isolateNetwork() calls net.LookupHost for the same hostname to build
+// the firewall ALLOW rule → both use the same DNS record → same IP →
+// no more Split-Brain.
+//
+// Gateway-IP fallbacks are appended for bootstrap resilience (before enrollment)
+// but will NOT be tried if the hostname dial succeeds.
+func (c *Client) buildDialCandidates() []string {
 	primary := c.cfg.Server.Address
 	_, port, err := net.SplitHostPort(primary)
 	if err != nil {
 		port = "50051"
 	}
 
+	// primary goes first — must be a hostname for DNS-based resolution.
 	candidates := []string{primary}
 	seen := map[string]bool{primary: true}
 
-	// 1) Try gateway IPs (the host machine on a VM network)
+	// Gateway-IP fallbacks: useful when the agent has no DNS config yet
+	// (e.g. fresh install before /etc/hosts or mDNS is configured).
 	for _, gw := range discoverGatewayIPs() {
 		addr := net.JoinHostPort(gw, port)
 		if !seen[addr] {
@@ -180,7 +230,7 @@ func (c *Client) resolveServerAddresses() []string {
 		}
 	}
 
-	// 2) Always try localhost as last resort
+	// Localhost as last resort (single-machine dev/test setups).
 	for _, host := range []string{"localhost", "127.0.0.1"} {
 		addr := net.JoinHostPort(host, port)
 		if !seen[addr] {
@@ -189,7 +239,7 @@ func (c *Client) resolveServerAddresses() []string {
 		}
 	}
 
-	c.logger.Debugf("Server candidates: %v", candidates)
+	c.logger.Debugf("Dial candidates: %v", candidates)
 	return candidates
 }
 
@@ -263,11 +313,26 @@ func (c *Client) loadTLSConfig() (*tls.Config, error) {
 		return nil, fmt.Errorf("failed to parse CA certificate")
 	}
 
-	return &tls.Config{
+	// Build mTLS config with client cert + CA chain.
+	tlsCfg := &tls.Config{
 		Certificates: []tls.Certificate{cert},
 		RootCAs:      caCertPool,
 		MinVersion:   tls.VersionTLS12,
-	}, nil
+	}
+
+	// ServerName override: resolves SAN mismatch when the agent connects to a
+	// custom deployment domain (e.g. "edr.internal", a bare IP injected via
+	// hosts file) but the server certificate's SANs list only the internal
+	// service name (e.g. "edr-connection-manager", "localhost").
+	// Setting ServerName tells the TLS layer which name to validate against,
+	// independent of the hostname used for the TCP connection.
+	if c.cfg.Server.TLSServerName != "" {
+		tlsCfg.ServerName = c.cfg.Server.TLSServerName
+		c.logger.Infof("mTLS dialer: ServerName override → %q (dialing %s)",
+			c.cfg.Server.TLSServerName, c.cfg.Server.Address)
+	}
+
+	return tlsCfg, nil
 }
 
 // Disconnect closes the connection and clears the active stream.
@@ -287,9 +352,33 @@ func (c *Client) Disconnect() error {
 	return nil
 }
 
-// IsConnected returns connection status.
+// IsConnected returns the TRUE transport-layer connectivity state.
+//
+// FIX — Blind Watchdog (connectivity.Ready check):
+// The previous implementation returned a stale atomic bool (c.connected) that
+// was only updated at dial/disconnect time. The gRPC transport can transition
+// to Idle, Connecting, or TransientFailure without us setting that bool, which
+// caused the Watchdog to print "gRPC healthy ✓" even while the stream was
+// reporting rpc error: code = Unavailable.
+//
+// The fix: read conn.GetState() directly from the ClientConn. This reflects the
+// real underlying transport state maintained by the gRPC library:
+//
+//	connectivity.Ready          → transport is up, RPCs will succeed
+//	connectivity.Idle           → no active RPCs; keepalive may wake it
+//	connectivity.Connecting     → handshake in progress
+//	connectivity.TransientFailure → last connect attempt failed, retrying
+//	connectivity.Shutdown       → conn was closed
+//
+// Only connectivity.Ready means the Watchdog should consider the channel healthy.
 func (c *Client) IsConnected() bool {
-	return c.connected.Load()
+	c.mu.RLock()
+	conn := c.conn
+	c.mu.RUnlock()
+	if conn == nil {
+		return false
+	}
+	return conn.GetState() == connectivity.Ready
 }
 
 // SendBatch queues a proto EventBatch for sending (asynchronous).
@@ -628,7 +717,7 @@ func (c *Client) recvLoop(ctx context.Context, stream EventIngestionService_Stre
 
 		resp, err := stream.Recv()
 		if err != nil {
-			c.logger.Debugf("Stream Recv error: %v", err)
+			c.logger.Warnf("Stream Recv error (stream broken): %v", err)
 			return err
 		}
 		if resp == nil {
@@ -689,11 +778,23 @@ func (c *Client) RunReceiver(ctx context.Context) {
 }
 
 // RunReconnector handles automatic reconnection.
+//
+// ZOMBIE-STATE FIX:
+// Previously checked `c.connected.Load()` (an atomic bool set only at dial/
+// disconnect time) which is permanently out of sync with the gRPC transport
+// state after a silent failure. The fix: use `c.IsConnected()` which reads
+// `conn.GetState() == connectivity.Ready` directly from the transport layer.
 func (c *Client) RunReconnector(ctx context.Context) {
 	c.logger.Debug("Reconnector started")
 
 	delay := c.cfg.Server.ReconnectDelay
+	if delay <= 0 {
+		delay = time.Second
+	}
 	maxDelay := c.cfg.Server.MaxReconnectDelay
+	if maxDelay <= 0 {
+		maxDelay = 30 * time.Second
+	}
 
 	for {
 		select {
@@ -701,27 +802,35 @@ func (c *Client) RunReconnector(ctx context.Context) {
 			c.logger.Debug("Reconnector stopped")
 			return
 		default:
-			if !c.connected.Load() && !c.reconnecting.Load() {
-				c.reconnecting.Store(true)
-
-				c.logger.Infof("Attempting reconnection in %v...", delay)
-				time.Sleep(delay)
-
-				if err := c.Connect(ctx); err != nil {
-					c.logger.Warnf("Reconnection failed: %v", err)
-					// Exponential backoff
-					delay = delay * 2
-					if delay > maxDelay {
-						delay = maxDelay
-					}
-				} else {
-					delay = c.cfg.Server.ReconnectDelay // Reset delay on success
-				}
-
-				c.reconnecting.Store(false)
-			}
-			time.Sleep(time.Second)
 		}
+
+		// Use the REAL transport state, not the stale atomic bool.
+		if !c.IsConnected() && !c.reconnecting.Load() {
+			c.reconnecting.Store(true)
+
+			c.logger.Infof("[Reconnector] Connection lost — reconnecting in %v...", delay)
+			select {
+			case <-ctx.Done():
+				c.reconnecting.Store(false)
+				return
+			case <-time.After(delay):
+			}
+
+			if err := c.Connect(ctx); err != nil {
+				c.logger.Warnf("[Reconnector] Reconnection failed: %v", err)
+				// Exponential backoff
+				delay = delay * 2
+				if delay > maxDelay {
+					delay = maxDelay
+				}
+			} else {
+				c.logger.Info("[Reconnector] Reconnection successful")
+				delay = c.cfg.Server.ReconnectDelay // Reset delay on success
+			}
+
+			c.reconnecting.Store(false)
+		}
+		time.Sleep(time.Second)
 	}
 }
 

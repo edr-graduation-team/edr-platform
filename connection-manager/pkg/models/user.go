@@ -29,11 +29,13 @@ type User struct {
 	UpdatedAt time.Time `db:"updated_at" json:"updated_at"`
 }
 
-// User role constants
+// User role constants — must match the roles table seed.
 const (
-	UserRoleAdmin   = "admin"
-	UserRoleAnalyst = "analyst"
-	UserRoleViewer  = "viewer"
+	UserRoleAdmin      = "admin"
+	UserRoleSecurity   = "security"
+	UserRoleAnalyst    = "analyst"
+	UserRoleOperations = "operations"
+	UserRoleViewer     = "viewer"
 )
 
 // User status constants
@@ -41,6 +43,7 @@ const (
 	UserStatusActive   = "active"
 	UserStatusInactive = "inactive"
 	UserStatusLocked   = "locked"
+	UserStatusDeleted  = "deleted"
 )
 
 // IsActive returns true if the user account is active.

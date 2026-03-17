@@ -2,6 +2,7 @@
 package api
 
 import (
+	"context"
 	"net/http"
 	"strings"
 	"time"
@@ -12,6 +13,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/edr-platform/connection-manager/internal/repository"
+	"github.com/edr-platform/connection-manager/pkg/models"
 	edrv1 "github.com/edr-platform/connection-manager/proto/v1"
 )
 
@@ -62,7 +64,7 @@ func (h *Handlers) ListAgents(c echo.Context) error {
 		total = int64(len(agents))
 	}
 
-	// Map to API response models
+	// Map to API response models — populate ALL fields for InlineAgentDetail panel
 	summaries := make([]AgentSummary, 0, len(agents))
 	for _, a := range agents {
 		summary := AgentSummary{
@@ -75,6 +77,21 @@ func (h *Handlers) ListAgents(c echo.Context) error {
 			LastSeen:        a.LastSeen,
 			HealthScore:     a.HealthScore,
 			EventsDelivered: a.EventsDelivered,
+			CPUCount:        a.CPUCount,
+			MemoryMB:        a.MemoryMB,
+			IPAddresses:     a.IPAddresses,
+			IsIsolated:      a.IsIsolated,
+			EventsCollected: a.EventsCollected,
+			EventsDropped:   a.EventsDropped,
+			CPUUsage:        a.CPUUsage,
+			MemoryUsedMB:    a.MemoryUsedMB,
+			QueueDepth:      a.QueueDepth,
+			CurrentCertID:   a.CurrentCertID,
+			InstalledDate:   a.InstalledDate,
+			CreatedAt:       a.CreatedAt,
+			UpdatedAt:       a.UpdatedAt,
+			Tags:            a.Tags,
+			Metadata:        a.Metadata,
 		}
 		if a.CertExpiresAt != nil && !a.CertExpiresAt.IsZero() {
 			summary.CertExpiresAt = a.CertExpiresAt
@@ -114,11 +131,8 @@ func (h *Handlers) GetAgent(c echo.Context) error {
 		return errorResponse(c, http.StatusNotFound, "NOT_FOUND", "Agent not found")
 	}
 
-	// Parse IP addresses from metadata
-	var ipAddresses []string
-	if ips, ok := a.Metadata["ip_addresses"]; ok && ips != "" {
-		ipAddresses = strings.Split(ips, ",")
-	}
+	// Use the actual IPAddresses field from the DB (not metadata)
+	ipAddresses := a.IPAddresses
 
 	detail := AgentDetail{
 		AgentSummary: AgentSummary{
@@ -131,6 +145,7 @@ func (h *Handlers) GetAgent(c echo.Context) error {
 			LastSeen:        a.LastSeen,
 			HealthScore:     a.HealthScore,
 			EventsDelivered: a.EventsDelivered,
+			IsIsolated:      a.IsIsolated,
 		},
 		IPAddresses:     ipAddresses,
 		CPUCount:        a.CPUCount,
@@ -302,7 +317,12 @@ func (h *Handlers) GetAgentCommands(c echo.Context) error {
 }
 
 // ExecuteAgentCommand pushes a command to a live agent via the AgentRegistry.
-// If the agent is online, the command is delivered instantly over its gRPC stream.
+// Dual-write strategy:
+//  1. Persist command to DB with status=pending (durable record created first)
+//  2. Push to agent's live gRPC stream — update DB to sent or failed accordingly
+//
+// This eliminates the race condition where a command is lost if the stream
+// disconnects between the Send() call and the actual delivery.
 func (h *Handlers) ExecuteAgentCommand(c echo.Context) error {
 	h.logger.Info("[C2] ExecuteAgentCommand called")
 
@@ -326,56 +346,218 @@ func (h *Handlers) ExecuteAgentCommand(c echo.Context) error {
 		return errorResponse(c, http.StatusServiceUnavailable, "C2_UNAVAILABLE", "Command routing is not available")
 	}
 
-	// Check if agent is online
-	if !h.registry.IsOnline(agentID.String()) {
+	// Special case: start_agent works even when agent is offline.
+	// The command is stored in DB (status=pending). When the agent reconnects
+	// it auto-starts because: (1) Windows service recovery restarts it, or
+	// (2) the redeliverPendingCommands goroutine pushes it on next connect.
+	if strings.ToLower(req.CommandType) == "start_agent" {
+		// Inject mode so agent's restartService handler knows to only start, not stop
+		if req.Parameters == nil {
+			req.Parameters = map[string]string{}
+		}
+		req.Parameters["mode"] = "start"
+	}
+
+	// Check if agent is online (skip for start_agent — handled above as offline-safe)
+	if strings.ToLower(req.CommandType) != "start_agent" && !h.registry.IsOnline(agentID.String()) {
 		h.logger.Warnf("[C2] Agent %s is not online", agentID)
 		return errorResponse(c, http.StatusNotFound, "AGENT_OFFLINE", "Agent is not online — command cannot be delivered")
 	}
 
-	// Map REST command_type to proto CommandType
-	cmdType := mapCommandType(req.CommandType)
+	// ── Step 1: Persist to DB FIRST (status=pending) ──────────────────────────
+	// Always create a durable record before attempting delivery so commands are
+	// never lost if the gRPC stream disconnects during the Send() call.
+	// NOTE: issued_by is intentionally left nil (NULL). The JWT UserID is a
+	// claims string that may not match the UUID in the users table, causing FK
+	// violations. The issuer username is stored in Metadata for audit purposes.
+	commandID := uuid.New()
+	if h.commandRepo != nil {
+		params := make(map[string]any, len(req.Parameters))
+		for k, v := range req.Parameters {
+			params[k] = v
+		}
+		timeout := req.Timeout
+		if timeout <= 0 {
+			timeout = 300
+		}
+		// Build metadata with issuer info for audit (avoids FK constraint on issued_by)
+		meta := map[string]any{}
+		if user := getCurrentUser(c); user != nil {
+			meta["issued_by_username"] = user.Username
+			if len(user.Roles) > 0 {
+				meta["issued_by_role"] = user.Roles[0]
+			}
+		}
+		dbCmd := &models.Command{
+			ID:             commandID,
+			AgentID:        agentID,
+			CommandType:    models.CommandType(req.CommandType),
+			Parameters:     params,
+			Priority:       5,
+			Status:         models.CommandStatusPending,
+			TimeoutSeconds: timeout,
+			IssuedBy:       nil, // always nil to avoid FK violation
+			Metadata:       meta,
+		}
+		if err := h.commandRepo.Create(c.Request().Context(), dbCmd); err != nil {
+			h.logger.WithError(err).Error("[C2] Failed to persist command to DB before dispatch — aborting")
+			return errorResponse(c, http.StatusInternalServerError, "DB_ERROR", "Failed to persist command")
+		}
+		h.logger.Infof("[C2] Command %s persisted to DB (status=pending)", commandID)
+	}
 
-	// Build proto Command
-	commandID := uuid.New().String()
+	// ── Step 1b: Inject mode parameter for agent service control commands ───────
+	// The agent's restartService handler checks Parameters["mode"] to decide
+	// whether to stop+start (restart), stop only, or start only.
+	switch strings.ToLower(req.CommandType) {
+	case "stop_agent", "stop_service":
+		if req.Parameters == nil {
+			req.Parameters = map[string]string{}
+		}
+		req.Parameters["mode"] = "stop" // agent: sc stop EDRAgent only
+	case "restart_agent", "restart_service":
+		if req.Parameters == nil {
+			req.Parameters = map[string]string{}
+		}
+		req.Parameters["mode"] = "restart" // agent: sc stop → sc start
+		// start_agent mode already injected in the offline-safe block above
+	case "isolate", "isolate_network", "unisolate", "unisolate_network", "restore_network":
+		// Auto-inject the C2 server address so the agent builds correct ALLOW
+		// firewall rules. The agent falls back to config.server.address when
+		// server_address is not provided, but explicit injection is more reliable.
+		if h.grpcAddress != "" {
+			if req.Parameters == nil {
+				req.Parameters = map[string]string{}
+			}
+			if req.Parameters["server_address"] == "" {
+				req.Parameters["server_address"] = h.grpcAddress
+			}
+		}
+	}
+
+	// ── Step 2: Map REST command_type to proto and push to gRPC stream ─────────
+	cmdType := mapCommandType(req.CommandType)
 	cmd := &edrv1.Command{
-		CommandId:  commandID,
+		CommandId:  commandID.String(),
 		Timestamp:  timestamppb.Now(),
 		Type:       cmdType,
 		Parameters: req.Parameters,
 		Priority:   5,
 	}
 
-	// Push to agent's live stream
 	if err := h.registry.Send(agentID.String(), cmd); err != nil {
-		h.logger.WithError(err).WithField("agent_id", agentID).Warn("Failed to push command to agent")
+		h.logger.WithError(err).WithField("agent_id", agentID).Warn("[C2] Failed to push command to agent — marking as failed in DB")
+		// Update DB to 'failed' since we couldn't deliver
+		if h.commandRepo != nil {
+			_ = h.commandRepo.UpdateStatus(c.Request().Context(), commandID, models.CommandStatusFailed, nil, err.Error())
+		}
 		return errorResponse(c, http.StatusConflict, "SEND_FAILED", err.Error())
+	}
+
+	// ── Step 3: Update DB to 'sent' ────────────────────────────────────────────
+	if h.commandRepo != nil {
+		if err := h.commandRepo.UpdateStatus(c.Request().Context(), commandID, models.CommandStatusSent, nil, ""); err != nil {
+			h.logger.WithError(err).Warn("[C2] Failed to update command status to sent (non-fatal)")
+		}
+	}
+
+	// ── Step 3b: Proactively update isolation state ──────────────────────────
+	// Set is_isolated in the DB immediately at dispatch rather than waiting
+	// for the agent's asynchronous SendCommandResult ACK. This eliminates the
+	// race between the dashboard's next query and the async result, ensuring
+	// the UI shows "Restore Network" (or "Isolate Network") right away.
+	if h.agentSvc != nil {
+		switch strings.ToLower(req.CommandType) {
+		case "isolate_network", "isolate":
+			if err := h.agentSvc.SetIsolation(c.Request().Context(), agentID, true); err != nil {
+				h.logger.WithError(err).Warn("[Isolation] Failed to proactively set is_isolated=true")
+			} else {
+				h.logger.Infof("[Isolation] Agent %s proactively marked ISOLATED at dispatch", agentID)
+			}
+		case "restore_network", "unisolate_network", "unisolate":
+			if err := h.agentSvc.SetIsolation(c.Request().Context(), agentID, false); err != nil {
+				h.logger.WithError(err).Warn("[Isolation] Failed to proactively set is_isolated=false")
+			} else {
+				h.logger.Infof("[Isolation] Agent %s proactively marked UN-ISOLATED at dispatch", agentID)
+			}
+		}
 	}
 
 	h.logger.WithFields(logrus.Fields{
 		"agent_id":     agentID,
 		"command_id":   commandID,
 		"command_type": req.CommandType,
+		"proto_type":   cmdType.String(),
 	}).Info("[C2] Command dispatched to agent via live stream")
 
+	// ── Step 4: Write audit log entry (non-blocking) ────────────────────────
+	if h.auditRepo != nil {
+		ip, ua := auditContext(c)
+		username := "unknown"
+		userID := uuid.Nil
+		if user := getCurrentUser(c); user != nil {
+			username = user.Username
+			if uid, parseErr := uuid.Parse(user.UserID); parseErr == nil {
+				userID = uid
+			}
+		}
+		auditAction := models.AuditActionCommandExecuted
+		if req.CommandType == "isolate" || req.CommandType == "isolate_network" {
+			auditAction = models.AuditActionIsolate
+		} else if req.CommandType == "unisolate" || req.CommandType == "unisolate_network" || req.CommandType == "restore_network" {
+			auditAction = models.AuditActionUnisolate
+		} else if req.CommandType == "update_filter_policy" {
+			auditAction = models.AuditActionDeployPolicy
+		}
+
+		auditEntry := models.NewAuditLog(userID, username, auditAction, "command", commandID).
+			WithContext(ip, ua).
+			WithDetails("agent=" + agentID.String() + " type=" + req.CommandType)
+		go func(entry *models.AuditLog) {
+			auditCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := h.auditRepo.Create(auditCtx, entry); err != nil {
+				h.logger.WithError(err).Warn("[C2] Failed to write audit log entry (non-fatal)")
+			}
+		}(auditEntry)
+	}
+
 	return c.JSON(http.StatusAccepted, CommandResponse{
-		CommandID: commandID,
-		Status:    "dispatched",
+		CommandID: commandID.String(),
+		Status:    "sent",
 		IssuedAt:  time.Now(),
 	})
 }
 
 // mapCommandType maps REST API command type strings to proto CommandType.
+// Every command type exposed in the dashboard must have a case here;
+// missing entries would cause the agent to receive COMMAND_TYPE_UNSPECIFIED
+// and log "unknown command type", silently dropping the command.
 func mapCommandType(cmdType string) edrv1.CommandType {
 	switch strings.ToLower(cmdType) {
 	case "kill_process", "terminate_process":
 		return edrv1.CommandType_COMMAND_TYPE_TERMINATE_PROCESS
 	case "collect_logs", "collect_forensics":
 		return edrv1.CommandType_COMMAND_TYPE_COLLECT_FORENSICS
+	case "quarantine_file":
+		// Agent handler: CmdQuarantineFile = "QUARANTINE_FILE"
+		// No dedicated proto enum — re-use COLLECT_FORENSICS slot with parameters.
+		// The agent distinguishes via the raw type string in the Parameters map.
+		return edrv1.CommandType_COMMAND_TYPE_COLLECT_FORENSICS
+	case "scan_file", "scan_memory":
+		// Map to COLLECT_FORENSICS so the agent receives it; params carry sub-type.
+		return edrv1.CommandType_COMMAND_TYPE_COLLECT_FORENSICS
 	case "isolate", "isolate_network":
 		return edrv1.CommandType_COMMAND_TYPE_ISOLATE
 	case "unisolate", "unisolate_network", "restore_network":
 		return edrv1.CommandType_COMMAND_TYPE_UNISOLATE
 	case "restart_agent", "restart_service":
+		return edrv1.CommandType_COMMAND_TYPE_RESTART_SERVICE
+	case "stop_agent", "stop_service":
+		// Stop only — agent checks Parameters["mode"] == "stop"
+		return edrv1.CommandType_COMMAND_TYPE_RESTART_SERVICE
+	case "start_agent", "start_service":
+		// Start only — agent checks Parameters["mode"] == "start"
 		return edrv1.CommandType_COMMAND_TYPE_RESTART_SERVICE
 	case "restart", "restart_machine":
 		return 10 // COMMAND_TYPE_RESTART — machine reboot (enum value 10)
@@ -385,10 +567,15 @@ func mapCommandType(cmdType string) edrv1.CommandType {
 		return edrv1.CommandType_COMMAND_TYPE_UPDATE_AGENT
 	case "update_config", "update_policy":
 		return edrv1.CommandType_COMMAND_TYPE_UPDATE_CONFIG
+	case "update_filter_policy":
+		// Front-end pushes filter policy — mapped to UPDATE_CONFIG so agent
+		// receives it; Parameters["policy"] carries the JSON payload.
+		return edrv1.CommandType_COMMAND_TYPE_UPDATE_CONFIG
 	case "adjust_rate":
 		return edrv1.CommandType_COMMAND_TYPE_ADJUST_RATE
-	case "run_cmd":
-		// RUN_CMD uses numeric value 9; agent handles it by string matching
+	case "run_cmd", "custom":
+		// RUN_CMD uses numeric value 9; agent handles it by string matching.
+		// "custom" from dashboard UI is also routed here.
 		return 9
 	default:
 		return edrv1.CommandType_COMMAND_TYPE_UNSPECIFIED

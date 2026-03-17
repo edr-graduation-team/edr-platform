@@ -79,14 +79,13 @@ filtering:
     - '*\Code.exe'
     - '*\devenv.exe'
 
-  whitelisted_users:
-    - 'NT AUTHORITY\SYSTEM'
-    - 'NT AUTHORITY\LOCAL SERVICE'
-    - 'NT AUTHORITY\NETWORK SERVICE'
+  # NOTE: whitelisted_users removed (RC-2 fix) — "NT AUTHORITY\SYSTEM" was
+  # silently dropping the vast majority of process events before rule evaluation.
+  whitelisted_users: []
 
-  whitelisted_parent_processes:
-    - 'C:\Windows\explorer.exe'
-    - 'C:\Windows\System32\services.exe'
+  # NOTE: whitelisted_parent_processes removed (RC-2 fix) — explorer.exe and
+  # services.exe are legitimate parent processes for attacker tools.
+  whitelisted_parent_processes: []
 
 # Output configuration
 output:
@@ -115,9 +114,9 @@ rules:
   parallel_workers: 32
 
   # Quality filters: relax to accept all Windows process-creation rules (SigmaHQ uses experimental/test and various levels)
-  min_level: "high"
+  min_level: "medium"
   allowed_status:
     - "stable"
-    # - "test"
+    - "test"
   skip_experimental: true
 

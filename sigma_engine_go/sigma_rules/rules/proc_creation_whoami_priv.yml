@@ -1,0 +1,23 @@
+title: Reconnaissance Execution of whoami /priv
+id: 5b4c19dd-da26-4d2c-8ab5-d918fdc99684
+status: stable
+description: Detects the execution of whoami.exe with the /priv argument, which is frequently used by attackers downstream to check for elevated privilege assignments.
+author: Protocol EDR Auditing
+date: 2026/03/14
+logsource:
+    category: process_creation
+    product: windows
+detection:
+    selection_image:
+        Image|endswith: '\\whoami.exe'
+    selection_cmdline:
+        CommandLine|contains|all:
+            - 'whoami'
+            - '/priv'
+    condition: selection_image and selection_cmdline
+falsepositives:
+    - Authorized administrative troubleshooting or domain audits
+level: high
+tags:
+    - attack.discovery
+    - attack.t1033

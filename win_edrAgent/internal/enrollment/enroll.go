@@ -74,6 +74,16 @@ func EnsureEnrolled(cfg *config.Config, logger *logging.Logger, configFilePath s
 			RootCAs:    caPool,
 			MinVersion: tls.VersionTLS12,
 		}
+		// ServerName override: allows the agent to connect to a custom deployment
+		// domain (e.g. "edr.local" or a bare IP) while validating the server cert
+		// against the internal service name the cert was actually issued for
+		// (e.g. "edr-connection-manager"). This resolves x509 SAN mismatches
+		// without requiring re-issuance of server certificates.
+		if cfg.Server.TLSServerName != "" {
+			tlsCfg.ServerName = cfg.Server.TLSServerName
+			logger.Infof("Enrollment TLS: ServerName override → %q (connecting to %s)",
+				cfg.Server.TLSServerName, cfg.Server.Address)
+		}
 		dialOpt = grpc.WithTransportCredentials(credentials.NewTLS(tlsCfg))
 		logger.Info("Enrollment using TLS (server-auth only, no client cert)")
 	}

@@ -6,8 +6,10 @@ import (
 	"crypto/tls"
 	"fmt"
 	"net"
+	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -18,8 +20,10 @@ import (
 
 	"github.com/edr-platform/connection-manager/config"
 	"github.com/edr-platform/connection-manager/internal/cache"
+	"github.com/edr-platform/connection-manager/internal/repository"
 	"github.com/edr-platform/connection-manager/internal/service"
 	"github.com/edr-platform/connection-manager/pkg/handlers"
+	"github.com/edr-platform/connection-manager/pkg/models"
 	"github.com/edr-platform/connection-manager/pkg/security"
 	edrv1 "github.com/edr-platform/connection-manager/proto/v1"
 )
@@ -39,6 +43,12 @@ type Server struct {
 	eventHandler     *handlers.EventHandler
 	heartbeatHandler *handlers.HeartbeatHandler
 	registry         *handlers.AgentRegistry
+	commandRepo      repository.CommandRepository
+}
+
+// SetCommandRepo injects the command repository for C2 result persistence.
+func (s *Server) SetCommandRepo(repo repository.CommandRepository) {
+	s.commandRepo = repo
 }
 
 // NewServer creates a new gRPC server with all handler dependencies injected.
@@ -282,8 +292,80 @@ func (s *Server) SendCommandResult(ctx context.Context, res *edrv1.CommandResult
 		"error":      res.Error,
 	}).Info("Command result received from agent")
 
-	// TODO: Persist to database (commands table) and notify dashboard via WebSocket
+	// Persist result to commands table
+	if s.commandRepo != nil {
+		// Map agent status to DB status (agent sends UPPERCASE: "SUCCESS", "FAILED")
+		dbStatus := models.CommandStatusCompleted
+		agentStatus := strings.ToLower(res.Status)
+		if agentStatus == "failed" || agentStatus == "error" {
+			dbStatus = models.CommandStatusFailed
+		} else if agentStatus == "timeout" {
+			dbStatus = models.CommandStatusTimeout
+		}
+
+		result := map[string]any{
+			"output": res.Output,
+		}
+		if cmdID, err := uuid.Parse(res.CommandId); err == nil {
+			if err := s.commandRepo.UpdateStatus(ctx, cmdID, dbStatus, result, res.Error); err != nil {
+				s.logger.WithError(err).Warn("Failed to persist command result to DB")
+			} else {
+				s.logger.Infof("Command %s result persisted: status=%s", res.CommandId, dbStatus)
+			}
+		}
+	}
+
+	// ── Status side-effects for successful commands ────────────────────────────
+	// Look up the command from DB (to get command_type) and apply side-effects:
+	//   - isolate_network   → set is_isolated=true
+	//   - restore_network   → set is_isolated=false
+	//   - stop_agent        → set status='suspended' (distinguishes from offline!)
+	if s.commandRepo != nil && strings.ToLower(res.Status) == "success" {
+		if cmdID, err := uuid.Parse(res.CommandId); err == nil {
+			if cmd, err := s.commandRepo.GetByID(ctx, cmdID); err == nil {
+				cmdType := strings.ToLower(string(cmd.CommandType))
+				agentID, _ := uuid.Parse(res.AgentId)
+				switch {
+				case cmdType == "isolate_network":
+					s.updateAgentIsolation(ctx, agentID, true)
+					s.logger.Infof("[Isolation] Agent %s is now ISOLATED", agentID)
+				case cmdType == "restore_network" || cmdType == "unisolate_network":
+					s.updateAgentIsolation(ctx, agentID, false)
+					s.logger.Infof("[Isolation] Agent %s isolation RESTORED", agentID)
+				case cmdType == "stop_agent" || cmdType == "stop_service":
+					// Mark suspended so frontend shows 'Start Agent' enabled.
+					// The stream-close defer checks current status and skips
+					// the 'offline' overwrite when already 'suspended'.
+					s.updateAgentStatus(ctx, agentID, models.AgentStatusSuspended)
+					s.logger.Infof("[Control] Agent %s marked SUSPENDED after stop_agent ACK", agentID)
+				}
+			}
+		}
+	}
+
 	return &emptypb.Empty{}, nil
+}
+
+// updateAgentIsolation updates the agents.is_isolated column in PostgreSQL.
+func (s *Server) updateAgentIsolation(ctx context.Context, agentID uuid.UUID, isolated bool) {
+	if s.agentService == nil {
+		return
+	}
+	if err := s.agentService.SetIsolation(ctx, agentID, isolated); err != nil {
+		s.logger.WithError(err).Warnf("Failed to update agent %s isolation state", agentID)
+	}
+}
+
+// updateAgentStatus updates the agent status column in PostgreSQL.
+// Used for deliberate state transitions: suspended, online, offline.
+func (s *Server) updateAgentStatus(ctx context.Context, agentID uuid.UUID, status string) {
+	if s.agentService == nil {
+		return
+	}
+	// AgentService.UpdateStatus(ctx, id, status, metrics) — pass nil metrics to skip metric update
+	if err := s.agentService.UpdateStatus(ctx, agentID, status, nil); err != nil {
+		s.logger.WithError(err).Warnf("Failed to update agent %s status to %s", agentID, status)
+	}
 }
 
 // GetRegistry returns the server's AgentRegistry for use by the REST API.

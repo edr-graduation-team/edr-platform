@@ -2,6 +2,7 @@
 package models
 
 import (
+	"encoding/json"
 	"time"
 
 	"github.com/google/uuid"
@@ -68,6 +69,34 @@ type Alert struct {
 	Tags            map[string]string `json:"tags,omitempty" db:"tags"`
 	Metadata        map[string]any    `json:"metadata,omitempty" db:"metadata"`
 	Notes           string            `json:"notes,omitempty" db:"notes"`
+
+	// Context-Aware Risk Scoring (Phase 1) — populated from alerts.risk_score / context_snapshot / score_breakdown.
+	// These fields are written by the sigma_engine's RiskScorer and read by the connection-manager API.
+	RiskScore          int              `json:"risk_score" db:"risk_score"`
+	ContextSnapshot    json.RawMessage  `json:"context_snapshot,omitempty" db:"context_snapshot"`
+	ScoreBreakdown     json.RawMessage  `json:"score_breakdown,omitempty" db:"score_breakdown"`
+	FalsePositiveRisk  float64          `json:"false_positive_risk" db:"false_positive_risk"`
+}
+
+// IsOpen returns true if alert is open or in progress.
+
+// ==========================================================================
+// Phase 2 — Endpoint Risk Intelligence
+// ==========================================================================
+
+// EndpointRiskSummary aggregates risk scoring data per agent.
+// Computed by a single GROUP BY query on the alerts table; no agent join needed.
+// The dashboard merges this with agent metadata (hostname, OS, status) fetched
+// from the /api/v1/agents endpoint that is already cached by React Query.
+type EndpointRiskSummary struct {
+	AgentID       string    `json:"agent_id"`
+	TotalAlerts   int64     `json:"total_alerts"`
+	PeakRiskScore int       `json:"peak_risk_score"`
+	AvgRiskScore  float64   `json:"avg_risk_score"`
+	CriticalCount int64     `json:"critical_count"` // risk_score >= 90
+	HighCount     int64     `json:"high_count"`     // risk_score 70-89
+	OpenCount     int64     `json:"open_count"`     // status = 'open'
+	LastAlertAt   time.Time `json:"last_alert_at"`
 }
 
 // IsOpen returns true if alert is open or in progress.
@@ -185,7 +214,7 @@ type Command struct {
 	StartedAt      *time.Time     `json:"started_at,omitempty" db:"started_at"`
 	CompletedAt    *time.Time     `json:"completed_at,omitempty" db:"completed_at"`
 	ExpiresAt      time.Time      `json:"expires_at" db:"expires_at"`
-	IssuedBy       uuid.UUID      `json:"issued_by" db:"issued_by"`
+	IssuedBy       *uuid.UUID     `json:"issued_by,omitempty" db:"issued_by"`
 	Metadata       map[string]any `json:"metadata,omitempty" db:"metadata"`
 }
 

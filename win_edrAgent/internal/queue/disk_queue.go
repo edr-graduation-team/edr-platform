@@ -19,14 +19,22 @@ const (
 	fileExt = ".bin"
 )
 
+// DataEncryptor is an optional interface for data-at-rest encryption.
+// When set on DiskQueue, all data is encrypted before writing and decrypted on read.
+type DataEncryptor interface {
+	Encrypt(plaintext []byte) ([]byte, error)
+	Decrypt(ciphertext []byte) ([]byte, error)
+}
+
 // DiskQueue is a concurrent-safe disk queue that stores EventBatch protos as binary files.
 // Files are named <unix_nano>_<batch_id>.bin for chronological ordering. Oldest files are
 // evicted when total size would exceed MaxQueueSizeMB.
 type DiskQueue struct {
-	dir        string
-	maxSizeMB  int
+	dir          string
+	maxSizeMB    int
 	maxSizeBytes int64
-	mu         sync.Mutex
+	mu           sync.Mutex
+	encryptor    DataEncryptor // optional, nil = no encryption
 }
 
 // NewDiskQueue creates a new disk queue. dir must exist; maxSizeMB is the quota in megabytes.
@@ -40,6 +48,13 @@ func NewDiskQueue(dir string, maxSizeMB int) *DiskQueue {
 		maxSizeMB:    maxSizeMB,
 		maxSizeBytes: maxBytes,
 	}
+}
+
+// SetEncryptor enables data-at-rest encryption for all queue I/O.
+func (q *DiskQueue) SetEncryptor(enc DataEncryptor) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.encryptor = enc
 }
 
 // sanitizeBatchID returns a filesystem-safe name from batch ID (no path separators or reserved chars).
@@ -91,6 +106,15 @@ func (q *DiskQueue) Enqueue(batch *pb.EventBatch) error {
 	if err != nil {
 		return fmt.Errorf("marshal batch: %w", err)
 	}
+
+	// Encrypt data-at-rest if encryptor is available.
+	if q.encryptor != nil {
+		data, err = q.encryptor.Encrypt(data)
+		if err != nil {
+			return fmt.Errorf("encrypt batch: %w", err)
+		}
+	}
+
 	size := int64(len(data))
 
 	// Enforce quota: remove oldest files until we're under limit after adding this file
@@ -162,6 +186,14 @@ func (q *DiskQueue) PeekOldest() (*pb.EventBatch, string, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, "", fmt.Errorf("read queue file %s: %w", oldest, err)
+	}
+
+	// Decrypt data-at-rest if encryptor is available.
+	if q.encryptor != nil {
+		data, err = q.encryptor.Decrypt(data)
+		if err != nil {
+			return nil, "", fmt.Errorf("decrypt queue file %s: %w", oldest, err)
+		}
 	}
 
 	batch := &pb.EventBatch{}

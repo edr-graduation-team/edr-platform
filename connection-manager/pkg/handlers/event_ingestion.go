@@ -282,6 +282,31 @@ func (h *EventHandler) StreamEvents(stream edrv1.EventIngestionService_StreamEve
 			return status.Errorf(codes.Internal, "stream receive error: %v", err)
 		}
 
+		// ── PER-BATCH RATE LIMITING (#1) ──
+		// This is the critical check that was missing: rate limits are applied
+		// on EVERY batch inside the stream, not just at stream establishment.
+		// Each batch consumes batch.EventCount tokens from the bucket.
+		if h.rateLimiter != nil {
+			eventCount := int(batch.EventCount)
+			if eventCount <= 0 {
+				eventCount = 1
+			}
+			allowed, count, rlErr := h.rateLimiter.Allow(ctx, agentID, eventCount)
+			if rlErr != nil {
+				h.logger.WithError(rlErr).WithField("agent_id", agentID).Warn("Rate limiter error (fail-open)")
+			} else if !allowed {
+				h.logger.WithFields(logrus.Fields{
+					"agent_id": agentID,
+					"count":    count,
+					"batch_id": batch.BatchId,
+				}).Warn("Per-batch rate limit exceeded — dropping batch")
+				if h.metrics != nil {
+					h.metrics.RecordError("rate_limit_batch")
+				}
+				continue // Drop this batch, keep stream alive
+			}
+		}
+
 		// Process the batch
 		resp, err := h.processBatch(ctx, agentID, batch)
 		if err != nil {
@@ -586,6 +611,29 @@ func (h *EventHandler) processBatch(ctx context.Context, agentID string, batch *
 		return nil, nil
 	}
 
+	// 5b. STRICT JSON SCHEMA VALIDATION (#3)
+	// Every event MUST have event_type (string), timestamp (string), and severity (string).
+	// Events that fail validation are logged and dropped; valid events continue.
+	validEvents := make([]map[string]interface{}, 0, len(events))
+	for i, ev := range events {
+		if err := validateEventSchema(ev); err != nil {
+			logger.WithError(err).WithFields(logrus.Fields{
+				"event_index": i,
+				"batch_id":    batch.BatchId,
+			}).Warn("Event failed schema validation — dropped")
+			if h.metrics != nil {
+				h.metrics.RecordError("schema_validation_failed")
+			}
+			continue
+		}
+		validEvents = append(validEvents, ev)
+	}
+	if len(validEvents) == 0 {
+		logger.WithField("batch_id", batch.BatchId).Warn("All events in batch failed schema validation")
+		return nil, nil
+	}
+	events = validEvents
+
 	// 6. Enrich each event with agent_id (and batch_id) for downstream detection engine.
 	for i := range events {
 		events[i]["agent_id"] = agentID
@@ -691,10 +739,59 @@ func extractAgentIDFromContext(ctx context.Context) string {
 	return "unknown"
 }
 
-// storeToFallback writes an event batch to PostgreSQL as a last-resort fallback.
-// This is designed to never fail loudly — we log errors but do NOT propagate
-// them to the caller. Uses a fresh context (not the stream context) because
-// this is often called when the stream is already cancelled or disconnected.
+// ============================================================================
+// JSON SCHEMA VALIDATION (#3)
+// ============================================================================
+
+// validateEventSchema enforces a strict contract on each event before Kafka
+// ingestion. Required fields: event_type, timestamp, severity (all strings).
+// Also applies a per-event size limit to prevent oversized objects from
+// reaching Kafka.
+func validateEventSchema(ev map[string]interface{}) error {
+	const maxEventSize = 1 * 1024 * 1024 // 1 MB per individual event
+
+	// Required string fields
+	requiredStrings := []string{"event_type", "timestamp", "severity"}
+	for _, field := range requiredStrings {
+		val, exists := ev[field]
+		if !exists {
+			return fmt.Errorf("missing required field: %s", field)
+		}
+		// Defense-in-depth: coerce numeric severity to string so older agents
+		// that send severity as a number (e.g., 1, 2) are not dropped.
+		if _, ok := val.(string); !ok {
+			if num, isNum := val.(float64); isNum && field == "severity" {
+				ev[field] = fmt.Sprintf("%d", int(num))
+			} else {
+				return fmt.Errorf("field %s must be a string, got %T", field, val)
+			}
+		}
+	}
+
+	// event_type must not be empty
+	if ev["event_type"].(string) == "" {
+		return fmt.Errorf("event_type must not be empty")
+	}
+
+	// Per-event size check (marshal to check serialized size)
+	raw, err := json.Marshal(ev)
+	if err != nil {
+		return fmt.Errorf("event is not valid JSON: %w", err)
+	}
+	if len(raw) > maxEventSize {
+		return fmt.Errorf("event too large: %d bytes (max %d)", len(raw), maxEventSize)
+	}
+
+	return nil
+}
+
+// ============================================================================
+// ASYNC FALLBACK (#2)
+// ============================================================================
+
+// storeToFallback enqueues an event batch for asynchronous PostgreSQL storage.
+// This is NON-BLOCKING: the fallback store uses a bounded channel internally.
+// If the channel is full, the batch is dropped (logged as error).
 func (h *EventHandler) storeToFallback(_ context.Context, batch *edrv1.EventBatch, payload []byte) {
 	if h.fallbackStore == nil {
 		h.logger.WithFields(logrus.Fields{
@@ -718,16 +815,14 @@ func (h *EventHandler) storeToFallback(_ context.Context, batch *edrv1.EventBatc
 		}
 	}
 
-	fallbackCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	if err := h.fallbackStore.Store(fallbackCtx, batch.BatchId, batch.AgentId, payload, metadata); err != nil {
+	// Async enqueue — returns immediately, never blocks the gRPC stream.
+	if err := h.fallbackStore.Store(nil, batch.BatchId, batch.AgentId, payload, metadata); err != nil {
 		h.logger.WithError(err).WithFields(logrus.Fields{
 			"batch_id": batch.BatchId,
 			"agent_id": batch.AgentId,
-		}).Error("DB fallback write failed — event data may be lost")
+		}).Error("Async fallback enqueue failed — event data may be lost")
 		if h.metrics != nil {
-			h.metrics.RecordError("fallback_write_failed")
+			h.metrics.RecordError("fallback_enqueue_failed")
 		}
 	}
 }

@@ -303,12 +303,18 @@ function CommandExecutionModal({
     const handleExecute = () => {
         if (!agent || !commandType) return;
 
+        // Force 'confirm: true' for dangerous OS commands
+        const finalParams = { ...parameters };
+        if (commandType === 'restart_machine' || commandType === 'shutdown_machine') {
+            finalParams['confirm'] = 'true';
+        }
+
         setStatus('executing');
         executeMutation.mutate({
             agentId: agent.id,
             command: {
                 command_type: commandType,
-                parameters,
+                parameters: finalParams,
                 timeout: 300,
             },
         });
@@ -466,6 +472,43 @@ function CommandExecutionModal({
                             value={parameters.file_path || ''}
                             onChange={(e) => setParameters({ ...parameters, file_path: e.target.value })}
                         />
+                    </div>
+                );
+
+            case 'restart_machine':
+                return (
+                    <div className="space-y-3">
+                        <div className="p-3 bg-red-50 dark:bg-red-950/40 border border-red-300 dark:border-red-800 rounded-lg">
+                            <p className="text-sm font-bold text-red-700 dark:text-red-300 flex items-center gap-2">
+                                <AlertTriangle className="w-4 h-4" />
+                                Critical Action Warning
+                            </p>
+                            <p className="text-xs text-red-600 dark:text-red-400 mt-1">
+                                This will forcibly reboot the endpoint at the OS level. Any unsaved work on the target machine will be lost.
+                            </p>
+                        </div>
+                        {/* Hidden input to satisfy React state, but we'll also force it on Mount/Execute */}
+                        <p className="text-xs text-gray-500">
+                            By clicking Execute, you confirm this action. (Safety parameter <code>confirm="true"</code> will be sent to the agent).
+                        </p>
+                    </div>
+                );
+
+            case 'shutdown_machine':
+                return (
+                    <div className="space-y-3">
+                        <div className="p-3 bg-red-50 dark:bg-red-950/40 border border-red-300 dark:border-red-800 rounded-lg">
+                            <p className="text-sm font-bold text-red-700 dark:text-red-300 flex items-center gap-2">
+                                <AlertTriangle className="w-4 h-4" />
+                                Critical Action Warning
+                            </p>
+                            <p className="text-xs text-red-600 dark:text-red-400 mt-1">
+                                This will completely power off the endpoint. You will NOT be able to start it back up from this console.
+                            </p>
+                        </div>
+                        <p className="text-xs text-gray-500">
+                            By clicking Execute, you confirm this action. (Safety parameter <code>confirm="true"</code> will be sent to the agent).
+                        </p>
                     </div>
                 );
 

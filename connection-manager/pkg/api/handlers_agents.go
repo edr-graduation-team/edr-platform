@@ -446,10 +446,16 @@ func (h *Handlers) ExecuteAgentCommand(c echo.Context) error {
 	}
 
 	if err := h.registry.Send(agentID.String(), cmd); err != nil {
-		h.logger.WithError(err).WithField("agent_id", agentID).Warn("[C2] Failed to push command to agent — marking as failed in DB")
-		// Update DB to 'failed' since we couldn't deliver
+		h.logger.WithError(err).WithField("agent_id", agentID).Warn("[C2] Failed to push command to agent — marking as FAILED in DB")
+		// R1 FIX: Explicitly update DB to 'failed' and CHECK the error.
+		// If this update also fails, the command stays at 'pending' forever
+		// (phantom pending) — log it as CRITICAL so it's never missed.
 		if h.commandRepo != nil {
-			_ = h.commandRepo.UpdateStatus(c.Request().Context(), commandID, models.CommandStatusFailed, nil, err.Error())
+			if uErr := h.commandRepo.UpdateStatus(c.Request().Context(), commandID, models.CommandStatusFailed, nil, err.Error()); uErr != nil {
+				h.logger.WithError(uErr).Errorf("[C2] CRITICAL: Failed to update command %s to FAILED in DB — phantom pending command!", commandID)
+			} else {
+				h.logger.Infof("[C2] Command %s marked FAILED in DB (channel full or agent offline)", commandID)
+			}
 		}
 		return errorResponse(c, http.StatusConflict, "SEND_FAILED", err.Error())
 	}

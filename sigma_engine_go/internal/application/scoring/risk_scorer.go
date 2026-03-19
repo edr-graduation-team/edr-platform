@@ -27,6 +27,7 @@ import (
 	"github.com/edr-platform/sigma-engine/internal/application/baselines"
 	"github.com/edr-platform/sigma-engine/internal/domain"
 	infracache "github.com/edr-platform/sigma-engine/internal/infrastructure/cache"
+	"github.com/edr-platform/sigma-engine/internal/infrastructure/logger"
 )
 
 // =============================================================================
@@ -143,9 +144,9 @@ func (rs *DefaultRiskScorer) Score(ctx context.Context, input ScoringInput) (*Sc
 		agentPfx = agentPfx[:8]
 	}
 	if lineageErr != nil {
-		fmt.Printf("[SCORER] pid=%d agent=%s chainLen=0 err=%v\n", pid, agentPfx, lineageErr)
+		logger.Debugf("[SCORER] pid=%d agent=%s chainLen=0 err=%v", pid, agentPfx, lineageErr)
 	} else {
-		fmt.Printf("[SCORER] pid=%d agent=%s chainLen=%d\n", pid, agentPfx, len(lineageChain))
+		logger.Debugf("[SCORER] pid=%d agent=%s chainLen=%d", pid, agentPfx, len(lineageChain))
 	}
 	// ─────────────────────────────────────────────────────────────
 	lineageBonus, lineageSuspicion := rs.matrix.ComputeBonus(lineageChain)

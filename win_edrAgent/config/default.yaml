@@ -5,7 +5,7 @@ server:
   # C2 server address — MUST be a DNS hostname, NOT a bare IP.
   # Using a hostname ensures both grpc.Dial and isolateNetwork() resolve
   # the same DNS record → same IP → no Split-Brain during isolation.
-  address: "edr-c2.local:50051"
+  address: "edr.local:47051"
   # Use plaintext gRPC (no TLS) for debugging / Host-VM connectivity; set true when server has GRPC_INSECURE=1
   insecure: false
   # Connection timeout
@@ -44,6 +44,7 @@ collectors:
   registry_enabled: true
   # Enable file monitoring
   file_enabled: true
+  imageload_enabled: true
   # Enable network monitoring
   network_enabled: true
 

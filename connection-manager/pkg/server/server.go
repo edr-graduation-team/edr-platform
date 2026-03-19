@@ -95,6 +95,9 @@ func NewServer(
 		grpc.KeepaliveParams(kaParams),
 		grpc.KeepaliveEnforcementPolicy(kaPolicy),
 		grpc.MaxConcurrentStreams(cfg.Server.MaxConcurrentStreams),
+		// Match the 10MB payload limit in validateBatch(). The extra 1MB
+		// covers Protobuf envelope overhead (batch_id, metadata, etc.).
+		grpc.MaxRecvMsgSize(11*1024*1024),
 	)
 
 	// Add interceptors (middleware)

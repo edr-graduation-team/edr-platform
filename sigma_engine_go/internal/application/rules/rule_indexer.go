@@ -100,6 +100,10 @@ func (ri *RuleIndexer) BuildIndex(rules []*domain.SigmaRule) {
 
 // GetRules returns rules matching the given logsource parameters.
 // Uses O(1) lookup with fallback to partial matches.
+//
+// S9 FIX: Returns the internal slice directly (no defensive copy).
+// Rules are immutable after LoadRules() and are protected by the RLock.
+// Callers must NOT mutate the returned slice.
 func (ri *RuleIndexer) GetRules(product, category, service string) []*domain.SigmaRule {
 	start := time.Now()
 
@@ -110,25 +114,25 @@ func (ri *RuleIndexer) GetRules(product, category, service string) []*domain.Sig
 	key := fmt.Sprintf("%s:%s:%s", product, category, service)
 	if rules, ok := ri.index[key]; ok {
 		ri.updateLookupStats(time.Since(start))
-		return copyRules(rules)
+		return rules
 	}
 
 	// Try category match (product:category:*)
 	catKey := fmt.Sprintf("%s:%s", product, category)
 	if rules, ok := ri.categoryIndex[catKey]; ok {
 		ri.updateLookupStats(time.Since(start))
-		return copyRules(rules)
+		return rules
 	}
 
 	// Try product match (product:*:*)
 	if rules, ok := ri.productIndex[product]; ok {
 		ri.updateLookupStats(time.Since(start))
-		return copyRules(rules)
+		return rules
 	}
 
 	// Fallback to all rules
 	ri.updateLookupStats(time.Since(start))
-	return copyRules(ri.allRules)
+	return ri.allRules
 }
 
 // GetRulesByCategory returns all rules for a specific category.

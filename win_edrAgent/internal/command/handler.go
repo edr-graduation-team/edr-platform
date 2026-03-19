@@ -9,10 +9,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
 	"time"
+	"unsafe"
 
 	"gopkg.in/yaml.v3"
 
@@ -37,6 +39,48 @@ const (
 	CmdRestart          CommandType = "RESTART"  // Machine reboot
 	CmdShutdown         CommandType = "SHUTDOWN" // Machine shutdown
 )
+
+// =============================================================================
+// Win32 API Constants & Safety Definitions
+// =============================================================================
+
+// Win32 process access rights for R4 safe termination.
+const (
+	_PROCESS_TERMINATE                = 0x0001
+	_PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+)
+
+// criticalSystemProcesses is a hardcoded set of Windows processes that must
+// NEVER be terminated. Killing any of these causes a BSOD or system instability.
+var criticalSystemProcesses = map[string]bool{
+	"csrss.exe":    true,
+	"smss.exe":     true,
+	"wininit.exe":  true,
+	"services.exe": true,
+	"lsass.exe":    true,
+	"svchost.exe":  true,
+	"dwm.exe":      true,
+	"winlogon.exe": true,
+	"ntoskrnl.exe": true,
+	"system":       true,
+}
+
+// allowedDiagnostics is the strict whitelist of executables that runCommand
+// is permitted to invoke (R5 fix). ALL other executables are BLOCKED.
+var allowedDiagnostics = map[string]bool{
+	"ping":       true,
+	"tracert":    true,
+	"pathping":   true,
+	"netstat":    true,
+	"ipconfig":   true,
+	"nslookup":   true,
+	"whoami":     true,
+	"hostname":   true,
+	"systeminfo": true,
+	"tasklist":   true,
+	"arp":        true,
+	"route":      true,
+}
 
 // Command represents an incoming command from the server.
 type Command struct {
@@ -228,27 +272,99 @@ func truncateOutput(s string, maxLen int) string {
 	return s[:maxLen] + "..."
 }
 
-// terminateProcess kills a process by PID.
+// terminateProcess kills a process by PID using native Win32 APIs.
+//
+// R4 FIX: Uses OpenProcess + TerminateProcess via syscall instead of shelling
+// out to taskkill. Resolves the process name via QueryFullProcessImageNameW
+// and checks against the critical system process list to prevent BSODs.
 func (h *Handler) terminateProcess(ctx context.Context, params map[string]string) (string, error) {
-	pid := params["pid"]
-	if pid == "" {
+	pidStr := params["pid"]
+	if pidStr == "" {
 		return "", fmt.Errorf("pid parameter is required")
 	}
 
-	criticalPIDs := []string{"0", "4"}
-	for _, cp := range criticalPIDs {
-		if pid == cp {
-			return "", fmt.Errorf("cannot terminate critical system process")
-		}
+	pid, err := strconv.Atoi(pidStr)
+	if err != nil || pid <= 0 {
+		return "", fmt.Errorf("invalid PID: %s (must be a positive integer)", pidStr)
 	}
 
-	cmd := exec.CommandContext(ctx, "taskkill", "/PID", pid, "/F")
-	output, err := cmd.CombinedOutput()
+	// Block PIDs 0 and 4 (System Idle, System kernel).
+	if pid == 0 || pid == 4 {
+		return "", fmt.Errorf("cannot terminate critical system process (PID %d)", pid)
+	}
+
+	// Prevent killing the EDR agent's own process.
+	if pid == os.Getpid() {
+		return "", fmt.Errorf("cannot terminate the EDR agent's own process (PID %d)", pid)
+	}
+
+	// Resolve process name via Win32 API (no shelling out).
+	processName, nameErr := getProcessNameByPID(pid)
+	if nameErr != nil {
+		h.logger.Warnf("[C2] Could not resolve name for PID %d: %v — termination blocked", pid, nameErr)
+		return "", fmt.Errorf("cannot resolve process name for PID %d (process may not exist): %w", pid, nameErr)
+	}
+
+	// Check against critical system process list.
+	if criticalSystemProcesses[strings.ToLower(processName)] {
+		return "", fmt.Errorf("BLOCKED: cannot terminate critical system process %q (PID %d) — would cause BSOD", processName, pid)
+	}
+
+	// Open process with TERMINATE access right.
+	handle, err := syscall.OpenProcess(_PROCESS_TERMINATE, false, uint32(pid))
 	if err != nil {
-		return string(output), fmt.Errorf("taskkill failed: %w", err)
+		return "", fmt.Errorf("OpenProcess failed for PID %d (%s): %w", pid, processName, err)
+	}
+	defer syscall.CloseHandle(handle)
+
+	// Terminate via Win32 API (exit code 1).
+	if err := win32TerminateProcess(handle); err != nil {
+		return "", fmt.Errorf("TerminateProcess failed for PID %d (%s): %w", pid, processName, err)
 	}
 
-	return fmt.Sprintf("Process %s terminated", pid), nil
+	h.logger.Infof("[C2] Process terminated via Win32 API: PID=%d Name=%s", pid, processName)
+	return fmt.Sprintf("Process terminated via Win32 API: PID=%d Name=%s", pid, processName), nil
+}
+
+// getProcessNameByPID resolves a PID to its executable name using the Win32
+// QueryFullProcessImageNameW API. This is injection-safe — no shell invocation.
+func getProcessNameByPID(pid int) (string, error) {
+	handle, err := syscall.OpenProcess(_PROCESS_QUERY_LIMITED_INFORMATION, false, uint32(pid))
+	if err != nil {
+		return "", fmt.Errorf("OpenProcess(QUERY): %w", err)
+	}
+	defer syscall.CloseHandle(handle)
+
+	var buf [512]uint16
+	size := uint32(len(buf))
+
+	kernel32 := syscall.NewLazyDLL("kernel32.dll")
+	queryProc := kernel32.NewProc("QueryFullProcessImageNameW")
+
+	r1, _, e1 := queryProc.Call(
+		uintptr(handle),
+		0, // dwFlags = 0 → Win32 path format
+		uintptr(unsafe.Pointer(&buf[0])),
+		uintptr(unsafe.Pointer(&size)),
+	)
+	if r1 == 0 {
+		return "", fmt.Errorf("QueryFullProcessImageNameW: %v", e1)
+	}
+
+	fullPath := syscall.UTF16ToString(buf[:size])
+	return filepath.Base(fullPath), nil
+}
+
+// win32TerminateProcess calls the Win32 TerminateProcess API on an open handle.
+func win32TerminateProcess(handle syscall.Handle) error {
+	kernel32 := syscall.NewLazyDLL("kernel32.dll")
+	proc := kernel32.NewProc("TerminateProcess")
+
+	r1, _, e1 := proc.Call(uintptr(handle), 1) // exit code = 1
+	if r1 == 0 {
+		return fmt.Errorf("TerminateProcess: %v", e1)
+	}
+	return nil
 }
 
 // quarantineFile moves a file to quarantine.
@@ -950,73 +1066,105 @@ func (h *Handler) adjustRate(ctx context.Context, params map[string]string) (str
 	return fmt.Sprintf("Rate adjusted: batch_size=%s interval=%s", batchSize, interval), nil
 }
 
-// runCommand executes an arbitrary shell command with safety checks.
+// runCommand executes a diagnostic command from a strict whitelist.
+//
+// R5 FIX: The previous implementation passed raw user input to cmd.exe /C,
+// which was a catastrophic RCE vulnerability. This version:
+//   1. Parses the command into executable + arguments (no shell interpretation)
+//   2. Validates the executable against a hardcoded whitelist of safe diagnostics
+//   3. Invokes exec.Command directly (no cmd.exe, no shell interpolation)
 func (h *Handler) runCommand(ctx context.Context, params map[string]string) (string, error) {
-	cmdStr := params["cmd"]
+	cmdStr := strings.TrimSpace(params["cmd"])
 	if cmdStr == "" {
 		return "", fmt.Errorf("cmd parameter is required")
 	}
 
-	dangerousPatterns := []string{
-		"format ", "format.",
-		"del /s", "del /q",
-		"rd /s", "rmdir /s",
-		"shutdown", "restart",
-		"reg delete",
-		"bcdedit",
-		"diskpart",
-		"cipher /w",
-	}
-	lower := strings.ToLower(cmdStr)
-	for _, pattern := range dangerousPatterns {
-		if strings.Contains(lower, pattern) {
-			return "", fmt.Errorf("blocked: command contains dangerous pattern '%s'", pattern)
-		}
+	// Parse into executable + arguments (no shell interpretation).
+	parts := strings.Fields(cmdStr)
+	if len(parts) == 0 {
+		return "", fmt.Errorf("empty command after parsing")
 	}
 
+	// Normalize executable name: strip path and .exe suffix.
+	exeName := strings.ToLower(filepath.Base(parts[0]))
+	exeName = strings.TrimSuffix(exeName, ".exe")
+
+	// R5 FIX: Strict whitelist check.
+	if !allowedDiagnostics[exeName] {
+		allowed := make([]string, 0, len(allowedDiagnostics))
+		for k := range allowedDiagnostics {
+			allowed = append(allowed, k)
+		}
+		h.logger.Warnf("[C2] BLOCKED run_cmd: %q is not in whitelist", parts[0])
+		return "", fmt.Errorf("BLOCKED: %q is not in the allowed diagnostic commands whitelist. Allowed: %v", parts[0], allowed)
+	}
+
+	// Execute directly via exec.Command — NO cmd.exe, NO shell interpolation.
 	timeoutCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	execCmd := exec.CommandContext(timeoutCtx, "cmd", "/C", cmdStr)
+	var execCmd *exec.Cmd
+	if len(parts) > 1 {
+		execCmd = exec.CommandContext(timeoutCtx, parts[0], parts[1:]...)
+	} else {
+		execCmd = exec.CommandContext(timeoutCtx, parts[0])
+	}
+
 	output, err := execCmd.CombinedOutput()
 	if err != nil {
 		return string(output), fmt.Errorf("command failed: %w", err)
 	}
 
-	h.logger.Infof("[C2] run_cmd executed: %s", cmdStr)
+	h.logger.Infof("[C2] run_cmd executed (whitelisted): %s", cmdStr)
 	return string(output), nil
 }
 
 // restartMachine initiates an OS-level machine reboot.
+//
+// R6 FIX: Requires explicit confirm:"true" parameter and uses a 30-second
+// delay to allow cancellation (shutdown /a) if issued by mistake.
 func (h *Handler) restartMachine(_ context.Context, params map[string]string) (string, error) {
-	h.logger.Warn("[C2] RESTART MACHINE command received — scheduling OS reboot in 3 seconds")
+	// R6 FIX: Require explicit confirmation.
+	if strings.ToLower(params["confirm"]) != "true" {
+		return "", fmt.Errorf("BLOCKED: machine restart requires confirm=\"true\" parameter for safety")
+	}
+
+	h.logger.Warn("[C2] RESTART MACHINE command received (CONFIRMED) — scheduling OS reboot in 30 seconds")
 
 	reason := params["reason"]
 	if reason == "" {
 		reason = "EDR C2 remote restart command"
 	}
 
-	cmd := exec.Command("shutdown", "/r", "/t", "3", "/d", "p:4:1", "/c", reason)
+	cmd := exec.Command("shutdown", "/r", "/t", "30", "/d", "p:4:1", "/c", reason)
 	if err := cmd.Run(); err != nil {
 		return "", fmt.Errorf("shutdown command failed: %w", err)
 	}
 
-	return fmt.Sprintf("Machine restart scheduled (reason: %s). OS rebooting in 3 seconds.", reason), nil
+	return fmt.Sprintf("Machine restart scheduled in 30s (reason: %s). Run 'shutdown /a' to cancel.", reason), nil
 }
 
 // shutdownMachine initiates an OS-level machine shutdown.
+//
+// R6 FIX: Requires explicit confirm:"true" parameter and uses a 30-second
+// delay to allow cancellation (shutdown /a) if issued by mistake.
 func (h *Handler) shutdownMachine(_ context.Context, params map[string]string) (string, error) {
-	h.logger.Warn("[C2] SHUTDOWN MACHINE command received — scheduling OS shutdown in 3 seconds")
+	// R6 FIX: Require explicit confirmation.
+	if strings.ToLower(params["confirm"]) != "true" {
+		return "", fmt.Errorf("BLOCKED: machine shutdown requires confirm=\"true\" parameter for safety")
+	}
+
+	h.logger.Warn("[C2] SHUTDOWN MACHINE command received (CONFIRMED) — scheduling OS shutdown in 30 seconds")
 
 	reason := params["reason"]
 	if reason == "" {
 		reason = "EDR C2 remote shutdown command"
 	}
 
-	cmd := exec.Command("shutdown", "/s", "/t", "3", "/d", "p:4:1", "/c", reason)
+	cmd := exec.Command("shutdown", "/s", "/t", "30", "/d", "p:4:1", "/c", reason)
 	if err := cmd.Run(); err != nil {
 		return "", fmt.Errorf("shutdown command failed: %w", err)
 	}
 
-	return fmt.Sprintf("Machine shutdown scheduled (reason: %s). OS powering off in 3 seconds.", reason), nil
+	return fmt.Sprintf("Machine shutdown scheduled in 30s (reason: %s). Run 'shutdown /a' to cancel.", reason), nil
 }

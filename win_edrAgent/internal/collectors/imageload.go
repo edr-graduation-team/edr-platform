@@ -1,0 +1,170 @@
+// Package collectors — DLL / Image Load event handler for the ETW kernel tracer.
+//
+// Handles Image Load events delivered real-time from the Windows Kernel
+// ETW session (EVENT_TRACE_FLAG_IMAGE_LOAD). Every event fires the instant
+// a DLL/EXE is mapped into a process address space, with the exact PID and
+// full image path. This catches reflective DLL injection and side-loading
+// that a polling approach would miss entirely.
+//
+// MITRE coverage: T1055 (Process Injection), T1574 (Hijack Execution
+// Flow / DLL Side-Loading), T1129 (Shared Modules).
+//
+//go:build windows
+// +build windows
+
+package collectors
+
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"os"
+	"strings"
+	"unsafe"
+
+	"github.com/edr-platform/win-agent/internal/event"
+)
+
+// handleImageLoad processes a single image/DLL load event from the kernel
+// ETW callback. This fires in real-time the instant a module is mapped —
+// there is zero polling window for malware to exploit.
+func (c *ETWCollector) handleImageLoad(pid uint32, imagePath string) {
+	lower := strings.ToLower(imagePath)
+
+	// --- Noise filter: skip core OS DLLs that load in every process ---
+	if isNoisyModule(lower) {
+		return
+	}
+
+	modName := baseName(imagePath)
+
+	// Enrich: process that loaded this module.
+	procPath := getImagePath(pid)
+	procName := baseName(procPath)
+	if procName == "" {
+		procName = "unknown"
+	}
+
+	// Compute SHA256 hash (best-effort, skip large files).
+	hashSHA256 := computeFileHash(imagePath)
+
+	// Lightweight Authenticode check.
+	isSigned := isFileSigned(imagePath)
+
+	evt := event.NewEvent(event.EventTypeImageLoad, event.SeverityMedium, map[string]interface{}{
+		"action":       "loaded",
+		"path":         imagePath,
+		"name":         modName,
+		"hash_sha256":  hashSHA256,
+		"pid":          pid,
+		"process_name": procName,
+		"process_path": procPath,
+		"is_signed":    isSigned,
+	})
+
+	// Apply configurable filter.
+	if c.filter != nil && c.filter.ShouldFilter(evt) {
+		return
+	}
+
+	c.send(evt)
+	c.imageLoadEvents.Add(1)
+}
+
+// isNoisyModule filters out very common OS modules that load in every process.
+// These generate enormous volume with zero security signal.
+func isNoisyModule(lower string) bool {
+	noisyExact := []string{
+		`\windows\system32\ntdll.dll`,
+		`\windows\system32\kernel32.dll`,
+		`\windows\system32\kernelbase.dll`,
+		`\windows\system32\msvcrt.dll`,
+		`\windows\system32\advapi32.dll`,
+		`\windows\system32\sechost.dll`,
+		`\windows\system32\rpcrt4.dll`,
+		`\windows\system32\bcryptprimitives.dll`,
+		`\windows\system32\ucrtbase.dll`,
+		`\windows\system32\combase.dll`,
+		`\windows\system32\user32.dll`,
+		`\windows\system32\gdi32.dll`,
+		`\windows\system32\win32u.dll`,
+		`\windows\system32\msvcp_win.dll`,
+		`\windows\system32\gdi32full.dll`,
+		`\windows\system32\ole32.dll`,
+		`\windows\system32\oleaut32.dll`,
+		`\windows\system32\shell32.dll`,
+		`\windows\system32\clbcatq.dll`,
+		`\windows\system32\imm32.dll`,
+	}
+	for _, n := range noisyExact {
+		if strings.HasSuffix(lower, n) {
+			return true
+		}
+	}
+	return false
+}
+
+// computeFileHash computes SHA256 of a file (best-effort, returns "" on error).
+// Skips files > 50 MB to prevent performance impact on the agent.
+func computeFileHash(path string) string {
+	info, err := os.Stat(path)
+	if err != nil || info.Size() > 50*1024*1024 {
+		return ""
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	h := sha256.Sum256(data)
+	return hex.EncodeToString(h[:])
+}
+
+// isFileSigned does a lightweight check for Authenticode signature presence
+// by parsing the PE Security Directory entry. A full WinVerifyTrust check
+// requires heavy COM interop; this is a fast heuristic.
+func isFileSigned(path string) bool {
+	f, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+
+	var dosHeader [64]byte
+	if _, err := f.Read(dosHeader[:]); err != nil {
+		return false
+	}
+	if dosHeader[0] != 'M' || dosHeader[1] != 'Z' {
+		return false
+	}
+	peOffset := *(*int32)(unsafe.Pointer(&dosHeader[60]))
+	if peOffset < 0 || peOffset > 1024*1024 {
+		return false
+	}
+
+	buf := make([]byte, 4+20+2)
+	if _, err := f.ReadAt(buf, int64(peOffset)); err != nil {
+		return false
+	}
+	if string(buf[:4]) != "PE\x00\x00" {
+		return false
+	}
+	magic := *(*uint16)(unsafe.Pointer(&buf[24]))
+
+	var secDirOffset int64
+	switch magic {
+	case 0x10b: // PE32
+		secDirOffset = int64(peOffset) + 4 + 20 + 128
+	case 0x20b: // PE32+
+		secDirOffset = int64(peOffset) + 4 + 20 + 144
+	default:
+		return false
+	}
+
+	var secDir [8]byte
+	if _, err := f.ReadAt(secDir[:], secDirOffset); err != nil {
+		return false
+	}
+	rva := *(*uint32)(unsafe.Pointer(&secDir[0]))
+	size := *(*uint32)(unsafe.Pointer(&secDir[4]))
+
+	return rva > 0 && size > 0
+}

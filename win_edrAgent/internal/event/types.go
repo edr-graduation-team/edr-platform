@@ -51,6 +51,13 @@ func (s Severity) String() string {
 	}
 }
 
+// MarshalJSON serializes Severity as a JSON string (e.g., "low", "high")
+// instead of a number. This ensures compatibility with the Connection Manager's
+// JSON schema validator which expects severity to be a string.
+func (s Severity) MarshalJSON() ([]byte, error) {
+	return []byte(`"` + s.String() + `"`), nil
+}
+
 // Event represents a security event collected by the agent.
 type Event struct {
 	ID        string                 `json:"event_id"`

@@ -37,13 +37,12 @@ import (
 	"github.com/edr-platform/connection-manager/pkg/server"
 )
 
-// seedDefaultAdmin guarantees a valid admin account exists on every boot.
-// Uses UPSERT so the admin row is self-healing: if the password, role, or
-// status were corrupted, they are forcefully corrected on next startup.
+// seedDefaultAdmin creates a default admin account if one does not already exist.
+// Uses INSERT ... ON CONFLICT DO NOTHING so that existing admin credentials
+// (including password changes made by operators) are NEVER overwritten on reboot.
 func seedDefaultAdmin(ctx context.Context, dbPool *database.PostgresPool, logger *logrus.Logger) {
 	pool := dbPool.Pool()
 
-	// Generate a fresh bcrypt hash every boot — idempotent and tamper-proof.
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte("admin"), bcrypt.DefaultCost)
 	if err != nil {
 		logger.Errorf("Failed to hash seed password: %v", err)
@@ -52,14 +51,10 @@ func seedDefaultAdmin(ctx context.Context, dbPool *database.PostgresPool, logger
 
 	now := time.Now()
 	adminID := uuid.New()
-	_, err = pool.Exec(ctx,
+	tag, err := pool.Exec(ctx,
 		`INSERT INTO users (id, username, email, password_hash, full_name, role, status, created_at, updated_at)
 		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-		 ON CONFLICT (username) DO UPDATE SET
-		     password_hash = EXCLUDED.password_hash,
-		     role          = EXCLUDED.role,
-		     status        = EXCLUDED.status,
-		     updated_at    = EXCLUDED.updated_at`,
+		 ON CONFLICT (username) DO NOTHING`,
 		adminID,
 		"admin",
 		"admin@edr.local",
@@ -70,10 +65,14 @@ func seedDefaultAdmin(ctx context.Context, dbPool *database.PostgresPool, logger
 		now, now,
 	)
 	if err != nil {
-		logger.Errorf("Failed to upsert default admin user: %v", err)
+		logger.Errorf("Failed to seed default admin user: %v", err)
 		return
 	}
-	logger.Info("🔑 Admin account bootstrapped (username: admin, password: admin) — CHANGE THIS PASSWORD!")
+	if tag.RowsAffected() > 0 {
+		logger.Info("🔑 Default admin account created (username: admin, password: admin) — CHANGE THIS PASSWORD!")
+	} else {
+		logger.Debug("Admin account already exists — skipping seed")
+	}
 }
 
 func main() {
@@ -316,7 +315,17 @@ func main() {
 				logger.Warnf("Failed to create fallback table (DB fallback disabled): %v", err)
 			} else {
 				evtHandler.SetFallbackStore(fallback)
-				logger.Info("Event DB fallback store enabled")
+				defer fallback.Close() // drain async writer workers on shutdown
+				logger.Info("Event DB fallback store enabled (async workers started)")
+
+				// Start the replay worker that re-publishes unreplayed events
+				// from the fallback table back to Kafka when connectivity is restored.
+				replayWorker := handlers.NewFallbackReplayWorker(dbPool.Pool(), kafkaProducer, logger)
+				if replayWorker != nil {
+					replayCtx, replayCancel := context.WithCancel(context.Background())
+					defer replayCancel()
+					go replayWorker.Start(replayCtx)
+				}
 			}
 		}
 	} else {

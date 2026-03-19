@@ -24,19 +24,23 @@ type ConsumerConfig struct {
 	MaxWait        time.Duration `yaml:"max_wait"`
 	CommitInterval time.Duration `yaml:"commit_interval"`
 	StartOffset    int64         `yaml:"start_offset"` // -1 = latest, -2 = earliest
+	// S1 FIX: Number of parallel reader goroutines that call ReadMessage().
+	// More readers = better partition-level parallelism for multi-partition topics.
+	ConsumerReaders int `yaml:"consumer_readers"`
 }
 
 // DefaultConsumerConfig returns default consumer configuration.
 func DefaultConsumerConfig() ConsumerConfig {
 	return ConsumerConfig{
-		Brokers:        []string{"localhost:9092"},
-		Topic:          "events-raw",
-		GroupID:        "sigma-engine-group",
-		MinBytes:       1,
-		MaxBytes:       10e6, // 10MB
-		MaxWait:        5 * time.Second,
-		CommitInterval: 1 * time.Second,
-		StartOffset:    kafka.LastOffset, // -1 = latest
+		Brokers:         []string{"localhost:9092"},
+		Topic:           "events-raw",
+		GroupID:         "sigma-engine-group",
+		MinBytes:        1,
+		MaxBytes:        10e6, // 10MB
+		MaxWait:         5 * time.Second,
+		CommitInterval:  1 * time.Second,
+		StartOffset:     kafka.LastOffset, // -1 = latest
+		ConsumerReaders: 2,                // S1 FIX: default 2 parallel readers
 	}
 }
 
@@ -77,8 +81,9 @@ type EventConsumer struct {
 	errorChan chan error
 	doneChan  chan struct{}
 
-	running atomic.Bool
-	wg      sync.WaitGroup
+	running   atomic.Bool
+	wg        sync.WaitGroup
+	closeOnce sync.Once // S1 FIX: protect channel close from multiple goroutines
 }
 
 // NewEventConsumer creates a new Kafka event consumer.
@@ -116,23 +121,35 @@ func (c *EventConsumer) Start(ctx context.Context) error {
 	}
 	c.running.Store(true)
 
-	logger.Infof("Starting Kafka consumer: brokers=%v topic=%s group=%s",
-		c.config.Brokers, c.config.Topic, c.config.GroupID)
+	readers := c.config.ConsumerReaders
+	if readers <= 0 {
+		readers = 2
+	}
 
-	c.wg.Add(1)
-	go c.consumeLoop(ctx)
+	logger.Infof("Starting Kafka consumer: brokers=%v topic=%s group=%s readers=%d",
+		c.config.Brokers, c.config.Topic, c.config.GroupID, readers)
+
+	// S1 FIX: Spawn multiple consumeLoop goroutines for partition-parallel reads.
+	// segmentio/kafka-go Reader.ReadMessage() is concurrency-safe in consumer-group mode.
+	for i := 0; i < readers; i++ {
+		c.wg.Add(1)
+		go c.consumeLoop(ctx, i)
+	}
 
 	return nil
 }
 
-// consumeLoop is the main consumer loop.
-func (c *EventConsumer) consumeLoop(ctx context.Context) {
+// consumeLoop is the main consumer loop. Multiple instances may run in parallel (S1).
+func (c *EventConsumer) consumeLoop(ctx context.Context, readerID int) {
 	defer c.wg.Done()
-	defer close(c.eventChan)
-	defer close(c.errorChan)
+	// Only close channels once across all goroutines (first to exit wins).
+	defer c.closeOnce.Do(func() {
+		close(c.eventChan)
+		close(c.errorChan)
+	})
 	defer func() {
 		if r := recover(); r != nil {
-			logger.Errorf("Panic recovered in consumeLoop: %v", r)
+			logger.Errorf("Panic recovered in consumeLoop[%d]: %v", readerID, r)
 		}
 	}()
 
@@ -178,12 +195,14 @@ func (c *EventConsumer) consumeLoop(ctx context.Context) {
 				continue
 			}
 
-			// Send to channel (with timeout to prevent blocking)
+			// Send to channel (with short timeout to prevent blocking)
+			// S8 FIX: Reduced from 5s to 500ms. Under backlog, 5s stalls per
+			// dropped event cascaded into unrecoverable consumer lag.
 			select {
 			case c.eventChan <- event:
 				atomic.AddUint64(&c.metrics.MessagesProcessed, 1)
-			case <-time.After(5 * time.Second):
-				logger.Warn("Event channel full, dropping message")
+			case <-time.After(500 * time.Millisecond):
+				logger.Warn("Event channel full, dropping message (500ms timeout)")
 				atomic.AddUint64(&c.metrics.ProcessingErrors, 1)
 			case <-ctx.Done():
 				return

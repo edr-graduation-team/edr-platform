@@ -30,13 +30,18 @@ func startPlatformCollectors(ctx context.Context, cfg *config.Config, eventChan 
 		IncludePaths:     cfg.Filtering.IncludePaths,
 	}, logger)
 
-	// ETW collector (no filter parameter in current API)
+	// ETW collector (process events + optional file I/O + image load)
+	// All three event types share a single kernel session for minimal overhead.
 	if cfg.Collectors.ETWEnabled {
 		sessionName := cfg.Collectors.ETWSessionName
 		if sessionName == "" {
 			sessionName = "EDRAgentSession"
 		}
-		etw := collectors.NewETWCollector(sessionName, eventChan, logger)
+		etw := collectors.NewETWCollector(
+			sessionName, eventChan, logger, evtFilter,
+			cfg.Collectors.FileEnabled,
+			cfg.Collectors.ImageLoadEnabled,
+		)
 		go func() {
 			defer func() {
 				if r := recover(); r != nil {
@@ -110,4 +115,9 @@ func startPlatformCollectors(ctx context.Context, cfg *config.Config, eventChan 
 	} else {
 		logger.Debug("WMI collector disabled by config")
 	}
+
+	// NOTE: File monitoring and Image Load detection are now handled by
+	// the ETW collector above (EVENT_TRACE_FLAG_FILE_IO_INIT and
+	// EVENT_TRACE_FLAG_IMAGE_LOAD). They fire real-time from the kernel
+	// with exact PID attribution — no separate polling collectors needed.
 }

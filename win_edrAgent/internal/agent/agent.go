@@ -122,6 +122,9 @@ func (a *Agent) Start(ctx context.Context) error {
 	a.logger.Infof("Go Version: %s", runtime.Version())
 	a.logger.Infof("OS/Arch: %s/%s", runtime.GOOS, runtime.GOARCH)
 
+	// ── Security hardening (ACLs, encryption, self-protection, retention) ──
+	a.initSecurity()
+
 	// Start event batcher
 	a.wg.Add(1)
 	go a.runBatcher()
@@ -611,9 +614,21 @@ func (a *Agent) runQueueProcessor() {
 	}
 }
 
-// runCommandLoop receives commands from the gRPC client and executes them via the command handler.
+// runCommandLoop receives commands from the gRPC client and dispatches them
+// asynchronously so the Recv loop is NEVER blocked by command execution.
+//
+// Architecture:
+//   - Incoming commands are dispatched to worker goroutines immediately.
+//   - A bounded semaphore (cmdSem, capacity 8) limits concurrent execution
+//     to prevent goroutine explosion under rapid-fire commands.
+//   - Each worker calls Execute() → SendCommandResult() independently.
+//   - The Recv loop remains free to process the next command instantly.
 func (a *Agent) runCommandLoop() {
-	a.logger.Debug("Command loop started")
+	a.logger.Debug("Command loop started (async dispatch, max 8 workers)")
+
+	// Bounded semaphore: at most 8 commands execute concurrently.
+	cmdSem := make(chan struct{}, 8)
+
 	for {
 		select {
 		case <-a.ctx.Done():
@@ -623,7 +638,8 @@ func (a *Agent) runCommandLoop() {
 			if !ok {
 				return
 			}
-			a.logger.Infof("[C2] Command received by Agent: id=%s type=%s", cmd.ID, cmd.Type)
+			a.logger.Infof("[C2] Command received — dispatching async: id=%s type=%s", cmd.ID, cmd.Type)
+
 			c := &command.Command{
 				ID:         cmd.ID,
 				Type:       mapProtoCommandType(cmd.Type),
@@ -632,13 +648,27 @@ func (a *Agent) runCommandLoop() {
 				ExpiresAt:  cmd.ExpiresAt,
 				ReceivedAt: time.Now(),
 			}
-			result := a.commandHandler.Execute(a.ctx, c)
-			if result != nil {
-				a.logger.Infof("[C2] Command result: id=%s status=%s", result.CommandID, result.Status)
-				if err := a.grpcClient.SendCommandResult(a.ctx, result, a.cfg.Agent.ID); err != nil {
-					a.logger.Warnf("[C2] Send command result failed: %v", err)
+
+			// Acquire semaphore slot (blocks only if 8 commands are already running).
+			cmdSem <- struct{}{}
+
+			// Dispatch execution + ACK to background goroutine.
+			go func(c *command.Command) {
+				defer func() { <-cmdSem }() // release slot
+				defer func() {
+					if r := recover(); r != nil {
+						a.logger.Errorf("[C2] Panic in command worker id=%s: %v", c.ID, r)
+					}
+				}()
+
+				result := a.commandHandler.Execute(a.ctx, c)
+				if result != nil {
+					a.logger.Infof("[C2] Command result: id=%s status=%s duration=%v", result.CommandID, result.Status, result.Duration)
+					if err := a.grpcClient.SendCommandResult(a.ctx, result, a.cfg.Agent.ID); err != nil {
+						a.logger.Warnf("[C2] SendCommandResult failed for id=%s: %v", result.CommandID, err)
+					}
 				}
-			}
+			}(c)
 		}
 	}
 }

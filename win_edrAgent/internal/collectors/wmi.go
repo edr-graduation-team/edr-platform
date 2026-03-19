@@ -6,6 +6,7 @@ package collectors
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os/exec"
 	"strconv"
@@ -177,35 +178,55 @@ func (c *WMICollector) collectProcesses() {
 	c.cacheMu.Unlock()
 }
 
-// parseProcessOutput parses PowerShell JSON output.
-func (c *WMICollector) parseProcessOutput(output string) []map[string]string {
-	// Simplified parsing - in production use encoding/json
-	var results []map[string]string
+// wmiProcessRecord represents a single process from PowerShell JSON output.
+// All fields are json.RawMessage so we can handle null, string, number, and
+// nested-object types (e.g. CreationDate is an object with "value" key).
+type wmiProcessRecord struct {
+	ProcessId       json.Number `json:"ProcessId"`
+	ParentProcessId json.Number `json:"ParentProcessId"`
+	Name            string      `json:"Name"`
+	ExecutablePath  *string     `json:"ExecutablePath"`
+	CommandLine     *string     `json:"CommandLine"`
+}
 
+// parseProcessOutput parses the PowerShell ConvertTo-Json output using
+// encoding/json for correct handling of all field values (including
+// command lines that contain commas, colons, and special characters).
+func (c *WMICollector) parseProcessOutput(output string) []map[string]string {
 	output = strings.TrimSpace(output)
 	if output == "" || output == "null" {
-		return results
+		return nil
 	}
 
-	// Very basic parsing for demo
-	// In production, unmarshal JSON properly
-	lines := strings.Split(output, "},{")
-	for _, line := range lines {
-		proc := make(map[string]string)
-		line = strings.Trim(line, "[]{}")
+	var records []wmiProcessRecord
 
-		parts := strings.Split(line, ",")
-		for _, part := range parts {
-			kv := strings.SplitN(part, ":", 2)
-			if len(kv) == 2 {
-				key := strings.Trim(kv[0], `" `)
-				value := strings.Trim(kv[1], `" `)
-				proc[key] = value
-			}
+	// PowerShell returns a single object (not wrapped in []) when there is
+	// only one result. Try array first, fall back to single object.
+	if err := json.Unmarshal([]byte(output), &records); err != nil {
+		var single wmiProcessRecord
+		if err2 := json.Unmarshal([]byte(output), &single); err2 != nil {
+			c.errors.Add(1)
+			c.logger.Debugf("Failed to parse WMI process JSON: %v", err)
+			return nil
 		}
+		records = []wmiProcessRecord{single}
+	}
 
-		if proc["ProcessId"] != "" {
-			results = append(results, proc)
+	results := make([]map[string]string, 0, len(records))
+	for _, r := range records {
+		m := map[string]string{
+			"ProcessId":       r.ProcessId.String(),
+			"ParentProcessId": r.ParentProcessId.String(),
+			"Name":            r.Name,
+		}
+		if r.ExecutablePath != nil {
+			m["ExecutablePath"] = *r.ExecutablePath
+		}
+		if r.CommandLine != nil {
+			m["CommandLine"] = *r.CommandLine
+		}
+		if m["ProcessId"] != "" && m["ProcessId"] != "0" {
+			results = append(results, m)
 		}
 	}
 

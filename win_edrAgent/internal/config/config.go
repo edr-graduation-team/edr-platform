@@ -51,13 +51,14 @@ type AgentConfig struct {
 
 // CollectorConfig defines event collection settings.
 type CollectorConfig struct {
-	ETWEnabled      bool          `yaml:"etw_enabled"`
-	ETWSessionName  string        `yaml:"etw_session_name"`
-	WMIEnabled      bool          `yaml:"wmi_enabled"`
-	WMIInterval     time.Duration `yaml:"wmi_interval"`
-	RegistryEnabled bool          `yaml:"registry_enabled"`
-	FileEnabled     bool          `yaml:"file_enabled"`
-	NetworkEnabled  bool          `yaml:"network_enabled"`
+	ETWEnabled       bool          `yaml:"etw_enabled"`
+	ETWSessionName   string        `yaml:"etw_session_name"`
+	WMIEnabled       bool          `yaml:"wmi_enabled"`
+	WMIInterval      time.Duration `yaml:"wmi_interval"`
+	RegistryEnabled  bool          `yaml:"registry_enabled"`
+	FileEnabled      bool          `yaml:"file_enabled"`
+	ImageLoadEnabled bool          `yaml:"imageload_enabled"`
+	NetworkEnabled   bool          `yaml:"network_enabled"`
 }
 
 // FilteringConfig defines event filtering rules.

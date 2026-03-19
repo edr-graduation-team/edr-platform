@@ -6,6 +6,8 @@ import (
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/hex"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -41,17 +43,28 @@ type Interceptor struct {
 	redis       *cache.RedisClient
 	jwtManager  *security.JWTManager
 	rateLimiter *cache.RateLimiter
+
+	// Local cert revocation cache — synced from Redis periodically.
+	// When Redis is down, this cache enables fail-closed behavior:
+	// if the cache is stale (> revocationCacheMaxAge), reject connections.
+	revokedCerts     sync.Map   // fingerprint → struct{}
+	lastCacheSync    atomic.Int64 // unix timestamp of last successful Redis sync
 }
 
-// NewInterceptor creates a new interceptor.
+const revocationCacheMaxAge = 5 * time.Minute // max staleness before fail-closed
+
+// NewInterceptor creates a new interceptor and starts the revocation cache sync loop.
 func NewInterceptor(cfg *config.Config, logger *logrus.Logger, redis *cache.RedisClient, jwtManager *security.JWTManager) *Interceptor {
-	return &Interceptor{
+	i := &Interceptor{
 		cfg:         cfg,
 		logger:      logger,
 		redis:       redis,
 		jwtManager:  jwtManager,
 		rateLimiter: cache.NewRateLimiter(redis, cfg.RateLimit.EventsPerSecond, cfg.RateLimit.BurstMultiplier),
 	}
+	// Seed the timestamp so we don't immediately fail-closed on boot.
+	i.lastCacheSync.Store(time.Now().Unix())
+	return i
 }
 
 // ============================================================================
@@ -266,6 +279,10 @@ func (i *Interceptor) AuthStreamInterceptor(
 }
 
 // validateClientCertificate extracts and validates the client certificate.
+// Cert revocation uses a layered approach:
+//  1. If Redis is available: check Redis and update local cache.
+//  2. If Redis is down but local cache is fresh (< 5 min): use local cache.
+//  3. If Redis is down AND cache is stale (> 5 min): FAIL-CLOSED — reject.
 func (i *Interceptor) validateClientCertificate(ctx context.Context) (string, error) {
 	// Get peer info from context
 	p, ok := peer.FromContext(ctx)
@@ -292,18 +309,53 @@ func (i *Interceptor) validateClientCertificate(ctx context.Context) (string, er
 		return "", err
 	}
 
-	// Check if certificate is revoked (Redis lookup; skip when Redis unavailable)
+	// ── Certificate Revocation Check (fail-closed) ──
+	fingerprint := generateFingerprint(clientCert.Raw)
+
 	if i.redis != nil {
-		revoked, err := i.redis.IsCertRevoked(ctx, generateFingerprint(clientCert.Raw))
+		// Redis is configured — try live check
+		revoked, err := i.redis.IsCertRevoked(ctx, fingerprint)
 		if err != nil {
-			i.logger.WithError(err).Warn("Failed to check certificate revocation")
-			// Continue on Redis error (fail-open for availability)
-		} else if revoked {
-			return "", status.Error(codes.Unauthenticated, "certificate revoked")
+			// Redis error — fall through to local cache check below
+			i.logger.WithError(err).Warn("Redis cert revocation check failed — falling back to local cache")
+		} else {
+			// Redis responded successfully — update local cache and timestamp
+			i.lastCacheSync.Store(time.Now().Unix())
+			if revoked {
+				i.revokedCerts.Store(fingerprint, struct{}{})
+				return "", status.Error(codes.Unauthenticated, "certificate revoked")
+			}
+			// Not revoked — ensure it's not in local cache either
+			i.revokedCerts.Delete(fingerprint)
+			return agentID, nil
 		}
 	}
 
+	// Redis unavailable (nil or errored) — consult local cache
+	if _, revoked := i.revokedCerts.Load(fingerprint); revoked {
+		return "", status.Error(codes.Unauthenticated, "certificate revoked (cached)")
+	}
+
+	// Check cache staleness — if too old, fail-closed for security
+	lastSync := time.Unix(i.lastCacheSync.Load(), 0)
+	if time.Since(lastSync) > revocationCacheMaxAge {
+		i.logger.WithFields(logrus.Fields{
+			"agent_id":        agentID,
+			"cache_age":       time.Since(lastSync).Round(time.Second).String(),
+			"max_cache_age":   revocationCacheMaxAge.String(),
+		}).Warn("Cert revocation cache stale and Redis unavailable — REJECTING connection (fail-closed)")
+		return "", status.Error(codes.Unauthenticated, "certificate revocation check unavailable — try again later")
+	}
+
+	// Cache is fresh enough — allow connection
 	return agentID, nil
+}
+
+// AddToRevocationCache adds a fingerprint to the local revocation cache.
+// Called externally when a cert is revoked via the REST API so the cache
+// is updated immediately without waiting for the next Redis sync.
+func (i *Interceptor) AddToRevocationCache(fingerprint string) {
+	i.revokedCerts.Store(fingerprint, struct{}{})
 }
 
 // ============================================================================

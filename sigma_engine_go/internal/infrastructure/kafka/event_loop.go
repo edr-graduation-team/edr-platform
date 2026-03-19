@@ -4,6 +4,7 @@ package kafka
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -154,6 +155,11 @@ type EventLoop struct {
 	// If nil (Redis unavailable), lineage hydration is silently skipped.
 	lineageCache cache.LineageCache
 
+	// S2 FIX: Async lineage write channel + workers.
+	// Detection workers push entries here (non-blocking), dedicated writer
+	// goroutines drain the channel and persist to Redis.
+	lineageWriteCh chan *cache.ProcessLineageEntry
+
 	// riskScorer computes the context-aware risk score for every matched alert.
 	// If nil, alerts are forwarded with RiskScore=0 (no context enrichment).
 	riskScorer scoring.RiskScorer
@@ -172,6 +178,13 @@ type EventLoop struct {
 	wg      sync.WaitGroup
 }
 
+const (
+	// lineageWriteBuffer is the bounded channel size for async lineage writes (S2).
+	lineageWriteBuffer = 4096
+	// lineageWriteWorkers is the number of background Redis writer goroutines.
+	lineageWriteWorkers = 2
+)
+
 // NewEventLoop creates a new integrated event loop.
 func NewEventLoop(
 	consumer *EventConsumer,
@@ -184,7 +197,7 @@ func NewEventLoop(
 		config.Workers = 4
 	}
 	if config.AlertBuffer <= 0 {
-		config.AlertBuffer = 500
+		config.AlertBuffer = 5000 // S6 FIX: increased from 500 to 5000
 	}
 
 	return &EventLoop{
@@ -196,6 +209,7 @@ func NewEventLoop(
 		metrics:         &EventLoopMetrics{},
 		suppression:     newSuppressionCache(defaultSuppressionTTL),
 		alertChan:       make(chan *domain.Alert, config.AlertBuffer),
+		lineageWriteCh:  make(chan *cache.ProcessLineageEntry, lineageWriteBuffer),
 		doneChan:        make(chan struct{}),
 	}
 }
@@ -251,6 +265,15 @@ func (el *EventLoop) Start(ctx context.Context) error {
 		go el.detectionWorker(ctx, i)
 	}
 
+	// S2 FIX: Start async lineage write workers (decouple Redis I/O from detection)
+	if el.lineageCache != nil {
+		for i := 0; i < lineageWriteWorkers; i++ {
+			el.wg.Add(1)
+			go el.lineageWriteWorker(ctx, i)
+		}
+		logger.Infof("Lineage write workers started (%d workers, buffer=%d)", lineageWriteWorkers, lineageWriteBuffer)
+	}
+
 	// Start alert publisher
 	el.wg.Add(1)
 	go el.alertPublisher(ctx)
@@ -263,7 +286,7 @@ func (el *EventLoop) Start(ctx context.Context) error {
 	el.wg.Add(1)
 	go el.suppressionCleaner(ctx)
 
-	logger.Infof("Event loop started (alert suppression: %v window)", el.suppression.ttl)
+	logger.Infof("Event loop started (alert suppression: %v window, alert buffer: %d)", el.suppression.ttl, el.config.AlertBuffer)
 	return nil
 }
 
@@ -373,16 +396,22 @@ func (el *EventLoop) processOneEvent(event *domain.LogEvent) {
 			}
 			// ─────────────────────────────────────────────────────────────────────
 
-			suppressKey := baseAlert.RuleID + "|" + agentStr
+			// S5 FIX: Include content hash in suppression key so distinct attacks
+			// on the same agent from the same rule are NOT suppressed.
+			processName := extractString(event.RawData, "name")
+			pidVal := extractInt64(event.RawData, "pid")
+			suppressKey := fmt.Sprintf("%s|%s|%s|%d", baseAlert.RuleID, agentStr, processName, pidVal)
 
 			if el.suppression.shouldSuppress(suppressKey) {
 				atomic.AddUint64(&el.metrics.AlertsSuppressed, 1)
 			} else {
+				// S6 FIX: Use 5s backpressure instead of silent drop.
+				// Security alerts are too valuable to silently discard.
 				select {
 				case el.alertChan <- baseAlert:
-				default:
+				case <-time.After(5 * time.Second):
 					atomic.AddUint64(&el.metrics.ProcessingErrors, 1)
-					logger.Warn("Alert channel full, dropping alert")
+					logger.Errorf("Alert channel full for 5s — ALERT DROPPED: rule=%s agent=%s", baseAlert.RuleID, agentStr)
 				}
 			}
 		}
@@ -645,21 +674,15 @@ func (el *EventLoop) GetEventsProcessed() uint64 {
 
 // =============================================================================
 // Lineage Cache Hydration (Context-Aware Detection — Sprint 1)
+//
+// S2 FIX: Writes are now ASYNCHRONOUS. hydrateLineageCache builds the entry
+// and pushes it to lineageWriteCh (non-blocking). Dedicated lineageWriteWorker
+// goroutines drain the channel and persist to Redis. Detection workers never
+// block on Redis I/O for lineage hydration.
 // =============================================================================
 
-// hydrateLineageCache writes the process context of a "process" event into
-// the lineage cache. It is called for every event, before Sigma evaluation.
-//
-// Only events whose event_type == "process" (or that carry a pid field)
-// are cached; other event types are skipped without error.
-//
-// Design notes:
-//   - The write is synchronous and will add ~0.1–0.5ms per event (Redis RTT).
-//     This is acceptable because the detection engine itself is CPU-bound at
-//     ~1–5ms per event. A future optimization could make this async via a
-//     fire-and-forget channel if latency becomes a concern.
-//   - Write errors are counted but never propagate — a lineage cache miss is
-//     far preferable to dropping a security event.
+// hydrateLineageCache builds a ProcessLineageEntry from a process event and
+// enqueues it for asynchronous Redis persistence. This method is NON-BLOCKING.
 func (el *EventLoop) hydrateLineageCache(event *domain.LogEvent) {
 	// Only process events carry the context we need.
 	eventType, _ := event.GetField("event_type")
@@ -681,47 +704,139 @@ func (el *EventLoop) hydrateLineageCache(event *domain.LogEvent) {
 		agentID, _ = v.(string)
 	}
 	if agentID == "" {
-		// agent_id may also be on the source sub-object; try a fallback key.
 		if v, ok := event.GetField("source.agent_id"); ok && v != nil {
 			agentID, _ = v.(string)
 		}
 	}
 	if agentID == "" {
-		logger.Warn("[LINEAGE] skipping hydration — agent_id missing from event")
 		return // cannot key the cache without an agent identifier
 	}
 
 	// Build a ProcessLineageEntry from the event's flat RawData map.
 	entry := cache.NewProcessLineageEntry(agentID, event.RawData)
 
-	// ── DIAGNOSTIC LOG ────────────────────────────────────────────────────────
-	// Logs at Info so it is visible in docker compose logs even without -debug.
-	// Search for [LINEAGE] in sigma-engine output to trace the hydration path.
-	logger.Infof("[LINEAGE] hydrate agent=%s pid=%d ppid=%d name=%q exe=%q parentName=%q",
+	logger.Debugf("[LINEAGE] hydrate agent=%s pid=%d ppid=%d name=%q exe=%q parentName=%q",
 		agentID[:min(8, len(agentID))], entry.PID, entry.PPID,
 		entry.Name, entry.Executable, entry.ParentName)
-	// ─────────────────────────────────────────────────────────────────────────
 
 	if entry.PID == 0 {
-		logger.Warnf("[LINEAGE] SKIP pid=0 — pid not resolved from event (agent=%s event_type=%v)",
-			agentID[:min(8, len(agentID))], eventType)
 		return // pid is required; skip events where it is missing or zero
 	}
 
-	// Use a short-lived context so a stalled Redis write doesn't block workers.
-	writeCtx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
-	defer cancel()
-
-	if err := el.lineageCache.WriteEntry(writeCtx, entry); err != nil {
+	// S2 FIX: Non-blocking enqueue to async writer channel.
+	// If the channel is full, the write is skipped (best-effort).
+	select {
+	case el.lineageWriteCh <- entry:
+	default:
 		el.lineageCacheErrors.Add(1)
-		if el.lineageCacheErrors.Load()%100 == 1 {
-			// Rate-limit error logging: log the 1st, 101st, 201st, ... error
-			logger.Warnf("lineage cache write error (total=%d): %v",
-				el.lineageCacheErrors.Load(), err)
+		if el.lineageCacheErrors.Load()%500 == 1 {
+			logger.Warnf("[LINEAGE] write channel full (total drops=%d)", el.lineageCacheErrors.Load())
 		}
-	} else {
-		logger.Debugf("[LINEAGE] wrote key lineage:%s:%d", agentID[:min(8, len(agentID))], entry.PID)
 	}
+}
+
+// lineageWriteWorker drains the lineageWriteCh and persists entries to Redis.
+// Runs as a background goroutine alongside the detection workers.
+func (el *EventLoop) lineageWriteWorker(ctx context.Context, workerID int) {
+	defer el.wg.Done()
+	defer func() {
+		if r := recover(); r != nil {
+			logger.Errorf("Panic recovered in lineageWriteWorker %d: %v", workerID, r)
+		}
+	}()
+	logger.Debugf("Lineage write worker %d started", workerID)
+
+	for {
+		select {
+		case entry, ok := <-el.lineageWriteCh:
+			if !ok {
+				logger.Debugf("Lineage write worker %d stopped (channel closed)", workerID)
+				return
+			}
+			writeCtx, cancel := context.WithTimeout(ctx, 300*time.Millisecond)
+			if err := el.lineageCache.WriteEntry(writeCtx, entry); err != nil {
+				el.lineageCacheErrors.Add(1)
+				if el.lineageCacheErrors.Load()%100 == 1 {
+					logger.Warnf("lineage cache write error (total=%d): %v",
+						el.lineageCacheErrors.Load(), err)
+				}
+			}
+			cancel()
+
+		case <-ctx.Done():
+			// Drain remaining entries before exiting
+			for {
+				select {
+				case entry := <-el.lineageWriteCh:
+					drainCtx, drainCancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+					_ = el.lineageCache.WriteEntry(drainCtx, entry)
+					drainCancel()
+				default:
+					logger.Debugf("Lineage write worker %d stopped (ctx done, drained)", workerID)
+					return
+				}
+			}
+		}
+	}
+}
+
+// =============================================================================
+// Event Field Extractors (used by suppression key + lineage)
+// =============================================================================
+
+// extractString retrieves a string from a flat or nested data map.
+func extractString(data map[string]interface{}, key string) string {
+	if data == nil {
+		return ""
+	}
+	if v, ok := data[key]; ok && v != nil {
+		if s, ok := v.(string); ok {
+			return s
+		}
+	}
+	if sub, ok := data["data"]; ok && sub != nil {
+		if m, ok := sub.(map[string]interface{}); ok {
+			if v, ok := m[key]; ok && v != nil {
+				if s, ok := v.(string); ok {
+					return s
+				}
+			}
+		}
+	}
+	return ""
+}
+
+// extractInt64 retrieves an int64 from a flat or nested data map.
+func extractInt64(data map[string]interface{}, key string) int64 {
+	resolveVal := func(v interface{}) int64 {
+		switch n := v.(type) {
+		case int64:
+			return n
+		case int:
+			return int64(n)
+		case float64:
+			return int64(n)
+		case uint32:
+			return int64(n)
+		case uint64:
+			return int64(n)
+		}
+		return 0
+	}
+	if data == nil {
+		return 0
+	}
+	if v, ok := data[key]; ok && v != nil {
+		return resolveVal(v)
+	}
+	if sub, ok := data["data"]; ok && sub != nil {
+		if m, ok := sub.(map[string]interface{}); ok {
+			if v, ok := m[key]; ok && v != nil {
+				return resolveVal(v)
+			}
+		}
+	}
+	return 0
 }
 
 // min returns the smaller of a and b (Go 1.20 doesn't have built-in min for ints).
@@ -731,4 +846,5 @@ func min(a, b int) int {
 	}
 	return b
 }
+
 

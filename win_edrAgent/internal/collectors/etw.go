@@ -39,20 +39,36 @@ var kernelProcessGUID = C.GUID{
 type ETWCollector struct {
 	logger    *logging.Logger
 	eventChan chan<- *event.Event
+	filter    *Filter
 	session   string
 	running   atomic.Bool
 	collected atomic.Uint64
 	dropped   atomic.Uint64
 	errors    atomic.Uint64
+
+	// Config toggles for event types handled by the same kernel session.
+	fileEnabled      bool
+	imageLoadEnabled bool
+
+	// Per-type metrics
+	fileEvents      atomic.Uint64
+	imageLoadEvents atomic.Uint64
 }
 
 var globalCollector atomic.Pointer[ETWCollector]
 
-func NewETWCollector(session string, ch chan<- *event.Event, l *logging.Logger) *ETWCollector {
+func NewETWCollector(session string, ch chan<- *event.Event, l *logging.Logger, filter *Filter, fileEnabled, imageLoadEnabled bool) *ETWCollector {
 	if session == "" {
 		session = "EDRKernelTrace"
 	}
-	return &ETWCollector{logger: l, eventChan: ch, session: session}
+	return &ETWCollector{
+		logger:           l,
+		eventChan:        ch,
+		filter:           filter,
+		session:          session,
+		fileEnabled:      fileEnabled,
+		imageLoadEnabled: imageLoadEnabled,
+	}
 }
 
 func (c *ETWCollector) Start(ctx context.Context) error {
@@ -67,8 +83,9 @@ func (c *ETWCollector) Start(ctx context.Context) error {
 
 func (c *ETWCollector) Stop() error {
 	c.running.Store(false)
-	c.logger.Infof("ETW stats: collected=%d dropped=%d errors=%d",
-		c.collected.Load(), c.dropped.Load(), c.errors.Load())
+	c.logger.Infof("ETW stats: process=%d imageload=%d fileio=%d dropped=%d errors=%d",
+		c.collected.Load(), c.imageLoadEvents.Load(), c.fileEvents.Load(),
+		c.dropped.Load(), c.errors.Load())
 	return nil
 }
 
@@ -77,7 +94,8 @@ func (c *ETWCollector) run(ctx context.Context) {
 	c.baseline()
 	c.logger.Info("[BASELINE] Initial snapshot complete")
 
-	c.logger.Info("[ETW] Starting classic kernel process tracer (EnableFlags=PROCESS)")
+	c.logger.Infof("[ETW] Starting kernel tracer (Process=ON, ImageLoad=%v, FileIO=%v)",
+		c.imageLoadEnabled, c.fileEnabled)
 	for ctx.Err() == nil && c.running.Load() {
 		if err := c.session_(ctx); err != nil && ctx.Err() == nil && c.running.Load() {
 			c.logger.Errorf("[ETW] Session error: %v — restarting in 3s", err)
@@ -101,7 +119,7 @@ func (c *ETWCollector) session_(ctx context.Context) error {
 		c.errors.Add(1)
 		return fmt.Errorf("StartKernelProcessSession: error %d", ret)
 	}
-	c.logger.Info("[ETW] Session ACTIVE — SYSTEM_LOGGER_MODE + EnableFlags=PROCESS")
+	c.logger.Info("[ETW] Session ACTIVE — SYSTEM_LOGGER_MODE + EnableFlags=PROCESS|IMAGE_LOAD|FILE_IO_INIT")
 
 	var diag atomic.Uint64
 	globalDiag.Store(&diag)
@@ -181,6 +199,51 @@ func goProcessEvent(evt *C.ParsedProcessEvent) {
 	} else {
 		go collector.processEnd(pid, ppid, imageName)
 	}
+}
+
+// =====================================================================
+// C → Go callbacks: Image Load and File I/O events
+// =====================================================================
+
+//export goImageLoadEvent
+func goImageLoadEvent(evt *C.ParsedImageLoadEvent) {
+	collector := globalCollector.Load()
+	if collector == nil || !collector.imageLoadEnabled {
+		return
+	}
+
+	pid := uint32(evt.processId)
+	opcode := uint8(evt.opcode)
+	imagePath := wcharToGo(&evt.imagePath[0], 1024)
+
+	if imagePath == "" {
+		return
+	}
+
+	// Only care about loads (opcode 10), not unloads.
+	if opcode != 10 {
+		return
+	}
+
+	go collector.handleImageLoad(pid, imagePath)
+}
+
+//export goFileIoEvent
+func goFileIoEvent(evt *C.ParsedFileIoEvent) {
+	collector := globalCollector.Load()
+	if collector == nil || !collector.fileEnabled {
+		return
+	}
+
+	pid := uint32(evt.processId)
+	opcode := uint8(evt.opcode)
+	filePath := wcharToGo(&evt.filePath[0], 1024)
+
+	if filePath == "" {
+		return
+	}
+
+	go collector.handleFileIo(pid, opcode, filePath)
 }
 
 func wcharToGo(p *C.WCHAR, max int) string {

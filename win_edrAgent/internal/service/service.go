@@ -20,6 +20,7 @@ import (
 	"github.com/edr-platform/win-agent/internal/config"
 	"github.com/edr-platform/win-agent/internal/enrollment"
 	"github.com/edr-platform/win-agent/internal/logging"
+	"github.com/edr-platform/win-agent/internal/protection"
 )
 
 const (
@@ -81,6 +82,16 @@ func (s *edrService) Execute(args []string, r <-chan svc.ChangeRequest, changes 
 	// This satisfies the SCM contract. All subsequent work is async.
 	changes <- svc.Status{State: svc.Running, Accepts: cmdsAccepted}
 	s.logger.Info("[SCM] Service reported Running — starting async enrollment + agent")
+
+	// ── Anti-Tamper: Protect the agent process from external termination ───
+	// Must be called AFTER Running is reported (so SCM doesn't timeout).
+	// This prevents taskkill, Task Manager, and TerminateProcess from non-SYSTEM.
+	if err := protection.ProtectProcess(); err != nil {
+		s.logger.Warnf("[SCM] Process self-protection failed (non-fatal): %v", err)
+	} else {
+		s.logger.Info("[SCM] Process self-protection enabled — tamper-resistant")
+	}
+
 
 	// agentErrCh carries the outcome of the async startup sequence.
 	// A nil value means the agent is running; a non-nil value means it failed.
@@ -296,32 +307,60 @@ func Install() error {
 	// (legacy -install without flags), the agent will load defaults at startup
 	// and the operator must edit config.yaml afterwards.
 
+
 	return nil
 }
 
-// Uninstall removes the Windows service.
-func Uninstall() error {
-	// Connect to service manager
+// Uninstall removes the Windows service. Requires a valid anti-tamper token.
+func Uninstall(token string) error {
+	// ── Anti-Tamper: Verify uninstall token ──────────────────────────────────
+	if err := protection.VerifyUninstallToken(token, ""); err != nil {
+		return fmt.Errorf("uninstall blocked: %w", err)
+	}
+
+	return forceRemoveService()
+}
+
+// ForceUninstall removes the service WITHOUT token verification.
+// This is ONLY called from runInstall() during a re-install, which is already
+// a privileged operation (requires admin + enrollment token).
+// It is NOT exposed via any CLI flag.
+func ForceUninstall() error {
+	return forceRemoveService()
+}
+
+// forceRemoveService stops and deletes the service.
+// Protection layers that remain active:
+//   - Process DACL: prevents taskkill (anti-kill)
+//   - Recovery Actions: auto-restart on crash
+//   - Uninstall Token: required to reach this function
+func forceRemoveService() error {
 	m, err := mgr.Connect()
 	if err != nil {
 		return fmt.Errorf("failed to connect to service manager: %w", err)
 	}
 	defer m.Disconnect()
 
-	// Open service
 	s, err := m.OpenService(ServiceName)
 	if err != nil {
 		return fmt.Errorf("service %s not found: %w", ServiceName, err)
 	}
 	defer s.Close()
 
-	// Stop service if running
+	// Disable recovery actions so the service doesn't auto-restart after stop.
+	noRestart := []mgr.RecoveryAction{
+		{Type: mgr.NoAction, Delay: 0},
+		{Type: mgr.NoAction, Delay: 0},
+		{Type: mgr.NoAction, Delay: 0},
+	}
+	_ = s.SetRecoveryActions(noRestart, 0)
+
+	// Stop the service if running.
 	status, err := s.Query()
 	if err == nil && status.State != svc.Stopped {
-		s.Control(svc.Stop)
-		// Wait for stop
-		for i := 0; i < 10; i++ {
-			time.Sleep(time.Second)
+		_, _ = s.Control(svc.Stop)
+		for i := 0; i < 30; i++ {
+			time.Sleep(500 * time.Millisecond)
 			status, err = s.Query()
 			if err != nil || status.State == svc.Stopped {
 				break
@@ -329,14 +368,12 @@ func Uninstall() error {
 		}
 	}
 
-	// Delete service
+	// Delete the service.
 	if err := s.Delete(); err != nil {
 		return fmt.Errorf("failed to delete service: %w", err)
 	}
 
-	// Remove event log source
 	eventlog.Remove(ServiceName)
-
 	return nil
 }
 

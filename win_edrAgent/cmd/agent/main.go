@@ -50,7 +50,7 @@ func main() {
 		serverIP     = flag.String("server-ip", "", "C2 server IP address (used with -install for hosts file injection)")
 		serverDomain = flag.String("server-domain", "", "C2 server FQDN/hostname (used with -install)")
 		serverPort   = flag.String("server-port", "50051", "C2 gRPC port (used with -install, default 50051)")
-		token        = flag.String("token", "", "Bootstrap enrollment token (used with -install)")
+		token        = flag.String("token", "", "Bootstrap enrollment token (install) or uninstall authorization token")
 
 		// ── Runtime flags ──────────────────────────────────────────────────────
 		debugMode = flag.Bool("debug", false, "Enable DEBUG-level logging")
@@ -94,7 +94,7 @@ func main() {
 	// UNINSTALL PATH
 	// ══════════════════════════════════════════════════════════════════════════
 	if *doUninstall {
-		if err := service.Uninstall(); err != nil {
+		if err := service.Uninstall(*token); err != nil {
 			logger.Errorf("Failed to uninstall service: %v", err)
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
@@ -227,7 +227,7 @@ func runInstall(
 	if err := service.Install(); err != nil {
 		if isAlreadyExistsErr(err) {
 			fmt.Println("         → Service exists; re-registering...")
-			_ = service.Uninstall()
+			_ = service.ForceUninstall()
 			if err2 := service.Install(); err2 != nil {
 				fmt.Fprintf(os.Stderr, "Error installing service: %v\n", err2)
 				logger.Errorf("Service install failed: %v", err2)
@@ -255,7 +255,7 @@ func runInstall(
 	fmt.Println("  Service:   EDRAgent (Automatic, LocalSystem)")
 	fmt.Println("\n  To check status:   sc query EDRAgent")
 	fmt.Println("  To view logs:      Get-Content C:\\ProgramData\\EDR\\logs\\agent.log -Tail 50")
-	fmt.Println("  To uninstall:      agent.exe -uninstall")
+	fmt.Println("  To uninstall:      agent.exe -uninstall -token <secret>")
 	logger.Infof("Zero-touch installation complete: server=%s:%s", serverDomain, serverPort)
 	os.Exit(0)
 }

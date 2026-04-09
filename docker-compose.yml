@@ -79,7 +79,7 @@ services:
       JWT_PUBLIC_KEY_PATH: "/app/certs/jwt_public.pem"
     volumes:
       - ./sigma_engine_go/sigma_rules:/app/sigma_rules:ro
-      - ./connection-manager/certs/jwt_public.pem:/app/certs/jwt_public.pem:ro
+      - ./connection-manager/certs:/app/certs:ro
     depends_on:
       postgres:
         condition: service_healthy

@@ -35,6 +35,7 @@ import (
 	"unsafe"
 
 	"golang.org/x/sys/windows"
+	"golang.org/x/sys/windows/registry"
 )
 
 // =========================================================================
@@ -149,9 +150,9 @@ func HardenServiceDACL(serviceName string) error {
 	// Administrators = query status, query config, interrogate, read-only
 	// Interactive Users = query status, query config, read-only
 	const hardenedSDDL = "D:" +
-		"(A;;CCLCSWRPWPDTLOCRSDRCWDWO;;;SY)" + // SYSTEM: full
-		"(A;;CCLCSWLOCRRC;;;BA)" +              // Admins: query-only
-		"(A;;CCLCSWLOCRRC;;;IU)"                // Interactive: query-only
+		"(A;;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;SY)" + // SYSTEM: full (including SERVICE_CHANGE_CONFIG)
+		"(A;;CCLCSWLOCRRC;;;BA)" +                // Admins: query-only
+		"(A;;CCLCSWLOCRRC;;;IU)"                  // Interactive: query-only
 
 	sd, sdSize, err := convertSDDLToSD(hardenedSDDL)
 	if err != nil {
@@ -223,6 +224,75 @@ func RestoreServiceDACL(serviceName string) error {
 	return nil
 }
 
+// HardenServiceRegistryKey sets a restrictive DACL on the service's registry
+// key (HKLM\SYSTEM\CurrentControlSet\Services\<serviceName>) so that only
+// SYSTEM retains full control. Administrators can read the key but cannot
+// delete or modify it, blocking attacks via `reg delete`.
+func HardenServiceRegistryKey(serviceName string) error {
+	keyPath := `SYSTEM\CurrentControlSet\Services\` + serviceName
+	k, err := registry.OpenKey(registry.LOCAL_MACHINE, keyPath, 0x20000|0x40000) // READ_CONTROL | WRITE_DAC
+	if err != nil {
+		return fmt.Errorf("tamper: open registry key: %w", err)
+	}
+	defer k.Close()
+
+	// SYSTEM: full key access with container inherit
+	// Administrators: read-only with container inherit
+	const sddl = "D:P(A;CI;KA;;;SY)(A;CI;KR;;;BA)"
+	sd, err := windows.SecurityDescriptorFromString(sddl)
+	if err != nil {
+		return fmt.Errorf("tamper: parse registry SDDL: %w", err)
+	}
+	dacl, _, err := sd.DACL()
+	if err != nil {
+		return fmt.Errorf("tamper: extract registry DACL: %w", err)
+	}
+
+	err = windows.SetSecurityInfo(
+		windows.Handle(k),
+		windows.SE_REGISTRY_KEY,
+		windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION,
+		nil, nil, dacl, nil,
+	)
+	if err != nil {
+		return fmt.Errorf("tamper: set registry key security: %w", err)
+	}
+	return nil
+}
+
+// RestoreServiceRegistryKey restores the default DACL on the service's registry key,
+// giving Administrators full control again. Must be called from SYSTEM context.
+func RestoreServiceRegistryKey(serviceName string) error {
+	keyPath := `SYSTEM\CurrentControlSet\Services\` + serviceName
+	k, err := registry.OpenKey(registry.LOCAL_MACHINE, keyPath, 0x20000|0x40000) // READ_CONTROL | WRITE_DAC
+	if err != nil {
+		return fmt.Errorf("tamper: open registry key for restore: %w", err)
+	}
+	defer k.Close()
+
+	// Restore: both SYSTEM and Administrators get full key access
+	const sddl = "D:(A;CI;KA;;;SY)(A;CI;KA;;;BA)"
+	sd, err := windows.SecurityDescriptorFromString(sddl)
+	if err != nil {
+		return fmt.Errorf("tamper: parse restore SDDL: %w", err)
+	}
+	dacl, _, err := sd.DACL()
+	if err != nil {
+		return fmt.Errorf("tamper: extract restore DACL: %w", err)
+	}
+
+	err = windows.SetSecurityInfo(
+		windows.Handle(k),
+		windows.SE_REGISTRY_KEY,
+		windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION,
+		nil, nil, dacl, nil,
+	)
+	if err != nil {
+		return fmt.Errorf("tamper: restore registry key security: %w", err)
+	}
+	return nil
+}
+
 // convertSDDLToSD converts an SDDL string to a binary security descriptor.
 func convertSDDLToSD(sddl string) (sd unsafe.Pointer, sdSize uint32, err error) {
 	sddlPtr, err := windows.UTF16PtrFromString(sddl)
@@ -284,6 +354,32 @@ func VerifyUninstallToken(providedToken, embeddedHash string) error {
 	}
 
 	return nil
+}
+
+// VerifyUninstallHash validates a pre-computed hash against the
+// SHA-256 hash embedded in the binary. This is used by the background
+// service when verifying uninstall requests via IPC/Registry.
+func VerifyUninstallHash(providedHash, embeddedHash string) error {
+	if providedHash == "" {
+		return fmt.Errorf("uninstall hash required")
+	}
+
+	// If no embedded hash (dev build without dashboard), use legacy default.
+	if embeddedHash == "" {
+		embeddedHash = sha256HexString("EDR-Uninstall-2026!")
+	}
+
+	// Constant-time comparison prevents timing side-channel attacks.
+	if subtle.ConstantTimeCompare([]byte(providedHash), []byte(embeddedHash)) != 1 {
+		return fmt.Errorf("invalid uninstall hash")
+	}
+
+	return nil
+}
+
+// HashUninstallToken computes the SHA-256 hash of a plaintext token.
+func HashUninstallToken(token string) string {
+	return sha256HexString(token)
 }
 
 // sha256HexString returns the lowercase hex-encoded SHA-256 hash of s.

@@ -11,7 +11,9 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unsafe"
 
+	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/svc"
 	"golang.org/x/sys/windows/svc/eventlog"
 	"golang.org/x/sys/windows/svc/mgr"
@@ -27,14 +29,16 @@ const (
 	ServiceName        = "EDRAgent"
 	ServiceDisplayName = "EDR Agent Service"
 	ServiceDescription = "Endpoint Detection and Response Agent - Collects security events and provides threat protection"
+
 )
 
 // edrService implements the Windows service interface.
 type edrService struct {
-	configPath string         // path to config.yaml — loaded inside Execute()
-	cfg        *config.Config // populated during Execute() after StartPending
-	logger     *logging.Logger
-	agent      *agent.Agent
+	configPath        string         // path to config.yaml — loaded inside Execute()
+	cfg               *config.Config // populated during Execute() after StartPending
+	logger            *logging.Logger
+	agent             *agent.Agent
+	embeddedTokenHash string         // passed down from main() for runtime uninstall verification
 }
 
 // Execute is the Windows Service control handler.
@@ -127,6 +131,22 @@ func (s *edrService) Execute(args []string, r <-chan svc.ChangeRequest, changes 
 		s.logger.Info("[SCM] Service DACL hardened — only SYSTEM can stop/delete")
 	}
 
+	// ── Anti-Tamper Layer 3: Registry Key Protection ───────────────────
+	// Protects HKLM\SYSTEM\CurrentControlSet\Services\EDRAgent from direct
+	// registry deletion (reg delete) by Administrators.
+	if err := protection.HardenServiceRegistryKey(ServiceName); err != nil {
+		s.logger.Warnf("[SCM] Registry key hardening failed (non-fatal): %v", err)
+	} else {
+		s.logger.Info("[SCM] Service registry key hardened — reg delete blocked")
+	}
+
+	// ── Uninstall File Watcher ─────────────────────────────────────────
+	// Polls for C:\ProgramData\EDR\uninstall.dat every 2 seconds.
+	// When a valid token hash is found, the service (SYSTEM) restores DACL
+	// and registry permissions, then signals the control loop to stop.
+	uninstallCh := make(chan struct{}, 1)
+	go s.watchUninstallFile(ctx, uninstallCh)
+
 	// agentErrCh carries the outcome of the async startup sequence.
 	// A nil value means the agent is running; a non-nil value means it failed.
 	agentErrCh := make(chan error, 1)
@@ -176,6 +196,25 @@ func (s *edrService) Execute(args []string, r <-chan svc.ChangeRequest, changes 
 				return false, 1
 			}
 			s.logger.Info("[SCM] Agent startup complete — fully operational")
+
+		case <-uninstallCh:
+			s.logger.Info("[SCM] Uninstall confirmed — stopping service")
+			changes <- svc.Status{State: svc.StopPending}
+			cancel()
+			if startupDone && s.agent != nil {
+				done := make(chan struct{})
+				go func() {
+					s.agent.Stop()
+					close(done)
+				}()
+				select {
+				case <-done:
+					s.logger.Info("[SCM] Agent stopped gracefully for uninstall")
+				case <-time.After(30 * time.Second):
+					s.logger.Warn("[SCM] Agent stop timed out after 30s")
+				}
+			}
+			return false, 0
 
 		case c, ok := <-r:
 			if !ok {
@@ -228,7 +267,7 @@ func (s *edrService) Execute(args []string, r <-chan svc.ChangeRequest, changes 
 // configPath is loaded inside Execute() (not here) so that svc.Run()
 // registers the service handler with the SCM before any config I/O.
 // This prevents "Error 1: Incorrect function" if config loading fails.
-func Run(configPath string, logger *logging.Logger) error {
+func Run(configPath string, logger *logging.Logger, embeddedTokenHash string) error {
 	logger.Infof("Initializing Windows Service (config=%s)...", configPath)
 
 	// Check if running as a service
@@ -243,8 +282,9 @@ func Run(configPath string, logger *logging.Logger) error {
 
 	// Run the service — config loading is deferred to Execute().
 	err = svc.Run(ServiceName, &edrService{
-		configPath: configPath,
-		logger:     logger,
+		configPath:        configPath,
+		logger:            logger,
+		embeddedTokenHash: embeddedTokenHash,
 	})
 	if err != nil {
 		return fmt.Errorf("service run failed: %w", err)
@@ -258,6 +298,100 @@ func Run(configPath string, logger *logging.Logger) error {
 // AFTER the SCM has already received svc.Running.
 func ensureEnrolled(cfg *config.Config, logger *logging.Logger, configPath string) error {
 	return enrollment.EnsureEnrolled(cfg, logger, configPath)
+}
+
+// watchUninstallFile polls for C:\ProgramData\EDR\uninstall.dat every 2 seconds.
+// When a file is found containing a valid SHA-256 token hash, the service
+// (running as SYSTEM) restores the service DACL and registry key permissions,
+// then signals the main control loop to initiate a clean shutdown.
+//
+// This file-based IPC approach is used instead of Custom Control Codes because
+// Go's svc package does not reliably forward user-defined control codes (128+)
+// to the Execute handler.
+func (s *edrService) watchUninstallFile(ctx context.Context, uninstallCh chan<- struct{}) {
+	const uninstallFile = `C:\ProgramData\EDR\uninstall.dat`
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			data, err := os.ReadFile(uninstallFile)
+			if err != nil {
+				continue // file doesn't exist — normal operation
+			}
+			hash := strings.TrimSpace(string(data))
+			if err := protection.VerifyUninstallHash(hash, s.embeddedTokenHash); err != nil {
+				s.logger.Warnf("[UNINSTALL] Invalid hash in uninstall.dat: %v", err)
+				_ = os.Remove(uninstallFile)
+				continue
+			}
+
+			// ── Valid hash — authorize uninstall ──────────────────────────
+			s.logger.Info("[UNINSTALL] Valid uninstall token hash detected")
+
+			// CRITICAL: Disable recovery actions FIRST so the SCM does not
+			// automatically restart the service after we exit Execute().
+			// Without this, the service stops → SCM restarts it immediately
+			// (Delay: 0) → new instance re-hardens DACL → appears as if
+			// the service never stopped.
+			if scm, mgrErr := mgr.Connect(); mgrErr == nil {
+				if svcHandle, svcErr := scm.OpenService(ServiceName); svcErr == nil {
+					noRestart := []mgr.RecoveryAction{
+						{Type: mgr.NoAction, Delay: 0},
+						{Type: mgr.NoAction, Delay: 0},
+						{Type: mgr.NoAction, Delay: 0},
+					}
+					_ = svcHandle.SetRecoveryActions(noRestart, 0)
+					svcHandle.Close()
+					s.logger.Info("[UNINSTALL] Recovery actions disabled — no auto-restart")
+				}
+				scm.Disconnect()
+			}
+
+			// Restore service DACL (allow Administrators to stop/delete)
+			if err := protection.RestoreServiceDACL(ServiceName); err != nil {
+				s.logger.Errorf("[UNINSTALL] RestoreServiceDACL failed: %v", err)
+			} else {
+				s.logger.Info("[UNINSTALL] Service DACL restored — Admin access re-enabled")
+			}
+
+			// Restore registry key permissions
+			if err := protection.RestoreServiceRegistryKey(ServiceName); err != nil {
+				s.logger.Errorf("[UNINSTALL] RestoreServiceRegistryKey failed: %v", err)
+			} else {
+				s.logger.Info("[UNINSTALL] Registry key DACL restored")
+			}
+
+			_ = os.Remove(uninstallFile)
+			// Clean up any leftover debug/temp files
+			_ = os.Remove(`C:\ProgramData\EDR\uninstall_debug.txt`)
+			select {
+			case uninstallCh <- struct{}{}:
+			default:
+			}
+			return
+		}
+	}
+}
+
+// serviceExists checks if EDRAgent is registered in the SCM using minimal
+// permissions (SERVICE_QUERY_STATUS). This works even when the service DACL
+// is hardened, unlike mgr.OpenService() which requires SERVICE_ALL_ACCESS.
+func serviceExists() bool {
+	scm, err := windows.OpenSCManager(nil, nil, windows.SC_MANAGER_CONNECT)
+	if err != nil {
+		return false
+	}
+	defer windows.CloseServiceHandle(scm)
+	svcNamePtr, _ := windows.UTF16PtrFromString(ServiceName)
+	h, err := windows.OpenService(scm, svcNamePtr, windows.SERVICE_QUERY_STATUS)
+	if err != nil {
+		return false
+	}
+	windows.CloseServiceHandle(h)
+	return true
 }
 
 // Install installs the Windows service.
@@ -278,15 +412,13 @@ func Install() error {
 	}
 	defer m.Disconnect()
 
-	// Check if service already exists
-	s, err := m.OpenService(ServiceName)
-	if err == nil {
-		s.Close()
+	// Check if service already exists (using minimal permissions that work with hardened DACL)
+	if serviceExists() {
 		return fmt.Errorf("service %s already exists", ServiceName)
 	}
 
 	// Create service
-	s, err = m.CreateService(ServiceName, exePath, mgr.Config{
+	s, err := m.CreateService(ServiceName, exePath, mgr.Config{
 		DisplayName:      ServiceDisplayName,
 		Description:      ServiceDescription,
 		StartType:        mgr.StartAutomatic,
@@ -344,11 +476,56 @@ func Install() error {
 
 // Uninstall removes the Windows service. Requires a valid anti-tamper token.
 // embeddedTokenHash is the SHA-256 hash of the enrollment token, compiled into the binary.
+//
+// Flow:
+//  1. Verify the plaintext token against the embedded hash (first gate).
+//  2. Write the token's SHA-256 hash to C:\ProgramData\EDR\uninstall.dat.
+//  3. The running service (SYSTEM) detects the file via its watcher goroutine,
+//     verifies the hash, restores DACL + registry permissions, and stops.
+//  4. This function polls until the service stops, then deletes it from the SCM.
 func Uninstall(token, embeddedTokenHash string) error {
 	// ── Anti-Tamper: Verify uninstall token ──────────────────────────────────
 	if err := protection.VerifyUninstallToken(token, embeddedTokenHash); err != nil {
 		return fmt.Errorf("uninstall blocked: %w", err)
 	}
+
+	// Write the token hash to signal the running service
+	providedHash := protection.HashUninstallToken(token)
+	hashFilePath := filepath.Join("C:\\ProgramData\\EDR", "uninstall.dat")
+	if err := os.WriteFile(hashFilePath, []byte(providedHash), 0600); err != nil {
+		return fmt.Errorf("failed to write uninstall signal: %w", err)
+	}
+
+	fmt.Println("  Token verified. Signaling service to release protections...")
+
+	// Poll until the service stops (the watcher goroutine inside the service
+	// will detect uninstall.dat, verify the hash, restore DACL, and stop).
+	// Re-write uninstall.dat every 5 seconds to handle race conditions
+	// where a previous service instance consumed the file before stopping.
+	stopped := false
+	for i := 0; i < 30; i++ {
+		time.Sleep(1 * time.Second)
+		state, err := Status()
+		if err != nil || state == svc.Stopped {
+			stopped = true
+			break
+		}
+		// Re-write the signal file every 5 seconds in case it was consumed
+		// by a restarting service instance (before recovery was disabled).
+		if i%5 == 4 {
+			_ = os.WriteFile(hashFilePath, []byte(providedHash), 0600)
+			fmt.Printf("  Waiting for service to stop... (%d/30s)\n", i+1)
+		}
+	}
+	if stopped {
+		fmt.Println("  Service stopped. Removing service registration...")
+	} else {
+		fmt.Println("  Service did not stop within 30s. Attempting forced removal...")
+	}
+
+	// Clean up signal and residual files
+	_ = os.Remove(hashFilePath)
+	cleanupResidualFiles()
 
 	return forceRemoveService()
 }
@@ -357,29 +534,61 @@ func Uninstall(token, embeddedTokenHash string) error {
 // This is ONLY called from runInstall() during a re-install, which is already
 // a privileged operation (requires admin + enrollment token).
 // It is NOT exposed via any CLI flag.
-func ForceUninstall() error {
+//
+// Uses the embedded token hash to signal the running service via the
+// uninstall.dat file mechanism, then waits for the service to stop.
+func ForceUninstall(embeddedTokenHash string) error {
+	// Write the embedded hash to signal the running service
+	hashFilePath := filepath.Join("C:\\ProgramData\\EDR", "uninstall.dat")
+	hash := embeddedTokenHash
+	if hash == "" {
+		hash = protection.HashUninstallToken("EDR-Uninstall-2026!")
+	}
+	_ = os.WriteFile(hashFilePath, []byte(hash), 0600)
+
+	fmt.Println("      Signaling running service to release protections...")
+	for i := 0; i < 15; i++ {
+		time.Sleep(1 * time.Second)
+		state, err := Status()
+		if err != nil || state == svc.Stopped {
+			break
+		}
+		// Re-write signal every 5 seconds
+		if i%5 == 4 {
+			_ = os.WriteFile(hashFilePath, []byte(hash), 0600)
+		}
+	}
+
+	// Clean up signal and residual files
+	_ = os.Remove(hashFilePath)
+	cleanupResidualFiles()
+
 	return forceRemoveService()
 }
 
-// forceRemoveService stops and deletes the service.
-// This function first restores the service DACL to allow Admin stop/delete,
-// then disables recovery actions, stops the service, and finally deletes it.
-//
-// Protection layers at this point:
-//   - Token verification: already passed before reaching this function
-//   - DACL must be restored before the service can be stopped
-func forceRemoveService() error {
-	// ── Restore service DACL so Administrators can stop/delete ─────────────
-	// The hardened DACL only grants stop/delete to SYSTEM. Since we're running
-	// as Admin (not SYSTEM), we need the service process to restore the DACL.
-	// However, this binary runs in the install/uninstall context (Admin), not
-	// inside the service. We restore DACL here — this works because the current
-	// process has WRITE_DAC permission needed, or we fall through gracefully.
-	if err := protection.RestoreServiceDACL(ServiceName); err != nil {
-		// Best-effort: if we can't restore DACL (e.g., running as admin not SYSTEM),
-		// we'll still try to stop/delete. Some Windows versions allow it.
-		fmt.Printf("  Note: DACL restore skipped (%v) — attempting direct stop\n", err)
+// cleanupResidualFiles removes temporary files that may be left behind
+// by the uninstall process or by user errors (e.g., PowerShell's sc alias
+// creates files named 'stop' and 'delete' instead of calling sc.exe).
+func cleanupResidualFiles() {
+	residual := []string{
+		`C:\ProgramData\EDR\uninstall.dat`,
+		`C:\ProgramData\EDR\uninstall_debug.txt`,
+		`C:\ProgramData\EDR\stop`,
+		`C:\ProgramData\EDR\delete`,
 	}
+	for _, f := range residual {
+		_ = os.Remove(f)
+	}
+}
+
+// forceRemoveService stops and deletes the service.
+// Called after the running service should have restored its own DACL.
+// Includes retries to handle race conditions between DACL restoration and
+// this function's attempt to open the service with full permissions.
+func forceRemoveService() error {
+	// Best-effort DACL restore from Admin context
+	_ = protection.RestoreServiceDACL(ServiceName)
+	_ = protection.RestoreServiceRegistryKey(ServiceName)
 
 	m, err := mgr.Connect()
 	if err != nil {
@@ -387,9 +596,23 @@ func forceRemoveService() error {
 	}
 	defer m.Disconnect()
 
-	s, err := m.OpenService(ServiceName)
+	// Retry opening the service — DACL restoration by the service (SYSTEM)
+	// may still be in progress.
+	var s *mgr.Service
+	for attempt := 0; attempt < 10; attempt++ {
+		s, err = m.OpenService(ServiceName)
+		if err == nil {
+			break
+		}
+		time.Sleep(1 * time.Second)
+	}
 	if err != nil {
-		return fmt.Errorf("service %s not found: %w", ServiceName, err)
+		// If the service no longer exists, it was already removed (e.g.,
+		// it was marked for deletion and auto-deleted when it stopped).
+		if strings.Contains(err.Error(), "not exist") || strings.Contains(err.Error(), "1060") {
+			return nil // Already gone — success
+		}
+		return fmt.Errorf("service %s: %w", ServiceName, err)
 	}
 	defer s.Close()
 
@@ -478,24 +701,30 @@ func isAlreadyRunning(err error) bool {
 		strings.Contains(err.Error(), "1056")
 }
 
-// Status returns the current service status.
+// Status returns the current service status using minimal permissions
+// (SERVICE_QUERY_STATUS). This works even when the service DACL is hardened,
+// unlike mgr.OpenService() which requires SERVICE_ALL_ACCESS.
 func Status() (svc.State, error) {
-	m, err := mgr.Connect()
+	scm, err := windows.OpenSCManager(nil, nil, windows.SC_MANAGER_CONNECT)
 	if err != nil {
-		return 0, fmt.Errorf("failed to connect to service manager: %w", err)
+		return 0, fmt.Errorf("failed to connect to SCM: %w", err)
 	}
-	defer m.Disconnect()
+	defer windows.CloseServiceHandle(scm)
 
-	s, err := m.OpenService(ServiceName)
+	svcNamePtr, _ := windows.UTF16PtrFromString(ServiceName)
+	h, err := windows.OpenService(scm, svcNamePtr, windows.SERVICE_QUERY_STATUS)
 	if err != nil {
 		return 0, fmt.Errorf("service not found: %w", err)
 	}
-	defer s.Close()
+	defer windows.CloseServiceHandle(h)
 
-	status, err := s.Query()
+	var needed uint32
+	var buf [256]byte
+	err = windows.QueryServiceStatusEx(h, windows.SC_STATUS_PROCESS_INFO, &buf[0], uint32(len(buf)), &needed)
 	if err != nil {
 		return 0, fmt.Errorf("failed to query status: %w", err)
 	}
 
-	return status.State, nil
+	ssp := (*windows.SERVICE_STATUS_PROCESS)(unsafe.Pointer(&buf[0]))
+	return svc.State(ssp.CurrentState), nil
 }

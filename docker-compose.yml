@@ -36,7 +36,7 @@ services:
       C2_GRPC_ADDRESS: "edr.local:47051"
       AGENT_BUILDER_URL: "http://agent-builder:8090"
     volumes:
-      - ./connection-manager/certs:/app/certs:ro
+      - ./connection-manager/certs:/app/certs
       - ./connection-manager/config:/app/config:ro
     depends_on:
       postgres:
@@ -160,7 +160,7 @@ services:
       POSTGRES_PASSWORD: edr
       POSTGRES_DB: edr
     ports:
-      - "6100:5432"
+      - "${POSTGRES_PORT:-31432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./connection-manager/internal/database/migrations:/docker-entrypoint-initdb.d/01-connection-manager:ro
@@ -180,7 +180,7 @@ services:
   redis:
     image: redis:7-alpine
     ports:
-      - "6379:6379"
+      - "${REDIS_PORT:-31379}:6379"
     command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
     volumes:
       - redis_data:/data
@@ -205,7 +205,7 @@ services:
       ZOOKEEPER_INIT_LIMIT: 5
       KAFKA_OPTS: "-Dzookeeper.4lw.commands.whitelist=ruok,stat,srvr"
     ports:
-      - "2181:2181"
+      - "${ZOOKEEPER_PORT:-31181}:2181"
     volumes:
       - zookeeper_data:/var/lib/zookeeper/data
       - zookeeper_log:/var/lib/zookeeper/log
@@ -241,7 +241,7 @@ services:
       # Listeners: bind addresses inside the container
       KAFKA_LISTENERS: INTERNAL://0.0.0.0:9092,EXTERNAL://0.0.0.0:29092
       # Advertised: what clients see after connecting
-      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:9092,EXTERNAL://localhost:29092
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:9092,EXTERNAL://localhost:${KAFKA_EXTERNAL_PORT:-31292}
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
       KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
       # Topic defaults
@@ -255,7 +255,7 @@ services:
       KAFKA_MESSAGE_MAX_BYTES: 10485760  # 10 MB
     ports:
       - "9092:9092"     # INTERNAL (also available on host for debugging)
-      - "29092:29092"   # EXTERNAL (for host Connection Manager)
+      - "${KAFKA_EXTERNAL_PORT:-31292}:29092"   # EXTERNAL (for host Connection Manager)
     volumes:
       - kafka_data:/var/lib/kafka/data
     healthcheck:

@@ -130,18 +130,20 @@ func main() {
 		logger.Warn("GRPC_INSECURE is set — gRPC server will use PLAINTEXT (no TLS). Use only for debugging.")
 		tlsConfig = nil
 	} else {
-		// Auto-Certificate Bootstrapper: dynamically generate server.crt
-		// with ALL current host IPs in SANs so mTLS works on any machine.
-		// Runs on every startup; only regenerates if IPs changed or cert missing.
+		// ── Full PKI Bootstrap ──────────────────────────────────────────
+		// Auto-generates ALL crypto material on first run:
+		//   1. CA cert + key       (if missing)
+		//   2. Server cert + key   (if missing or IPs changed)
+		//   3. JWT signing keys    (if missing)
+		// Safe to call on every startup — only generates what is missing.
 		caKeyPath := filepath.Join(filepath.Dir(cfg.Server.CACertPath), "ca.key")
-		if regenerated, err := security.EnsureServerCert(
+		if err := security.EnsureFullPKI(
 			cfg.Server.CACertPath, caKeyPath,
 			cfg.Server.TLSCertPath, cfg.Server.TLSKeyPath,
+			cfg.JWT.PrivateKeyPath, cfg.JWT.PublicKeyPath,
 			logger,
 		); err != nil {
-			logger.Warnf("Auto-Cert Bootstrapper failed (will try loading existing cert): %v", err)
-		} else if regenerated {
-			logger.Info("Server certificate regenerated with current host IPs")
+			logger.Fatalf("PKI Bootstrap failed: %v", err)
 		}
 
 		var err error

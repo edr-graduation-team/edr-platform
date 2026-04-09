@@ -10,14 +10,17 @@ WORKDIR /app
 # Copy go mod files
 COPY go.mod go.sum ./
 
-# 🚀 السطر السحري لتسريع التحميل وتجاوز اختناق الشبكة
+# Use fast Go proxy to bypass network throttling
 ENV GOPROXY="https://goproxy.io,direct"
 
-# Download dependencies
+# Download dependencies first (Docker layer cache optimization)
 RUN go mod download
 
-# Copy source code
+# Copy source code (including tracked .pb.go files)
 COPY . .
+
+# Ensure all dependencies are consistent
+RUN go mod tidy
 
 # Build the application
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
@@ -25,40 +28,49 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
     -o /app/bin/connection-manager \
     ./cmd/server
 
-# Final stage — lightweight runtime (build handled by agent-builder service)
+# Final stage — lightweight runtime
 FROM alpine:3.19
 
-# Install CA certificates and timezone data
+# Install CA certificates, timezone data, and openssl (for cert generation fallback)
 RUN apk add --no-cache ca-certificates tzdata
 
 # Create non-root user
 RUN adduser -D -u 1000 edr
-USER edr
 
 # Set working directory
 WORKDIR /app
 
+# Create writable certs directory owned by edr user
+RUN mkdir -p /app/certs && chown edr:edr /app/certs
+
 # Copy binary from builder
 COPY --from=builder /app/bin/connection-manager /app/connection-manager
+
+# Copy entrypoint script
+COPY docker-entrypoint.sh /app/docker-entrypoint.sh
+RUN chmod +x /app/docker-entrypoint.sh
 
 # Copy config template
 COPY --from=builder /app/config/config.example.yaml /app/config/config.yaml
 
+# Switch to non-root user
+USER edr
+
 # Expose ports
 # gRPC port
 EXPOSE 50051
-# HTTP API/health port (override with HTTP_PORT in compose)
+# HTTP API/health port
 EXPOSE 8082
 
-# Health check (uses HTTP_PORT at runtime; default 8082 for root docker-compose)
+# Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD wget --no-verbose --tries=1 --spider http://localhost:8082/healthz || exit 1
+    CMD wget --no-verbose --tries=1 --spider http://localhost:${HTTP_PORT:-8082}/healthz || exit 1
 
 # Set environment variables
 ENV LOG_LEVEL=info
 ENV GRPC_PORT=50051
 ENV HTTP_PORT=8082
 
-# Run the application
-ENTRYPOINT ["/app/connection-manager"]
+# Run via entrypoint (ensures certs dir, then execs the binary)
+ENTRYPOINT ["/app/docker-entrypoint.sh"]
 CMD ["-config", "/app/config/config.yaml"]

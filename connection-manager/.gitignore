@@ -14,8 +14,10 @@
 *.out
 coverage.html
 
-# Generated protobuf files
-proto/v1/*.pb.go
+# Generated protobuf files — TRACKED in Git (Go standard practice).
+# .pb.go files must be committed so Docker builds and fresh clones work
+# without needing protoc installed.
+# proto/v1/*.pb.go
 
 # IDE
 .idea/

@@ -7,6 +7,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/rsa"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
@@ -14,6 +15,7 @@ import (
 	"math/big"
 	"net"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -295,4 +297,191 @@ func ipsToStrings(ips []net.IP) []string {
 		strs[i] = ip.String()
 	}
 	return strs
+}
+
+// ---------------------------------------------------------------------------
+// Full PKI Bootstrap — auto-generates ALL required crypto material
+// ---------------------------------------------------------------------------
+
+// EnsureCA checks if the CA certificate and key exist at the given paths.
+// If either is missing, it generates a new self-signed Root CA (RSA 4096)
+// and writes both files to disk. This allows the server to start on a
+// completely fresh machine without any manual cert provisioning.
+//
+// Returns (generated bool, err error).
+func EnsureCA(caCertPath, caKeyPath string, logger *logrus.Logger) (bool, error) {
+	// Check if both files already exist
+	_, certErr := os.Stat(caCertPath)
+	_, keyErr := os.Stat(caKeyPath)
+	if certErr == nil && keyErr == nil {
+		logger.Info("PKI Bootstrap: CA certificate and key already exist — skipping generation")
+		return false, nil
+	}
+
+	logger.Info("PKI Bootstrap: CA certificate or key not found — generating new Root CA...")
+
+	// Ensure the directory exists
+	certDir := filepath.Dir(caCertPath)
+	if err := os.MkdirAll(certDir, 0755); err != nil {
+		return false, fmt.Errorf("create certs directory %s: %w", certDir, err)
+	}
+
+	// Generate RSA 4096 key for CA (industry standard for root CAs)
+	caKey, err := rsa.GenerateKey(rand.Reader, 4096)
+	if err != nil {
+		return false, fmt.Errorf("generate CA key: %w", err)
+	}
+
+	// Serial number
+	serialNumber, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
+	if err != nil {
+		return false, fmt.Errorf("generate CA serial: %w", err)
+	}
+
+	now := time.Now()
+	caTemplate := &x509.Certificate{
+		SerialNumber: serialNumber,
+		Subject: pkix.Name{
+			CommonName:   "EDR Platform Root CA",
+			Organization: []string{"EDR Platform"},
+			Country:      []string{"SA"},
+		},
+		NotBefore:             now.Add(-5 * time.Minute), // Clock skew tolerance
+		NotAfter:              now.AddDate(10, 0, 0),     // 10 year validity for CA
+		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign | x509.KeyUsageDigitalSignature,
+		BasicConstraintsValid: true,
+		IsCA:                  true,
+		MaxPathLen:            1,
+	}
+
+	// Self-sign the CA certificate
+	caCertDER, err := x509.CreateCertificate(rand.Reader, caTemplate, caTemplate, &caKey.PublicKey, caKey)
+	if err != nil {
+		return false, fmt.Errorf("sign CA cert: %w", err)
+	}
+
+	// Write CA certificate PEM
+	certFile, err := os.OpenFile(caCertPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
+	if err != nil {
+		return false, fmt.Errorf("create CA cert file: %w", err)
+	}
+	defer certFile.Close()
+	if err := pem.Encode(certFile, &pem.Block{Type: "CERTIFICATE", Bytes: caCertDER}); err != nil {
+		return false, fmt.Errorf("write CA cert PEM: %w", err)
+	}
+
+	// Write CA private key PEM (restricted permissions)
+	keyFile, err := os.OpenFile(caKeyPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
+	if err != nil {
+		return false, fmt.Errorf("create CA key file: %w", err)
+	}
+	defer keyFile.Close()
+	if err := pem.Encode(keyFile, &pem.Block{
+		Type:  "RSA PRIVATE KEY",
+		Bytes: x509.MarshalPKCS1PrivateKey(caKey),
+	}); err != nil {
+		return false, fmt.Errorf("write CA key PEM: %w", err)
+	}
+
+	logger.Info("PKI Bootstrap: Root CA generated successfully (valid for 10 years)")
+	return true, nil
+}
+
+// EnsureJWTKeys checks if the JWT signing keys exist at the given paths.
+// If either is missing, it generates a new RSA 2048 keypair for JWT
+// token signing and verification.
+//
+// Returns (generated bool, err error).
+func EnsureJWTKeys(privateKeyPath, publicKeyPath string, logger *logrus.Logger) (bool, error) {
+	// Check if both files already exist
+	_, privErr := os.Stat(privateKeyPath)
+	_, pubErr := os.Stat(publicKeyPath)
+	if privErr == nil && pubErr == nil {
+		logger.Info("PKI Bootstrap: JWT keys already exist — skipping generation")
+		return false, nil
+	}
+
+	logger.Info("PKI Bootstrap: JWT keys not found — generating new RSA 2048 keypair...")
+
+	// Ensure the directory exists
+	keyDir := filepath.Dir(privateKeyPath)
+	if err := os.MkdirAll(keyDir, 0755); err != nil {
+		return false, fmt.Errorf("create keys directory %s: %w", keyDir, err)
+	}
+
+	// Generate RSA 2048 key for JWT
+	jwtKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		return false, fmt.Errorf("generate JWT key: %w", err)
+	}
+
+	// Write private key PEM
+	privFile, err := os.OpenFile(privateKeyPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
+	if err != nil {
+		return false, fmt.Errorf("create JWT private key file: %w", err)
+	}
+	defer privFile.Close()
+	if err := pem.Encode(privFile, &pem.Block{
+		Type:  "RSA PRIVATE KEY",
+		Bytes: x509.MarshalPKCS1PrivateKey(jwtKey),
+	}); err != nil {
+		return false, fmt.Errorf("write JWT private key PEM: %w", err)
+	}
+
+	// Write public key PEM
+	pubFile, err := os.OpenFile(publicKeyPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
+	if err != nil {
+		return false, fmt.Errorf("create JWT public key file: %w", err)
+	}
+	defer pubFile.Close()
+	pubKeyBytes, err := x509.MarshalPKIXPublicKey(&jwtKey.PublicKey)
+	if err != nil {
+		return false, fmt.Errorf("marshal JWT public key: %w", err)
+	}
+	if err := pem.Encode(pubFile, &pem.Block{Type: "PUBLIC KEY", Bytes: pubKeyBytes}); err != nil {
+		return false, fmt.Errorf("write JWT public key PEM: %w", err)
+	}
+
+	logger.Info("PKI Bootstrap: JWT RSA 2048 keypair generated successfully")
+	return true, nil
+}
+
+// EnsureFullPKI orchestrates the complete PKI bootstrap sequence:
+//  1. Generate CA cert + key if missing
+//  2. Generate/regenerate server cert if missing or IPs changed
+//  3. Generate JWT signing keys if missing
+//
+// This function guarantees that after it returns successfully, ALL crypto
+// material required by the server is present on disk. It is safe to call
+// on every startup — it only generates what is missing.
+func EnsureFullPKI(
+	caCertPath, caKeyPath string,
+	serverCertPath, serverKeyPath string,
+	jwtPrivateKeyPath, jwtPublicKeyPath string,
+	logger *logrus.Logger,
+) error {
+	logger.Info("PKI Bootstrap: starting full PKI check...")
+
+	// Step 1: Ensure CA exists (required before server cert can be signed)
+	caGenerated, err := EnsureCA(caCertPath, caKeyPath, logger)
+	if err != nil {
+		return fmt.Errorf("PKI Bootstrap CA failed: %w", err)
+	}
+
+	// Step 2: Ensure server certificate (regenerates if IPs changed or cert missing)
+	// If CA was just generated, the server cert definitely needs generating too.
+	if caGenerated {
+		logger.Info("PKI Bootstrap: CA was just generated — server certificate will be created")
+	}
+	if _, err := EnsureServerCert(caCertPath, caKeyPath, serverCertPath, serverKeyPath, logger); err != nil {
+		return fmt.Errorf("PKI Bootstrap server cert failed: %w", err)
+	}
+
+	// Step 3: Ensure JWT signing keys
+	if _, err := EnsureJWTKeys(jwtPrivateKeyPath, jwtPublicKeyPath, logger); err != nil {
+		return fmt.Errorf("PKI Bootstrap JWT keys failed: %w", err)
+	}
+
+	logger.Info("PKI Bootstrap: all crypto material verified/generated successfully")
+	return nil
 }

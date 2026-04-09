@@ -139,7 +139,7 @@ func main() {
 		// load config, perform CA fetch → enrollment → agent.Start()
 		// asynchronously, reporting proper SCM status at each stage.
 		logger.Info("Execution context: Windows Service Control Manager")
-		if err := service.Run(*configPath, logger); err != nil {
+		if err := service.Run(*configPath, logger, EmbeddedTokenHash); err != nil {
 			logger.Errorf("Service execution error: %v", err)
 			os.Exit(1)
 		}
@@ -364,7 +364,7 @@ func runInstall(
 	if err := service.Install(); err != nil {
 		if isAlreadyExistsErr(err) {
 			fmt.Println("      → Service exists; re-registering...")
-			_ = service.ForceUninstall()
+			_ = service.ForceUninstall(EmbeddedTokenHash)
 			if err2 := service.Install(); err2 != nil {
 				fmt.Fprintf(os.Stderr, "Error installing service: %v\n", err2)
 				logger.Errorf("Service install failed: %v", err2)

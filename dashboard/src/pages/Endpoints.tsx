@@ -620,8 +620,8 @@ function formatDateTime(dateStr?: string | null): string {
     return d.toLocaleString();
 }
 
-// STALE THRESHOLD: 5 minutes in milliseconds
-const STALE_THRESHOLD_MS = 5 * 60 * 1000;
+// STALE THRESHOLD: 1 minute in milliseconds (matches server-side sweeper)
+const STALE_THRESHOLD_MS = 1 * 60 * 1000;
 
 /**
  * Computes the effective agent status by cross-checking last_seen.
@@ -985,7 +985,7 @@ export default function Endpoints() {
             sort_by: 'health_score',
             sort_order: 'desc',
         }),
-        refetchInterval: 30000, // Refresh every 30 seconds
+        refetchInterval: 10000, // Refresh every 10 seconds for near-real-time status
     });
 
     const agents = data?.data || [];

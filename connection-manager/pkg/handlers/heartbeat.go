@@ -13,6 +13,7 @@ import (
 
 	"github.com/edr-platform/connection-manager/internal/cache"
 	"github.com/edr-platform/connection-manager/internal/service"
+	"github.com/edr-platform/connection-manager/pkg/contextkeys"
 	edrv1 "github.com/edr-platform/connection-manager/proto/v1"
 )
 
@@ -42,7 +43,15 @@ func NewHeartbeatHandler(logger *logrus.Logger, redis *cache.RedisClient, agentS
 
 // Heartbeat processes a heartbeat request from an agent.
 func (h *HeartbeatHandler) Heartbeat(ctx context.Context, req *edrv1.HeartbeatRequest) (*edrv1.HeartbeatResponse, error) {
-	agentID := req.AgentId
+	// Use the AUTHENTICATED agent ID from the TLS certificate (set by auth
+	// interceptor), NOT the self-reported req.AgentId. This is consistent with
+	// StreamEvents and prevents heartbeat misrouting when config UUID diverges
+	// from the certificate CN after re-installation.
+	agentID := extractHeartbeatAgentID(ctx)
+	if agentID == "" {
+		// Fallback for unauthenticated/test contexts
+		agentID = req.AgentId
+	}
 	if agentID == "" {
 		return nil, status.Error(codes.InvalidArgument, "agent_id is required")
 	}
@@ -193,4 +202,13 @@ func getHealthStatus(score float64) string {
 	default:
 		return "critical"
 	}
+}
+
+// extractHeartbeatAgentID extracts the authenticated agent ID from context.
+// The auth interceptor sets this from the TLS certificate CN.
+func extractHeartbeatAgentID(ctx context.Context) string {
+	if id, ok := ctx.Value(contextkeys.AgentIDKey).(string); ok {
+		return id
+	}
+	return ""
 }

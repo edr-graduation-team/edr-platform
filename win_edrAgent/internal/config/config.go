@@ -78,6 +78,12 @@ type FilteringConfig struct {
 	// Reduces noise from OS-native processes and verified third-party software.
 	TrustedHashes []string `yaml:"trusted_hashes"`
 
+	// FilterPrivateNetworks, when true, drops network connections where BOTH
+	// source and destination are RFC 1918 private IPs (10.x, 172.16-31.x, 192.168.x).
+	// This eliminates high-volume internal LAN noise with near-zero security signal.
+	// Set to false to collect internal connections (e.g., lateral movement detection).
+	FilterPrivateNetworks bool `yaml:"filter_private_networks"`
+
 	// QoS rate limiting configuration for noisy event types.
 	RateLimit RateLimitConfig `yaml:"rate_limit"`
 }
@@ -131,62 +137,129 @@ func DefaultConfig() *Config {
 			Timeout:           30 * time.Second,
 			ReconnectDelay:    1 * time.Second,
 			MaxReconnectDelay: 30 * time.Second,
-			HeartbeatInterval: 30 * time.Second,
+			HeartbeatInterval: 10 * time.Second,
 			TLSServerName:     "edr-connection-manager",
 		},
 		Agent: AgentConfig{
 			ID:             uuid.New().String(),
 			Hostname:       hostname,
-			BatchSize:      50,
-			BatchInterval:  1 * time.Second,
+			BatchSize:      200,
+			BatchInterval:  2 * time.Second,
 			BufferSize:     5000,
 			Compression:    "snappy",
 			QueueDir:       "C:\\ProgramData\\EDR\\queue",
 			MaxQueueSizeMB: 500,
 		},
 		Collectors: CollectorConfig{
-			ETWEnabled:      true,
-			ETWSessionName:  "EDRAgentSession",
-			WMIEnabled:      true,
-			WMIInterval:     60 * time.Minute,
-			RegistryEnabled: true,
-			FileEnabled:     true,
-			NetworkEnabled:  true,
+			ETWEnabled:       true,
+			ETWSessionName:   "EDRAgentSession",
+			WMIEnabled:       false, // Disabled by default: ETW provides real-time process events. Enable via config for periodic inventory.
+			WMIInterval:      60 * time.Minute,
+			RegistryEnabled:  true,
+			FileEnabled:      true,
+			ImageLoadEnabled: true,
+			NetworkEnabled:   true,
 		},
 		Filtering: FilteringConfig{
 			ExcludeProcesses: []string{
-				"svchost.exe",
+				// NOTE: svchost.exe is intentionally NOT excluded — it is a high-value
+				// detection target (MITRE T1036.004 Masquerading). Malware frequently
+				// masquerades as or is launched by svchost.
+
+				// Core OS session managers — pure kernel infrastructure, zero attack surface
 				"csrss.exe",
-				"services.exe",
 				"smss.exe",
 				"wininit.exe",
 				"winlogon.exe",
+				"services.exe",
+				"lsaiso.exe", // Credential Guard (isolated LSA)
+
+				// Desktop / Shell infrastructure — noisy, not attack vectors
 				"dwm.exe",
+				"sihost.exe",
 				"taskhostw.exe",
 				"RuntimeBroker.exe",
+				"ApplicationFrameHost.exe",
+				"SystemSettings.exe",
+				"TextInputHost.exe",
+				"ctfmon.exe",
+				"fontdrvhost.exe",
+				"dashost.exe",
+
+				// Audio / Media — no security signal
+				"audiodg.exe",
+
+				// Search indexing — extremely noisy
 				"SearchIndexer.exe",
-				"MsMpEng.exe", // Windows Defender
-				"agent.exe",   // Self
+				"SearchProtocolHost.exe",
+				"SearchFilterHost.exe",
+
+				// Windows Update / Telemetry — periodic noise
+				"wuauclt.exe",
+				"musnotification.exe",
+				"CompatTelRunner.exe",
+				"MicrosoftEdgeUpdate.exe",
+
+				// Security services (collecting their events is redundant)
+				"MsMpEng.exe",
+				"SecurityHealthService.exe",
+				"SgrmBroker.exe",
+
+				// COM infrastructure
+				"dllhost.exe",
+
+				// Print / background
+				"spoolsv.exe",
+				"backgroundTaskHost.exe",
+
+				// Self — agent's own executable
+				"edr-agent.exe",
+				"agent.exe",
 			},
 			ExcludeIPs: []string{
-				"127.0.0.1",
-				"::1",
-				"0.0.0.0",
-				"169.254.0.0/16", // Link-local
+				// Loopback / invalid
+				"127.0.0.0/8",
+				"::1/128",
+				"0.0.0.0/32",
+				// Link-local
+				"169.254.0.0/16",
+				"fe80::/10",
+				// Multicast / broadcast
+				"224.0.0.0/4",
+				"255.255.255.255/32",
 			},
 			ExcludeRegistry: []string{
-				"HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Component Based Servicing",
-				"HKLM\\SYSTEM\\CurrentControlSet\\Services\\bam\\State",
+				"Component Based Servicing",
+				"\\Services\\bam\\State",
+				"\\Services\\WpnUserService",
+				"\\DeviceAssociationService",
 			},
 			ExcludePaths: []string{
 				"C:\\Windows\\Temp",
 				"C:\\Users\\*\\AppData\\Local\\Temp",
 				"C:\\Windows\\SoftwareDistribution",
+				"C:\\Windows\\WinSxS",
+				"C:\\Windows\\assembly",
+				"C:\\Windows\\Installer",
+				"C:\\Windows\\Microsoft.NET",
+				"C:\\Windows\\servicing",
+				"C:\\ProgramData\\Microsoft\\Windows Defender",
 			},
 			IncludePaths: []string{
 				"C:\\Windows\\System32",
 				"C:\\Program Files",
 				"C:\\Program Files (x86)",
+			},
+			FilterPrivateNetworks: true, // Drop RFC 1918 private-to-private connections. Set to false for lateral movement detection.
+			RateLimit: RateLimitConfig{
+				Enabled:        true,
+				DefaultMaxEPS:  500,
+				CriticalBypass: true,
+				PerEventType: map[string]int{
+					"file":       200,
+					"image_load": 100,
+					"network":    50,
+				},
 			},
 		},
 		Logging: LoggingConfig{

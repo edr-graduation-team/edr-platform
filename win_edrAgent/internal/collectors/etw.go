@@ -269,6 +269,70 @@ func wcharToGo(p *C.WCHAR, max int) string {
 // Sigma-Enriched Process Events
 // =====================================================================
 
+// trustedOSProcess is an O(1) lookup table of Windows kernel and shell
+// infrastructure processes that fire continuously with zero security signal.
+// These are hard-coded (not configurable) because they represent immutable
+// OS internals — an attacker cannot create a process with these exact names
+// from a non-system path and get past ETW's kernel-level PID attribution.
+//
+// The configurable ExcludeProcesses list in FilterConfig handles user-defined
+// exclusions and is applied AFTER event creation in the filter pipeline.
+var trustedOSProcess = map[string]bool{
+	// Session managers / kernel (PID 0-4 already skipped)
+	"conhost.exe": true,
+	"wmiprvse.exe": true,
+
+	// Shell / Desktop infrastructure (fire hundreds of times/minute)
+	"backgroundtaskhost.exe":    true,
+	"applicationframehost.exe":  true,
+	"gamebarpresencewriter.exe": true,
+	"textinputhost.exe":         true,
+	"systemsettings.exe":        true,
+
+	// Search indexing — extremely noisy, no security signal
+	"searchprotocolhost.exe": true,
+	"searchfilterhost.exe":   true,
+
+	// Audio / Media
+	"audiodg.exe":    true,
+	"fontdrvhost.exe": true,
+
+	// Peripheral / device infrastructure
+	"dashost.exe": true, // Device Association Framework Provider Host
+	"ctfmon.exe":  true, // CTF Loader (text input framework)
+	"sihost.exe":  true, // Shell Infrastructure Host
+
+	// Windows Update telemetry (periodic, no detection value)
+	"compattelrunner.exe":      true,
+	"musnotification.exe":      true,
+	"microsoftedgeupdate.exe":  true,
+	"wuauclt.exe":              true,
+}
+
+// isSelfOrChildProcess returns true if the process is the EDR agent itself
+// or a child process spawned by it (e.g., PowerShell for WMI/Network queries).
+// This prevents a telemetry feedback loop where the agent's own activity
+// generates events that flood the pipeline.
+func isSelfOrChildProcess(nameLow, cmdLine string) bool {
+	// Skip the agent executable itself
+	if nameLow == "edr-agent.exe" || nameLow == "agent.exe" {
+		return true
+	}
+
+	// Skip PowerShell instances launched by the agent for WMI/Network collection.
+	// These use -NoProfile and contain known query cmdlets.
+	if nameLow == "powershell.exe" && strings.Contains(cmdLine, "-NoProfile") {
+		if containsAny(cmdLine,
+			"Get-NetTCPConnection", "Get-CimInstance",
+			"Get-NetAdapter", "ConvertTo-Json", "ConvertTo-Csv",
+			"Win32_Process", "Win32_ComputerSystem") {
+			return true
+		}
+	}
+
+	return false
+}
+
 func (c *ETWCollector) processStart(pid, ppid uint32, eventImg, eventCmd string) {
 	if isDuplicate(pid) {
 		return
@@ -292,15 +356,19 @@ func (c *ETWCollector) processStart(pid, ppid uint32, eventImg, eventCmd string)
 	}
 	nameLow := strings.ToLower(name)
 
-	// Noise filter
-	if nameLow == "conhost.exe" || nameLow == "wmiprvse.exe" || nameLow == "" {
+	// Hard-coded noise filter — these processes fire constantly with zero
+	// security signal. They cannot be abused by attackers (kernel-managed).
+	// The configurable FilterConfig.ExcludeProcesses handles additional
+	// user-defined exclusions in the pipeline after event creation.
+	if trustedOSProcess[nameLow] {
 		return
 	}
-	if nameLow == "powershell.exe" && strings.Contains(cmdLine, "-NoProfile") {
-		if containsAny(cmdLine, "Get-NetTCPConnection", "Get-CimInstance",
-			"Get-NetAdapter", "ConvertTo-Json", "ConvertTo-Csv") {
-			return
-		}
+
+	// Self-exclusion: skip the agent's own child processes.
+	// The agent spawns PowerShell for WMI/Network queries; these generate
+	// noise and create a telemetry feedback loop.
+	if isSelfOrChildProcess(nameLow, cmdLine) {
+		return
 	}
 
 	if cmdLine == "" {
@@ -341,7 +409,7 @@ func (c *ETWCollector) processEnd(pid, ppid uint32, eventImg string) {
 	if name == "" {
 		name = baseName(eventImg)
 	}
-	if name == "" || strings.ToLower(name) == "conhost.exe" {
+	if name == "" || trustedOSProcess[strings.ToLower(name)] {
 		return
 	}
 	evt := event.NewEvent(event.EventTypeProcess, event.SeverityLow, map[string]interface{}{

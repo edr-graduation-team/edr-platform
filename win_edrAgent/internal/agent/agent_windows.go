@@ -21,13 +21,15 @@ func startPlatformCollectors(ctx context.Context, cfg *config.Config, eventChan 
 		return
 	}
 
-	// Global telemetry filter from config (ExcludeProcesses, ExcludeIPs, ExcludeRegistry, ExcludePaths, IncludePaths)
+	// Global telemetry filter from config
 	evtFilter := collectors.NewFilter(collectors.FilterConfig{
 		ExcludeProcesses: cfg.Filtering.ExcludeProcesses,
 		ExcludeIPs:       cfg.Filtering.ExcludeIPs,
 		ExcludeRegistry:  cfg.Filtering.ExcludeRegistry,
 		ExcludePaths:     cfg.Filtering.ExcludePaths,
 		IncludePaths:     cfg.Filtering.IncludePaths,
+		ExcludeEventIDs:  cfg.Filtering.ExcludeEventIDs,
+		TrustedHashes:    cfg.Filtering.TrustedHashes,
 	}, logger)
 
 	// ETW collector (process events + optional file I/O + image load)
@@ -79,7 +81,7 @@ func startPlatformCollectors(ctx context.Context, cfg *config.Config, eventChan 
 
 	// Network collector (connection monitoring)
 	if cfg.Collectors.NetworkEnabled {
-		net := collectors.NewNetworkCollector(eventChan, evtFilter, logger)
+		net := collectors.NewNetworkCollector(eventChan, evtFilter, cfg.Filtering.FilterPrivateNetworks, logger)
 		go func() {
 			defer func() {
 				if r := recover(); r != nil {

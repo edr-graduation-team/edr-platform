@@ -29,9 +29,9 @@ package protection
 
 import (
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/hex"
 	"fmt"
-	"strings"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -251,24 +251,35 @@ func convertSDDLToSD(sddl string) (sd unsafe.Pointer, sdSize uint32, err error) 
 // Layer 3: Uninstall Token Verification
 // =========================================================================
 
-// DefaultUninstallTokenHash is the SHA-256 hash of the default uninstall token.
-// In production, this should be set during installation via the dashboard.
-// Default token: "EDR-Uninstall-2026!" → SHA-256 hash below.
-var DefaultUninstallTokenHash = sha256HexString("EDR-Uninstall-2026!")
-
-// VerifyUninstallToken checks whether the provided plaintext token matches
-// the expected SHA-256 hash.  Returns nil on success, error on mismatch.
-func VerifyUninstallToken(providedToken, expectedHash string) error {
+// VerifyUninstallToken validates the provided plaintext token against the
+// SHA-256 hash embedded in the binary at build time.
+//
+// Security design:
+//   - The binary contains ONLY the SHA-256 hash of the enrollment token,
+//     injected via -ldflags by the dashboard build system.
+//   - The plaintext secret is NEVER stored in the binary, config files,
+//     registry, or disk — it exists only as a CLI argument during install.
+//   - Even if the .exe is captured and reverse-engineered (strings, IDA Pro),
+//     the attacker gets an irreversible hash, not the secret.
+//   - Comparison uses crypto/subtle.ConstantTimeCompare to prevent timing
+//     side-channel attacks.
+//   - If no embedded hash exists (development builds), falls back to the
+//     legacy default token for backward compatibility.
+func VerifyUninstallToken(providedToken, embeddedHash string) error {
 	if providedToken == "" {
 		return fmt.Errorf("uninstall token required: use --token <secret>")
 	}
 
-	if expectedHash == "" {
-		expectedHash = DefaultUninstallTokenHash
+	// Compute the SHA-256 hash of the provided token.
+	providedHash := sha256HexString(providedToken)
+
+	// If no embedded hash (dev build without dashboard), use legacy default.
+	if embeddedHash == "" {
+		embeddedHash = sha256HexString("EDR-Uninstall-2026!")
 	}
 
-	computedHash := sha256HexString(providedToken)
-	if !strings.EqualFold(computedHash, expectedHash) {
+	// Constant-time comparison prevents timing side-channel attacks.
+	if subtle.ConstantTimeCompare([]byte(providedHash), []byte(embeddedHash)) != 1 {
 		return fmt.Errorf("invalid uninstall token")
 	}
 

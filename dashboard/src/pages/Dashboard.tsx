@@ -8,7 +8,7 @@ import {
 import { statsApi, alertsApi, agentsApi, createAlertStream, type Alert, type AgentStats, type Agent } from '../api/client';
 import { SkeletonKPICards } from '../components';
 
-const STALE_THRESHOLD_MS = 5 * 60 * 1000;
+const STALE_THRESHOLD_MS = 1 * 60 * 1000;
 
 function KPICard({ title, value, icon: Icon, color = 'primary', subValue, onClick }: any) {
     const colorClasses: Record<string, string> = {
@@ -278,19 +278,21 @@ export default function Dashboard() {
     const { data: alertStats, isLoading: statsLoading } = useQuery({
         queryKey: ['alertStats'],
         queryFn: statsApi.alerts,
-        refetchInterval: 30000,
+        refetchInterval: 10000,
     });
 
     const { data: agentStats } = useQuery({
         queryKey: ['agentStats'],
         queryFn: agentsApi.stats,
         retry: false,
+        refetchInterval: 10000,
     });
 
     const { data: agentListData } = useQuery({
         queryKey: ['agents'],
         queryFn: () => agentsApi.list({ limit: 200 }),
         retry: false,
+        refetchInterval: 10000,
     });
 
     const { data: recentAlerts } = useQuery({

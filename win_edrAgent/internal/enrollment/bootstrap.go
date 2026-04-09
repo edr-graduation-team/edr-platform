@@ -18,9 +18,31 @@ const (
 	caFetchTimeout    = 15 * time.Second
 	caFetchMaxRetries = 3
 	caFetchRetryDelay = 2 * time.Second
-	caHTTPPort        = "8082" // Connection Manager HTTP/REST port
+	caHTTPPort        = "60200" // Connection Manager HTTP/REST port
 	caEndpoint        = "/api/v1/agent/ca"
 )
+
+// EnsureCACertificate is the primary CA provisioning function.
+// It uses the build-time embedded CA certificate when available (secure path),
+// falling back to the legacy HTTP fetch only if no cert was embedded.
+//
+// Call sites should use this instead of FetchCACertificate directly.
+func EnsureCACertificate(serverAddr, caPath string, logger *logging.Logger) error {
+	// ── Secure path: use embedded CA cert (no network call) ─────────────────
+	if HasEmbeddedCA() {
+		logger.Info("Using build-time embedded CA certificate (secure, no network fetch)")
+		if err := WriteEmbeddedCA(caPath); err != nil {
+			return fmt.Errorf("write embedded CA: %w", err)
+		}
+		logger.Infof("Embedded CA certificate written to %s", caPath)
+		return nil
+	}
+
+	// ── Fallback: fetch over HTTP (insecure, for legacy/dev builds) ─────────
+	logger.Warn("No embedded CA certificate found — falling back to insecure HTTP fetch. " +
+		"Build the agent from the dashboard to embed the CA certificate securely.")
+	return FetchCACertificate(serverAddr, caPath, logger)
+}
 
 // FetchCACertificate downloads the CA certificate from the Connection Manager's
 // REST API and saves it to caPath. This enables zero-touch provisioning — agents

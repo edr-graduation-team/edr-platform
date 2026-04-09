@@ -227,3 +227,22 @@ func (q *DiskQueue) Remove(filename string) error {
 	}
 	return os.Remove(path)
 }
+
+// FileCount returns the number of pending .bin files in the queue directory.
+// This is used as the Queue Depth health metric — it reflects the actual
+// backlog of unsent events (files awaiting delivery), not the in-memory
+// buffer occupancy (which is always high under normal load).
+func (q *DiskQueue) FileCount() int {
+	entries, err := os.ReadDir(q.dir)
+	if err != nil {
+		return 0
+	}
+	count := 0
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), fileExt) {
+			count++
+		}
+	}
+	return count
+}
+

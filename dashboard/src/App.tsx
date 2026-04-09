@@ -3,7 +3,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import {
   Menu, X, Shield, Activity, Settings as SettingsIcon, FileText,
   AlertTriangle, Monitor, Target, PieChart, BarChart3, Zap,
-  Key, LogOut, Moon, Sun, TrendingUp
+  Key, LogOut, Moon, Sun, TrendingUp, Download
 } from 'lucide-react';
 import ProtocolLogo from './components/ProtocolLogo';
 import { useState, Suspense, lazy, useEffect, useMemo, memo } from 'react';
@@ -24,6 +24,7 @@ const Threats = lazy(() => import('./pages/Threats'));
 const AuditLogs = lazy(() => import('./pages/AuditLogs'));
 const EnrollmentTokens = lazy(() => import('./pages/EnrollmentTokens'));
 const ActionCenter = lazy(() => import('./pages/ActionCenter'));
+const AgentDeployment = lazy(() => import('./pages/AgentDeployment'));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -118,6 +119,7 @@ const Navigation = memo(function Navigation() {
       items: [
         ...(authApi.canViewAuditLogs() ? [{ path: '/audit', icon: Activity, label: 'Audit Logs' }] : []),
         { path: '/tokens', icon: Key, label: 'Enrollment Tokens' },
+        ...(authApi.canViewAuditLogs() ? [{ path: '/deploy', icon: Download, label: 'Agent Deployment' }] : []),
         { path: '/settings', icon: SettingsIcon, label: 'Settings' },
       ]
     }
@@ -326,6 +328,11 @@ function AppRoutes() {
             <Route path="/responses" element={
               <ProtectedRoute roles={['admin', 'security']}>
                 <ActionCenter />
+              </ProtectedRoute>
+            } />
+            <Route path="/deploy" element={
+              <ProtectedRoute roles={['admin', 'security']}>
+                <AgentDeployment />
               </ProtectedRoute>
             } />
             <Route path="/settings" element={

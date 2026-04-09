@@ -413,7 +413,7 @@ func main() {
 	defer sweepCancel()
 	if agentRepo != nil {
 		go staleAgentSweeper(sweepCtx, agentRepo, logger)
-		logger.Info("Stale agent sweeper started (interval: 60s, threshold: 5m)")
+		logger.Info("Stale agent sweeper started (interval: 15s, threshold: 1m)")
 	}
 
 	// Start gRPC server in goroutine
@@ -554,10 +554,11 @@ func grpcInsecure() bool {
 }
 
 // staleAgentSweeper runs a periodic sweep to mark zombie agents as offline.
-// An agent is considered stale if its last_seen timestamp is older than 5 minutes.
+// An agent is considered stale if its last_seen timestamp is older than 1 minute.
+// Sweep interval: 15s — ensures offline detection within ~75 seconds.
 func staleAgentSweeper(ctx context.Context, repo repository.AgentRepository, logger *logrus.Logger) {
-	const threshold = 5 * time.Minute
-	ticker := time.NewTicker(60 * time.Second)
+	const threshold = 1 * time.Minute
+	ticker := time.NewTicker(15 * time.Second)
 	defer ticker.Stop()
 
 	for {

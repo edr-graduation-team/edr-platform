@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"os"
@@ -38,6 +39,19 @@ func EnsureEnrolled(cfg *config.Config, logger *logging.Logger, configFilePath s
 	// Already enrolled if both cert and key exist
 	if _, err := os.Stat(cfg.Certs.CertPath); err == nil {
 		if _, err := os.Stat(cfg.Certs.KeyPath); err == nil {
+			// Sync cfg.Agent.ID from the certificate CN.
+			// After re-installation, config.yaml may have a NEWLY generated UUID
+			// while the existing certificate still carries the SERVER-ASSIGNED UUID
+			// in its CN. Without this sync, the Heartbeat sends the wrong agent_id.
+			if certID := extractCertCN(cfg.Certs.CertPath, logger); certID != "" && certID != cfg.Agent.ID {
+				logger.Infof("Syncing Agent.ID from certificate CN: %s → %s", cfg.Agent.ID, certID)
+				cfg.Agent.ID = certID
+				if configFilePath != "" {
+					if err := cfg.Save(configFilePath); err != nil {
+						logger.Warnf("Failed to save config after CN sync: %v", err)
+					}
+				}
+			}
 			logger.Info("Agent already enrolled")
 			return nil
 		}
@@ -139,4 +153,22 @@ func EnsureEnrolled(cfg *config.Config, logger *logging.Logger, configFilePath s
 		logger.Infof("Config saved to %s", configFilePath)
 	}
 	return nil
+}
+
+// extractCertCN reads a PEM certificate file and returns its Subject.CommonName.
+// Returns "" on any error (missing file, bad PEM, etc.) — caller handles fallback.
+func extractCertCN(certPath string, logger *logging.Logger) string {
+	data, err := os.ReadFile(certPath)
+	if err != nil {
+		return ""
+	}
+	block, _ := pem.Decode(data)
+	if block == nil {
+		return ""
+	}
+	cert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		return ""
+	}
+	return cert.Subject.CommonName
 }

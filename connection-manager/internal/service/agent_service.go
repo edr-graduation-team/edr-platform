@@ -154,19 +154,30 @@ func (s *agentServiceImpl) Register(ctx context.Context, req *RegisterAgentReque
 		legacyToken = token
 	}
 
-	// 2. Check for duplicate hostname
+	// 2. Handle duplicate hostname — allow re-enrollment (reinstall / rebuild scenario).
+	//    The agents table has a UNIQUE constraint on hostname, so we use
+	//    UpsertByHostname (ON CONFLICT DO UPDATE) which atomically replaces
+	//    the old agent record. This supports:
+	//    - OS reinstalls with fresh agent binary
+	//    - Dashboard-built agents replacing manually installed ones
+	//    - Recovery from broken enrollment state
 	existing, err := s.agentRepo.GetByHostname(ctx, req.Hostname)
 	if err == nil && existing != nil {
-		return nil, ErrDuplicateAgent
+		s.logger.WithFields(logrus.Fields{
+			"old_agent_id": existing.ID,
+			"hostname":     req.Hostname,
+		}).Info("Re-enrollment detected: will replace existing agent with same hostname")
 	}
 
 	// 3. Generate agent ID
 	agentID := uuid.New()
 	now := time.Now()
 
-	// 4. Create agent record as PENDING first.
-	//    The certificates table has FK → agents(id), so the agent row MUST
-	//    exist before CertificateService.Issue inserts the signed cert.
+	// 4. Create/replace agent record using UPSERT.
+	//    The agents table has UNIQUE(hostname), so a plain INSERT would fail
+	//    on re-enrollment. UpsertByHostname uses ON CONFLICT (hostname) DO UPDATE
+	//    which atomically replaces the previous agent row — keeping audit trail
+	//    via metadata["previous_agent_id"].
 	agent := &models.Agent{
 		ID:            agentID,
 		Hostname:      req.Hostname,
@@ -182,8 +193,16 @@ func (s *agentServiceImpl) Register(ctx context.Context, req *RegisterAgentReque
 		HealthScore:   100.0,
 	}
 
-	if err := s.agentRepo.Create(ctx, agent); err != nil {
-		s.logger.WithError(err).Error("Failed to create agent")
+	// Preserve previous agent ID in metadata for audit trail
+	if existing != nil {
+		if agent.Metadata == nil {
+			agent.Metadata = make(map[string]string)
+		}
+		agent.Metadata["previous_agent_id"] = existing.ID.String()
+	}
+
+	if err := s.agentRepo.UpsertByHostname(ctx, agent); err != nil {
+		s.logger.WithError(err).Error("Failed to upsert agent")
 		return nil, ErrInternal
 	}
 

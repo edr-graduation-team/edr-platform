@@ -25,7 +25,7 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
     -o /app/bin/connection-manager \
     ./cmd/server
 
-# Final stage
+# Final stage — lightweight runtime (build handled by agent-builder service)
 FROM alpine:3.19
 
 # Install CA certificates and timezone data

@@ -35,6 +35,14 @@ func (c *ETWCollector) handleImageLoad(pid uint32, imagePath string) {
 		return
 	}
 
+	// --- Signed System32 fast-path ---
+	// If the DLL is in System32 and has a valid Authenticode signature,
+	// it is a stock OS module. Skip event creation entirely — this is the
+	// single biggest volume reducer for image load telemetry.
+	if strings.Contains(lower, `\windows\system32\`) && isFileSigned(imagePath) {
+		return
+	}
+
 	modName := baseName(imagePath)
 
 	// Enrich: process that loaded this module.
@@ -72,28 +80,69 @@ func (c *ETWCollector) handleImageLoad(pid uint32, imagePath string) {
 
 // isNoisyModule filters out very common OS modules that load in every process.
 // These generate enormous volume with zero security signal.
+//
+// This list covers the Windows loader chain (ntdll → kernel32 → kernelbase),
+// the C runtime, COM infrastructure, GDI/USER32, cryptography, networking,
+// and other modules that are mapped into virtually every process. Total: ~45.
 func isNoisyModule(lower string) bool {
 	noisyExact := []string{
+		// Core loader chain
 		`\windows\system32\ntdll.dll`,
 		`\windows\system32\kernel32.dll`,
 		`\windows\system32\kernelbase.dll`,
+
+		// C Runtime
 		`\windows\system32\msvcrt.dll`,
+		`\windows\system32\ucrtbase.dll`,
+		`\windows\system32\msvcp_win.dll`,
+		`\windows\system32\vcruntime140.dll`,
+
+		// Security / Auth
 		`\windows\system32\advapi32.dll`,
 		`\windows\system32\sechost.dll`,
-		`\windows\system32\rpcrt4.dll`,
+		`\windows\system32\sspicli.dll`,
+		`\windows\system32\bcrypt.dll`,
 		`\windows\system32\bcryptprimitives.dll`,
-		`\windows\system32\ucrtbase.dll`,
+		`\windows\system32\crypt32.dll`,
+		`\windows\system32\wintrust.dll`,
+
+		// RPC / COM
+		`\windows\system32\rpcrt4.dll`,
 		`\windows\system32\combase.dll`,
-		`\windows\system32\user32.dll`,
-		`\windows\system32\gdi32.dll`,
-		`\windows\system32\win32u.dll`,
-		`\windows\system32\msvcp_win.dll`,
-		`\windows\system32\gdi32full.dll`,
 		`\windows\system32\ole32.dll`,
 		`\windows\system32\oleaut32.dll`,
-		`\windows\system32\shell32.dll`,
-		`\windows\system32\clbcatq.dll`,
+
+		// Graphics / UI
+		`\windows\system32\user32.dll`,
+		`\windows\system32\gdi32.dll`,
+		`\windows\system32\gdi32full.dll`,
+		`\windows\system32\win32u.dll`,
+		`\windows\system32\uxtheme.dll`,
 		`\windows\system32\imm32.dll`,
+		`\windows\system32\msctf.dll`,
+
+		// Shell
+		`\windows\system32\shell32.dll`,
+		`\windows\system32\shlwapi.dll`,
+		`\windows\system32\clbcatq.dll`,
+		`\windows\system32\propsys.dll`,
+
+		// Networking
+		`\windows\system32\ws2_32.dll`,
+		`\windows\system32\wininet.dll`,
+		`\windows\system32\nsi.dll`,
+
+		// Device / Power / Setup
+		`\windows\system32\cfgmgr32.dll`,
+		`\windows\system32\devobj.dll`,
+		`\windows\system32\powrprof.dll`,
+		`\windows\system32\setupapi.dll`,
+		`\windows\system32\wldp.dll`,
+
+		// Profiling / Version
+		`\windows\system32\profapi.dll`,
+		`\windows\system32\version.dll`,
+		`\windows\system32\cabinet.dll`,
 	}
 	for _, n := range noisyExact {
 		if strings.HasSuffix(lower, n) {

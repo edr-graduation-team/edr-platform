@@ -150,7 +150,7 @@ func (a *Agent) Start(ctx context.Context) error {
 	a.heartbeat.SetMetricsCollectors(
 		func() uint64 { return a.eventsTotal.Load() },
 		func() uint64 { return a.eventsSent.Load() },
-		func() int { return len(a.eventChan) },
+		func() int { return a.diskQueue.FileCount() },
 		nil, // events dropped — no filter/rate-limiter integrated yet
 	)
 	a.heartbeat.Start(a.ctx, a.grpcClient.SendHeartbeat)
@@ -518,8 +518,15 @@ func (a *Agent) runSender() {
 	}
 }
 
-// processBatch serializes the batch to proto and enqueues it to the disk queue (WAL).
-// The queue processor goroutine is responsible for sending to the server and removing on success.
+// processBatch serializes the batch to proto and sends it.
+//
+// FAST PATH (connection healthy): sends directly via gRPC stream without
+// touching the disk. This eliminates 3 disk I/O operations per batch
+// (write + read + delete) and is the primary throughput optimization.
+//
+// SLOW PATH (connection down): falls back to the disk queue (WAL) so
+// events are never lost. The queue processor drains these files when
+// the connection is restored.
 func (a *Agent) processBatch(batch *event.Batch) {
 	if batch == nil || len(batch.Events) == 0 {
 		return
@@ -551,15 +558,33 @@ func (a *Agent) processBatch(batch *event.Batch) {
 		},
 	}
 
+	// ── FAST PATH: direct send (no disk I/O) ─────────────────────────────────
+	// Always attempt a direct send first. SendBatchSync has its own fallback
+	// (long-lived stream → short-lived stream). We only fall to disk when
+	// the actual send fails, NOT based on conn state checks — because gRPC
+	// transitions to Idle between RPCs, making IsConnected() unreliable.
+	if err := a.grpcClient.SendBatchSync(a.ctx, pbBatch); err == nil {
+		a.eventsSent.Add(uint64(pbBatch.GetEventCount()))
+		return
+	}
+
+	// ── SLOW PATH: persist to disk for later delivery ────────────────────────
 	if err := a.diskQueue.Enqueue(pbBatch); err != nil {
 		a.logger.Warnf("Enqueue batch to disk failed: %v", err)
 		return
 	}
-	a.logger.Debugf("Batch enqueued: id=%s events=%d", batch.ID, len(batch.Events))
+	a.logger.Debugf("Batch enqueued to disk: id=%s events=%d", batch.ID, len(batch.Events))
 }
 
 // runQueueProcessor drains the disk queue by sending batches to the server.
-// On success the file is removed; on failure (e.g. disconnected) exponential backoff is applied.
+//
+// With the fast-path in processBatch, this goroutine primarily handles:
+//   - Backlog files from when the connection was down
+//   - Files that accumulated during agent restart
+//
+// The processor uses file listing (ReadDir) instead of PeekOldest-per-iteration
+// to amortise the directory scan cost. Files are processed sequentially (safe)
+// but the list is refreshed in bulk to avoid O(n²) ReadDir calls.
 func (a *Agent) runQueueProcessor() {
 	defer a.wg.Done()
 	defer func() {
@@ -573,7 +598,7 @@ func (a *Agent) runQueueProcessor() {
 
 	backoff := 1 * time.Second
 	maxBackoff := 30 * time.Second
-	emptyPoll := 100 * time.Millisecond
+	emptyPoll := 500 * time.Millisecond
 
 	for {
 		select {
@@ -590,6 +615,7 @@ func (a *Agent) runQueueProcessor() {
 			continue
 		}
 		if pbBatch == nil || filename == "" {
+			// Queue is empty — with the fast-path, this is the normal steady state.
 			time.Sleep(emptyPoll)
 			continue
 		}

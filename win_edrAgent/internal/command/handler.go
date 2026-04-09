@@ -131,6 +131,7 @@ type Handler struct {
 	isolationPort      string             // gRPC port extracted from server_address
 	isolationCurrentIP string             // last resolved IP used in firewall rules
 	watchdogCancel     context.CancelFunc // cancels the isolation watchdog goroutine
+	blockPolicyCancel  context.CancelFunc // cancels the delayed block-policy goroutine
 	grpcHealth         GRPCHealthChecker  // injected: nil-safe health probe
 
 	// configUpdateFn is injected by agent.SetConfigUpdateHandler so the handler
@@ -445,7 +446,7 @@ func (h *Handler) resolveC2IP(hostOrIP string) (string, error) {
 // It is idempotent: existing rules with the same names are deleted first.
 // httpPort is always "8082" (REST/enrollment); grpcPort is typically "50051".
 func (h *Handler) installIsolationRules(c2IP, grpcPort string) error {
-	const httpPort = "8082"
+	const httpPort = "60200"
 
 	rules := []struct {
 		name string
@@ -495,15 +496,43 @@ func (h *Handler) installIsolationRules(c2IP, grpcPort string) error {
 		},
 	}
 
+	// ── Phase 1: Delete old rules in parallel (idempotent) ──────────────────
+	var wg sync.WaitGroup
 	for _, rule := range rules {
-		// Delete first (idempotent).
-		_ = exec.Command("netsh", "advfirewall", "firewall", "delete", "rule", "name="+rule.name).Run()
+		wg.Add(1)
+		go func(name string) {
+			defer wg.Done()
+			_ = exec.Command("netsh", "advfirewall", "firewall", "delete", "rule", "name="+name).Run()
+		}(rule.name)
+	}
+	wg.Wait()
 
-		out, err := exec.Command("netsh", rule.args...).CombinedOutput()
-		if err != nil {
-			return fmt.Errorf("failed to add firewall rule %s: %w (output: %s)", rule.name, err, string(out))
+	// ── Phase 2: Add new rules in parallel ───────────────────────────────────
+	type ruleResult struct {
+		name string
+		err  error
+		out  string
+	}
+	results := make(chan ruleResult, len(rules))
+	for _, rule := range rules {
+		wg.Add(1)
+		go func(r struct {
+			name string
+			args []string
+		}) {
+			defer wg.Done()
+			out, err := exec.Command("netsh", r.args...).CombinedOutput()
+			results <- ruleResult{name: r.name, err: err, out: string(out)}
+		}(rule)
+	}
+	wg.Wait()
+	close(results)
+
+	for res := range results {
+		if res.err != nil {
+			return fmt.Errorf("failed to add firewall rule %s: %w (output: %s)", res.name, res.err, res.out)
 		}
-		h.logger.Infof("[Isolate] Firewall rule added: %s (remoteip=%s)", rule.name, c2IP)
+		h.logger.Infof("[Isolate] Firewall rule added: %s (remoteip=%s)", res.name, c2IP)
 	}
 	return nil
 }
@@ -594,10 +623,24 @@ func (h *Handler) isolateNetwork(ctx context.Context, params map[string]string) 
 	go h.isolationWatchdog(watchdogCtx, watchHostname, watchPort, watchIP, grpcHealth)
 
 	// ── 7. Apply block policy after grace period (ACK-before-block) ───────────
+	// Cancel any previous pending block-policy goroutine (idempotent re-isolation).
+	if h.blockPolicyCancel != nil {
+		h.blockPolicyCancel()
+	}
+	blockCtx, blockCancel := context.WithCancel(context.Background())
+	h.blockPolicyCancel = blockCancel
+
 	h.logger.Infof("[Isolate] ALLOW rules installed for %s:%s — block policy fires in 4s", resolvedIP, grpcPort)
 	go func() {
 		h.logger.Info("[Isolate] Waiting 4s for CommandResult ACK before applying block policy...")
-		time.Sleep(4 * time.Second)
+		select {
+		case <-time.After(4 * time.Second):
+			// Timer expired — apply block policy.
+		case <-blockCtx.Done():
+			// RESTORE arrived during grace period — abort block policy.
+			h.logger.Info("[Isolate] Block policy CANCELLED — unisolate arrived during grace period")
+			return
+		}
 
 		out, err := exec.Command("netsh", "advfirewall", "set", "allprofiles",
 			"firewallpolicy", "blockinbound,blockoutbound").CombinedOutput()
@@ -714,7 +757,16 @@ func (h *Handler) unisolateNetwork(ctx context.Context, params map[string]string
 
 	h.logger.Info("[Restore] Restoring default firewall policy")
 
-	// ── 1. Stop the watchdog first ────────────────────────────────────────────
+	// ── 1a. Cancel the delayed block-policy goroutine FIRST ───────────────────
+	// If RESTORE arrives during the 4-second grace period, we must prevent
+	// the pending goroutine from re-applying blockinbound,blockoutbound.
+	if h.blockPolicyCancel != nil {
+		h.blockPolicyCancel()
+		h.blockPolicyCancel = nil
+		h.logger.Info("[Restore] Block-policy goroutine cancelled ✓")
+	}
+
+	// ── 1b. Stop the watchdog ─────────────────────────────────────────────────
 	// This MUST happen before removing firewall rules so the watchdog cannot
 	// attempt to re-add rules while we are deleting them.
 	if h.watchdogCancel != nil {

@@ -85,7 +85,7 @@ type HeartbeatResponse struct {
 func NewHeartbeat(cfg *config.Config, logger *logging.Logger) *Heartbeat {
 	interval := cfg.Server.HeartbeatInterval
 	if interval <= 0 {
-		interval = 30 * time.Second
+		interval = 10 * time.Second
 	}
 
 	return &Heartbeat{
@@ -205,8 +205,12 @@ func (h *Heartbeat) buildRequest() *HeartbeatRequest {
 		req.EventsDropped = h.getEventsDropped()
 	}
 
-	// Calculate status based on metrics
-	req.Status = h.calculateStatus(req)
+	// Calculate status based on metrics — but NEVER override manually-set
+	// operational statuses (Isolated, Updating). These are set by command
+	// handlers and reflect deliberate agent state, not metric thresholds.
+	if currentStatus != StatusIsolated && currentStatus != StatusUpdating {
+		req.Status = h.calculateStatus(req)
+	}
 
 	return req
 }
@@ -264,6 +268,8 @@ func getLocalIPAddresses() (addrs []string) {
 
 // calculateStatus determines agent status from metrics.
 // Uses percentage-based thresholds for system memory (not Go process memory).
+// Queue depth threshold is dynamic: 80% of buffer capacity (avoids false
+// "degraded" alerts when the event channel is only partially filled).
 func (h *Heartbeat) calculateStatus(req *HeartbeatRequest) HeartbeatStatus {
 	// Check for critical: >90% system memory usage
 	if req.MemoryTotalMB > 0 {
@@ -274,7 +280,15 @@ func (h *Heartbeat) calculateStatus(req *HeartbeatRequest) HeartbeatStatus {
 	}
 
 	// Check for degraded conditions
-	if req.QueueDepth > 1000 {
+	// Queue depth: trigger only when buffer is >80% full (backpressure).
+	// Default buffer is 5000, so threshold = 4000.
+	// Old hard-coded threshold of 1000 caused false "degraded" status because
+	// ETW routinely fills 1000-2000 events during normal batching.
+	queueThreshold := int(float64(h.cfg.Agent.BufferSize) * 0.80)
+	if queueThreshold < 500 {
+		queueThreshold = 500 // safety floor
+	}
+	if req.QueueDepth > queueThreshold {
 		return StatusDegraded
 	}
 	if req.CPUUsage > 80 {

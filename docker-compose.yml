@@ -34,6 +34,7 @@ services:
       GRPC_PORT: "50051"
       HTTP_PORT: "8082"
       C2_GRPC_ADDRESS: "edr.local:47051"
+      AGENT_BUILDER_URL: "http://agent-builder:8090"
     volumes:
       - ./connection-manager/certs:/app/certs:ro
       - ./connection-manager/config:/app/config:ro
@@ -90,6 +91,30 @@ services:
       timeout: 10s
       retries: 5
       start_period: 15s
+    restart: unless-stopped
+    networks:
+      - edr-network
+
+  # ============================================================================
+  # AGENT BUILDER — Cross-compilation service for EDR Agent binaries
+  # ============================================================================
+  agent-builder:
+    build:
+      context: ./agent-builder
+      dockerfile: Dockerfile
+    volumes:
+      - ./win_edrAgent:/app/agent-src
+      - ./connection-manager/certs:/app/certs:ro
+      - agent_build_cache:/root/go   # cache Go modules between builds
+    environment:
+      BUILDER_PORT: "8090"
+      AGENT_SRC_DIR: "/app/agent-src"
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8090/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
     restart: unless-stopped
     networks:
       - edr-network
@@ -292,6 +317,7 @@ volumes:
   kafka_data:
   zookeeper_data:
   zookeeper_log:
+  agent_build_cache:
 
 # ==============================================================================
 # NETWORKS

@@ -577,6 +577,53 @@ export const enrollmentTokensApi = {
 };
 
 // ============================================================================
+// Agent Build API (Dashboard-driven compilation)
+// ============================================================================
+
+export interface AgentBuildRequest {
+    server_ip?: string;
+    server_domain?: string;
+    server_port?: string;
+    token_id: string;
+    skip_config: boolean;
+}
+
+export const agentBuildApi = {
+    /**
+     * Build and download the agent binary.
+     * Returns a Blob (the .exe) and response headers with metadata.
+     */
+    build: async (data: AgentBuildRequest): Promise<{ blob: Blob; sha256: string; filename: string }> => {
+        const response = await connectionApi.post('/api/v1/agent/build', data, {
+            responseType: 'blob',
+            timeout: 600_000, // 10 minutes — generous for cross-compilation (first build can take 3-5 min)
+        });
+        const sha256 = (response.headers as Record<string, string>)['x-agent-sha256'] || '';
+        return {
+            blob: response.data as Blob,
+            sha256,
+            filename: 'edr-agent.exe',
+        };
+    },
+
+    /**
+     * List only valid (usable) enrollment tokens.
+     * Filters out revoked, expired, and maxed-out tokens.
+     */
+    listValidTokens: async (): Promise<EnrollmentToken[]> => {
+        const result = await enrollmentTokensApi.list();
+        const tokens = result.data ?? result;
+        const now = new Date();
+        return (tokens as EnrollmentToken[]).filter(t => {
+            if (!t.is_active) return false;
+            if (t.expires_at && new Date(t.expires_at) < now) return false;
+            if (t.max_uses !== null && t.use_count >= t.max_uses) return false;
+            return true;
+        });
+    },
+};
+
+// ============================================================================
 // WebSocket for real-time alerts
 // ============================================================================
 

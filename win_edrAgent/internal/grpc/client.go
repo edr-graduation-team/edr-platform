@@ -396,17 +396,57 @@ func (c *Client) SendBatch(batch *EventBatch) error {
 }
 
 // SendBatchSync sends a proto EventBatch on the active stream synchronously.
-// Returns an error if the stream is not established (e.g. not connected).
-// Caller should use this for guaranteed delivery with retry (e.g. disk queue processor).
+// If the long-lived bidirectional stream is not established, it falls back to
+// opening a short-lived stream — ensuring the disk queue processor can always
+// drain files as long as the gRPC connection itself is up (even if RunStream
+// has not yet re-established the persistent stream).
+//
+// This is the critical fix for the "queue files never deleted" bug: Heartbeat
+// uses unary RPC (independent of the stream), so it keeps working while
+// SendBatchSync was returning "stream not established" and never draining.
 func (c *Client) SendBatchSync(ctx context.Context, batch *EventBatch) error {
+	// Try the long-lived stream first (fast path).
 	c.streamMu.Lock()
 	stream := c.stream
 	c.streamMu.Unlock()
 
-	if stream == nil {
-		return fmt.Errorf("stream not established")
+	if stream != nil {
+		if err := stream.Send(batch); err != nil {
+			c.clearStream()
+			return fmt.Errorf("stream send failed: %w", err)
+		}
+		return nil
 	}
-	return stream.Send(batch)
+
+	// Fallback: open a short-lived stream for this single batch.
+	// This path is hit when RunStream hasn't re-established the persistent
+	// stream yet, but the underlying gRPC connection is healthy.
+	c.mu.RLock()
+	sc := c.serviceClient
+	c.mu.RUnlock()
+	if sc == nil {
+		return fmt.Errorf("not connected")
+	}
+
+	// Use a bounded timeout so the batcher goroutine is never blocked
+	// indefinitely — a hung StreamEvents call would stall the entire
+	// event pipeline and fill eventChan to 5000 (→ Degraded).
+	sendCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	shortStream, err := sc.StreamEvents(sendCtx)
+	if err != nil {
+		return fmt.Errorf("failed to open short-lived stream: %w", err)
+	}
+	if err := shortStream.Send(batch); err != nil {
+		return fmt.Errorf("short-lived stream send failed: %w", err)
+	}
+	if err := shortStream.CloseSend(); err != nil {
+		return fmt.Errorf("short-lived stream close failed: %w", err)
+	}
+	// Drain any server response (commands, ACK) — best-effort.
+	shortStream.Recv() //nolint:errcheck
+	return nil
 }
 
 // SendCommandResult sends the command execution result to the server (C2 feedback).

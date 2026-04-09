@@ -537,6 +537,43 @@ func (r *PostgresAgentRepository) SetIsolation(ctx context.Context, id uuid.UUID
 //
 // The operation runs inside a single implicit transaction (pgxpool.Exec is atomic).
 func (r *PostgresAgentRepository) UpsertByHostname(ctx context.Context, agent *models.Agent) error {
+	now := time.Now()
+
+	// Use a transaction: we must delete FK-dependent rows from ALL child tables
+	// before the UPSERT can safely change the agent's primary key (id).
+	//
+	// Child tables with FK → agents(id):
+	//   certificates, installation_tokens, csrs,
+	//   policy_agent_assignments, alerts, commands, command_queue
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	// 1. Delete ALL FK-dependent rows referencing the previous agent with this hostname.
+	//    Each table has agent_id → agents(id), so all must be cleared before the id can change.
+	childTables := []string{
+		"certificates",
+		"installation_tokens",
+		"csrs",
+		"policy_agent_assignments",
+		"alerts",
+		"commands",
+		"command_queue",
+	}
+	for _, table := range childTables {
+		_, err = tx.Exec(ctx, fmt.Sprintf(`
+			DELETE FROM %s
+			WHERE agent_id IN (
+				SELECT id FROM agents WHERE hostname = $1
+			)`, table), agent.Hostname)
+		if err != nil {
+			return fmt.Errorf("failed to clean %s for re-enrollment: %w", table, err)
+		}
+	}
+
+	// 2. UPSERT the agent row — now safe to change the id (no FK references remain).
 	query := `
 		INSERT INTO agents (
 			id, hostname, status, os_type, os_version, cpu_count, memory_mb,
@@ -572,8 +609,7 @@ func (r *PostgresAgentRepository) UpsertByHostname(ctx context.Context, agent *m
 			metadata       = EXCLUDED.metadata,
 			updated_at     = EXCLUDED.updated_at`
 
-	now := time.Now()
-	_, err := r.pool.Exec(ctx, query,
+	_, err = tx.Exec(ctx, query,
 		agent.ID,           // $1
 		agent.Hostname,     // $2
 		agent.Status,       // $3
@@ -590,6 +626,10 @@ func (r *PostgresAgentRepository) UpsertByHostname(ctx context.Context, agent *m
 	)
 	if err != nil {
 		return fmt.Errorf("failed to upsert agent by hostname: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("failed to commit upsert transaction: %w", err)
 	}
 	return nil
 }

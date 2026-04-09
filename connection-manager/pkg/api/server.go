@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/labstack/echo/v4"
@@ -51,8 +52,12 @@ func NewServer(cfg *config.APIConfig, logger *logrus.Logger, m *metrics.Metrics)
 		MaxAge:           3600,
 	}))
 
-	// Request timeout
+	// Request timeout (skip for long-running endpoints like agent build)
 	e.Use(middleware.TimeoutWithConfig(middleware.TimeoutConfig{
+		Skipper: func(c echo.Context) bool {
+			p := c.Request().URL.Path
+			return strings.HasSuffix(p, "/agent/build")
+		},
 		Timeout: cfg.RequestTimeout,
 	}))
 
@@ -171,6 +176,9 @@ func (s *Server) RegisterRoutes(handlers *Handlers) {
 	tokens.GET("", handlers.ListEnrollmentTokens, handlers.RequirePermission("tokens", "read"))
 	tokens.POST("", handlers.GenerateEnrollmentToken, handlers.RequirePermission("tokens", "write"))
 	tokens.POST("/:id/revoke", handlers.RevokeEnrollmentToken, handlers.RequirePermission("tokens", "write"))
+
+	// Agent build (dashboard-driven compilation with embedded CA + config)
+	protected.POST("/agent/build", handlers.BuildAgent, handlers.RequirePermission("agents", "write"))
 }
 
 // healthCheck returns server health status.

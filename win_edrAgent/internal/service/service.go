@@ -31,9 +31,10 @@ const (
 
 // edrService implements the Windows service interface.
 type edrService struct {
-	cfg    *config.Config
-	logger *logging.Logger
-	agent  *agent.Agent
+	configPath string         // path to config.yaml — loaded inside Execute()
+	cfg        *config.Config // populated during Execute() after StartPending
+	logger     *logging.Logger
+	agent      *agent.Agent
 }
 
 // Execute is the Windows Service control handler.
@@ -53,45 +54,78 @@ type edrService struct {
 //  4. Async goroutine:  CA fetch → enrollment → agent.Start()
 //     On any failure: signal agentErrCh so the control loop can shut down cleanly.
 func (s *edrService) Execute(args []string, r <-chan svc.ChangeRequest, changes chan<- svc.Status) (ssec bool, errno uint32) {
+	// ── Panic recovery: ensure SCM always gets a clean status transition ────
+	// Without this, an unrecovered panic in Execute() would crash the service
+	// process, causing an ungraceful termination visible as Error 1.
+	defer func() {
+		if rec := recover(); rec != nil {
+			s.logger.Errorf("[SCM] PANIC recovered in Execute: %v", rec)
+		}
+	}()
+
 	const cmdsAccepted = svc.AcceptStop | svc.AcceptShutdown | svc.AcceptPauseAndContinue
 
 	// ── 1. StartPending — satisfy SCM within the startup timeout window ────────
 	changes <- svc.Status{State: svc.StartPending}
 
+	// ── 1b. Load configuration ─────────────────────────────────────────────────
+	// Config loading happens HERE (inside Execute) rather than in main() to
+	// guarantee that svc.Run() has already registered the service handler.
+	// If config loading happened in main() and failed, os.Exit() would kill
+	// the process before the SCM received a handler → "Error 1: Incorrect function".
+	cfg, err := config.Load(s.configPath)
+	if err != nil {
+		s.logger.Errorf("[SCM] Failed to load configuration from %s: %v", s.configPath, err)
+		changes <- svc.Status{State: svc.StopPending}
+		return false, 2 // service-specific error code 2 = config load failure
+	}
+	s.cfg = cfg
+	s.logger.SetLevel(cfg.Logging.Level)
+	s.logger.Infof("[SCM] Config loaded successfully: server=%s agent=%s", cfg.Server.Address, cfg.Agent.ID)
+
 	// ── 2. Prepare agent (pure in-memory, cannot fail) ────────────────────────
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	var err error
 	s.agent, err = agent.New(s.cfg, s.logger)
 	if err != nil {
-		// agent.New() failure is extremely unlikely (nil cfg/logger), but if it
-		// happens before we report Running, we MUST still transition properly.
 		s.logger.Errorf("[SCM] Failed to construct agent: %v", err)
 		changes <- svc.Status{State: svc.StopPending}
-		changes <- svc.Status{State: svc.Stopped}
-		return false, 1
+		return false, 3 // service-specific error code 3 = agent init failure
 	}
 
-	const svcConfigPath = `C:\ProgramData\EDR\config\config.yaml`
-	s.agent.SetConfigFilePath(svcConfigPath)
-	s.agent.SetRestartInfo(svcConfigPath)
+	s.agent.SetConfigFilePath(s.configPath)
+	s.agent.SetRestartInfo(s.configPath)
 	s.agent.SetConfigUpdateHandler(s.agent.UpdateConfig)
 
 	// ── 3. Running — must be sent BEFORE any network / TLS / enrollment work ──
 	// This satisfies the SCM contract. All subsequent work is async.
 	changes <- svc.Status{State: svc.Running, Accepts: cmdsAccepted}
 	s.logger.Info("[SCM] Service reported Running — starting async enrollment + agent")
+	s.logger.Infof("[SCM] Config path: %s", s.configPath)
 
-	// ── Anti-Tamper: Protect the agent process from external termination ───
+	// ── Anti-Tamper Layer 1: Process DACL ─────────────────────────────────
+	// Prevents taskkill, Task Manager, TerminateProcess from non-SYSTEM.
 	// Must be called AFTER Running is reported (so SCM doesn't timeout).
-	// This prevents taskkill, Task Manager, and TerminateProcess from non-SYSTEM.
 	if err := protection.ProtectProcess(); err != nil {
 		s.logger.Warnf("[SCM] Process self-protection failed (non-fatal): %v", err)
 	} else {
 		s.logger.Info("[SCM] Process self-protection enabled — tamper-resistant")
 	}
 
+	// ── Anti-Tamper Layer 2: Service DACL Hardening ────────────────────────
+	// Prevents Administrators from stopping or deleting the service via:
+	//   - sc stop EDRAgent      → ACCESS DENIED
+	//   - sc delete EDRAgent    → ACCESS DENIED
+	//   - Stop-Service EDRAgent → ACCESS DENIED
+	//   - net stop EDRAgent     → ACCESS DENIED
+	// Only SYSTEM retains full control. This is restored during uninstall
+	// via RestoreServiceDACL() before the service can be stopped.
+	if err := protection.HardenServiceDACL(ServiceName); err != nil {
+		s.logger.Warnf("[SCM] Service DACL hardening failed (non-fatal): %v", err)
+	} else {
+		s.logger.Info("[SCM] Service DACL hardened — only SYSTEM can stop/delete")
+	}
 
 	// agentErrCh carries the outcome of the async startup sequence.
 	// A nil value means the agent is running; a non-nil value means it failed.
@@ -99,16 +133,16 @@ func (s *edrService) Execute(args []string, r <-chan svc.ChangeRequest, changes 
 
 	// ── 4. Async startup goroutine ─────────────────────────────────────────────
 	go func() {
-		// 4a. Fetch CA certificate (best-effort, non-fatal)
+		// 4a. Provision CA certificate — embedded if available, else HTTP fetch
 		if !s.cfg.Server.Insecure && s.cfg.Certs.CAPath != "" {
-			if err := fetchCA(s.cfg, s.logger); err != nil {
-				s.logger.Warnf("[SCM] CA auto-bootstrap failed (using existing cert if present): %v", err)
+			if err := enrollment.EnsureCACertificate(s.cfg.Server.Address, s.cfg.Certs.CAPath, s.logger); err != nil {
+				s.logger.Warnf("[SCM] CA provisioning failed (using existing cert if present): %v", err)
 			}
 		}
 
 		// 4b. Enrollment — this is where TLS handshakes happen.
 		// On failure we log the error and signal the control loop to stop cleanly.
-		if err := ensureEnrolled(s.cfg, s.logger, svcConfigPath); err != nil {
+		if err := ensureEnrolled(s.cfg, s.logger, s.configPath); err != nil {
 			s.logger.Errorf("[SCM] Enrollment failed — service will stop: %v", err)
 			agentErrCh <- err
 			cancel()
@@ -190,8 +224,12 @@ func (s *edrService) Execute(args []string, r <-chan svc.ChangeRequest, changes 
 }
 
 // Run starts the service.
-func Run(cfg *config.Config, logger *logging.Logger) error {
-	logger.Info("Initializing Windows Service...")
+//
+// configPath is loaded inside Execute() (not here) so that svc.Run()
+// registers the service handler with the SCM before any config I/O.
+// This prevents "Error 1: Incorrect function" if config loading fails.
+func Run(configPath string, logger *logging.Logger) error {
+	logger.Infof("Initializing Windows Service (config=%s)...", configPath)
 
 	// Check if running as a service
 	isService, err := svc.IsWindowsService()
@@ -203,23 +241,16 @@ func Run(cfg *config.Config, logger *logging.Logger) error {
 		return fmt.Errorf("not running as a Windows service")
 	}
 
-	// Run the service
+	// Run the service — config loading is deferred to Execute().
 	err = svc.Run(ServiceName, &edrService{
-		cfg:    cfg,
-		logger: logger,
+		configPath: configPath,
+		logger:     logger,
 	})
 	if err != nil {
 		return fmt.Errorf("service run failed: %w", err)
 	}
 
 	return nil
-}
-
-// fetchCA is a thin wrapper so Execute()'s async goroutine can call
-// enrollment.FetchCACertificate without referencing the enrollment package
-// at every call-site.
-func fetchCA(cfg *config.Config, logger *logging.Logger) error {
-	return enrollment.FetchCACertificate(cfg.Server.Address, cfg.Certs.CAPath, logger)
 }
 
 // ensureEnrolled is a thin wrapper over enrollment.EnsureEnrolled used by Execute()
@@ -312,9 +343,10 @@ func Install() error {
 }
 
 // Uninstall removes the Windows service. Requires a valid anti-tamper token.
-func Uninstall(token string) error {
+// embeddedTokenHash is the SHA-256 hash of the enrollment token, compiled into the binary.
+func Uninstall(token, embeddedTokenHash string) error {
 	// ── Anti-Tamper: Verify uninstall token ──────────────────────────────────
-	if err := protection.VerifyUninstallToken(token, ""); err != nil {
+	if err := protection.VerifyUninstallToken(token, embeddedTokenHash); err != nil {
 		return fmt.Errorf("uninstall blocked: %w", err)
 	}
 
@@ -330,11 +362,25 @@ func ForceUninstall() error {
 }
 
 // forceRemoveService stops and deletes the service.
-// Protection layers that remain active:
-//   - Process DACL: prevents taskkill (anti-kill)
-//   - Recovery Actions: auto-restart on crash
-//   - Uninstall Token: required to reach this function
+// This function first restores the service DACL to allow Admin stop/delete,
+// then disables recovery actions, stops the service, and finally deletes it.
+//
+// Protection layers at this point:
+//   - Token verification: already passed before reaching this function
+//   - DACL must be restored before the service can be stopped
 func forceRemoveService() error {
+	// ── Restore service DACL so Administrators can stop/delete ─────────────
+	// The hardened DACL only grants stop/delete to SYSTEM. Since we're running
+	// as Admin (not SYSTEM), we need the service process to restore the DACL.
+	// However, this binary runs in the install/uninstall context (Admin), not
+	// inside the service. We restore DACL here — this works because the current
+	// process has WRITE_DAC permission needed, or we fall through gracefully.
+	if err := protection.RestoreServiceDACL(ServiceName); err != nil {
+		// Best-effort: if we can't restore DACL (e.g., running as admin not SYSTEM),
+		// we'll still try to stop/delete. Some Windows versions allow it.
+		fmt.Printf("  Note: DACL restore skipped (%v) — attempting direct stop\n", err)
+	}
+
 	m, err := mgr.Connect()
 	if err != nil {
 		return fmt.Errorf("failed to connect to service manager: %w", err)
@@ -402,8 +448,9 @@ func StartService() error {
 		return nil
 	}
 
-	// Poll until Running (up to 10 s).
-	for i := 0; i < 20; i++ {
+	// Poll until Running (up to 30 s — first boot after install needs extra time
+	// for config loading and agent construction inside Execute()).
+	for i := 0; i < 60; i++ {
 		time.Sleep(500 * time.Millisecond)
 		status, err := s.Query()
 		if err != nil {
@@ -412,9 +459,13 @@ func StartService() error {
 		if status.State == svc.Running {
 			return nil
 		}
+		// If the service has already stopped, don't keep waiting
+		if status.State == svc.Stopped {
+			return fmt.Errorf("service stopped unexpectedly — check C:\\ProgramData\\EDR\\logs\\agent.log for details")
+		}
 	}
 
-	return fmt.Errorf("service did not reach Running state within 10s")
+	return fmt.Errorf("service did not reach Running state within 30s — check C:\\ProgramData\\EDR\\logs\\agent.log")
 }
 
 // isAlreadyRunning returns true when the error message indicates the service

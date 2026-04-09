@@ -17,11 +17,28 @@ import (
 	"github.com/edr-platform/win-agent/internal/logging"
 )
 
+// rfc1918 defines the private IPv4 address ranges (RFC 1918).
+// Used to filter internal LAN connections that generate high volume
+// with near-zero security signal for EDR.
+var rfc1918 = []struct{ prefix string; bits int }{
+	{"10.", 8},
+	{"172.16.", 12}, {"172.17.", 12}, {"172.18.", 12}, {"172.19.", 12},
+	{"172.20.", 12}, {"172.21.", 12}, {"172.22.", 12}, {"172.23.", 12},
+	{"172.24.", 12}, {"172.25.", 12}, {"172.26.", 12}, {"172.27.", 12},
+	{"172.28.", 12}, {"172.29.", 12}, {"172.30.", 12}, {"172.31.", 12},
+	{"192.168.", 16},
+}
+
 // NetworkCollector monitors network connections.
 type NetworkCollector struct {
 	logger    *logging.Logger
 	eventChan chan<- *event.Event
 	filter    *Filter
+
+	// filterPrivateNetworks, when true, drops connections where BOTH
+	// endpoints are RFC 1918 private IPs (e.g. 192.168.x ↔ 192.168.x).
+	// Controlled by config.Filtering.FilterPrivateNetworks.
+	filterPrivateNetworks bool
 
 	// State
 	running atomic.Bool
@@ -36,12 +53,13 @@ type NetworkCollector struct {
 }
 
 // NewNetworkCollector creates a new network collector.
-func NewNetworkCollector(eventChan chan<- *event.Event, filter *Filter, logger *logging.Logger) *NetworkCollector {
+func NewNetworkCollector(eventChan chan<- *event.Event, filter *Filter, filterPrivateNetworks bool, logger *logging.Logger) *NetworkCollector {
 	return &NetworkCollector{
-		logger:    logger,
-		eventChan: eventChan,
-		filter:    filter,
-		connCache: make(map[string]bool),
+		logger:                logger,
+		eventChan:             eventChan,
+		filter:                filter,
+		filterPrivateNetworks: filterPrivateNetworks,
+		connCache:             make(map[string]bool),
 	}
 }
 
@@ -135,6 +153,13 @@ func (c *NetworkCollector) collectConnections() {
 		c.cacheMu.RUnlock()
 
 		if !exists && remoteAddr != "" && remoteAddr != "0.0.0.0" && remoteAddr != "::" {
+			// RFC 1918 filtering: skip private-to-private (LAN) connections.
+			// These generate enormous volume with near-zero security signal.
+			if c.filterPrivateNetworks && isPrivateIP(localAddr) && isPrivateIP(remoteAddr) {
+				newCache[connKey] = true
+				continue
+			}
+
 			c.connectionsFound.Add(1)
 
 			localPortInt, _ := strconv.Atoi(localPort)
@@ -222,4 +247,15 @@ type NetworkStats struct {
 	Running          bool
 	ConnectionsFound uint64
 	EventsGenerated  uint64
+}
+
+// isPrivateIP returns true if the IP address is in an RFC 1918 private range.
+// Uses fast string-prefix matching (no net.ParseIP) for zero-allocation performance.
+func isPrivateIP(ip string) bool {
+	for _, r := range rfc1918 {
+		if strings.HasPrefix(ip, r.prefix) {
+			return true
+		}
+	}
+	return false
 }

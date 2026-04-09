@@ -11,6 +11,7 @@ package installer
 import (
 	"bufio"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -72,9 +73,15 @@ func (o *Options) effectiveConfigPath() string {
 // PatchHostsFile
 // =============================================================================
 
-// PatchHostsFile ensures that the Windows hosts file contains a mapping of
-// serverIP → serverDomain. The operation is idempotent: if an uncommented line
-// containing both tokens already exists, the file is not modified.
+// PatchHostsFile ensures that the Windows hosts file contains exactly ONE mapping
+// of serverIP → serverDomain with the EDR C2 comment marker.
+//
+// Unlike the previous implementation that only appended, this version:
+//  1. Removes ALL existing lines with the "# EDR C2" marker
+//  2. Removes any line mapping a different IP to the same domain
+//  3. Then appends the single correct entry
+//
+// This prevents duplicate/stale entries from accumulating across reinstalls.
 //
 // Requires Administrator or SYSTEM privileges on the calling process.
 func PatchHostsFile(serverIP, serverDomain string) error {
@@ -88,41 +95,68 @@ func PatchHostsFile(serverIP, serverDomain string) error {
 		return fmt.Errorf("failed to read hosts file: %w", err)
 	}
 
-	// ── Check idempotency ─────────────────────────────────────────────────────
-	// Consider a line a match only when it is not a comment AND contains both
-	// the exact IP and the exact domain as whitespace-delimited tokens.
+	// ── Filter out stale EDR entries, check if correct entry already exists ───
+	var cleanLines []string
+	alreadyCorrect := false
+
 	scanner := bufio.NewScanner(strings.NewReader(string(data)))
 	for scanner.Scan() {
 		line := scanner.Text()
 		stripped := strings.TrimSpace(line)
 
-		// Skip blank lines and comment lines.
-		if stripped == "" || strings.HasPrefix(stripped, "#") {
+		// Remove any line with the EDR C2 comment marker (our previous entries)
+		if strings.Contains(line, hostsComment) {
+			// Check if this is already the exact correct entry
+			fields := strings.Fields(stripped)
+			if len(fields) >= 2 && fields[0] == serverIP &&
+				strings.EqualFold(fields[1], serverDomain) {
+				alreadyCorrect = true
+				cleanLines = append(cleanLines, line) // keep the correct one
+			}
+			// else: stale entry — drop it
 			continue
 		}
 
-		// Check if this line already maps our IP to our domain.
-		fields := strings.Fields(stripped)
-		if len(fields) >= 2 && fields[0] == serverIP {
-			for _, f := range fields[1:] {
-				if strings.EqualFold(f, serverDomain) {
-					// Entry already present — idempotent, nothing to do.
-					return nil
+		// Also remove any uncommented line mapping ANY IP to our domain
+		// (prevents conflicts from manual edits)
+		if stripped != "" && !strings.HasPrefix(stripped, "#") {
+			fields := strings.Fields(stripped)
+			if len(fields) >= 2 {
+				domainMatch := false
+				for _, f := range fields[1:] {
+					if strings.EqualFold(f, serverDomain) {
+						domainMatch = true
+						break
+					}
+				}
+				if domainMatch && fields[0] != serverIP {
+					// Different IP → stale, remove it
+					continue
 				}
 			}
 		}
+
+		cleanLines = append(cleanLines, line)
 	}
 
-	// ── Append the new entry ──────────────────────────────────────────────────
-	// Ensure the file ends with a newline before appending.
-	content := string(data)
-	if len(content) > 0 && content[len(content)-1] != '\n' {
-		content += "\n"
+	// ── If correct entry already exists, write cleaned content and return ─────
+	if alreadyCorrect {
+		cleaned := strings.Join(cleanLines, "\n")
+		if !strings.HasSuffix(cleaned, "\n") {
+			cleaned += "\n"
+		}
+		return os.WriteFile(hostsFile, []byte(cleaned), 0644)
+	}
+
+	// ── Append the correct EDR entry ─────────────────────────────────────────
+	cleaned := strings.Join(cleanLines, "\n")
+	if len(cleaned) > 0 && cleaned[len(cleaned)-1] != '\n' {
+		cleaned += "\n"
 	}
 	entry := fmt.Sprintf("%s\t%s\t%s\n", serverIP, serverDomain, hostsComment)
-	content += entry
+	cleaned += entry
 
-	if err := os.WriteFile(hostsFile, []byte(content), 0644); err != nil {
+	if err := os.WriteFile(hostsFile, []byte(cleaned), 0644); err != nil {
 		return fmt.Errorf("failed to write hosts file: %w", err)
 	}
 
@@ -241,3 +275,73 @@ func EnsureDirectories() error {
 	}
 	return nil
 }
+
+// =============================================================================
+// PingServer
+// =============================================================================
+
+// PingServer performs pre-installation connectivity checks:
+//  1. DNS resolution of serverDomain → verify it resolves to an IP address.
+//  2. TCP connectivity to serverIP:serverPort → verify the C2 server is reachable.
+//
+// Returns a descriptive error if either check fails, helping the installer
+// diagnose network issues before the agent service starts.
+func PingServer(serverIP, serverDomain, serverPort string) error {
+	// ── DNS resolution check ───────────────────────────────────────────────────
+	if serverDomain != "" {
+		addrs, err := net.LookupHost(serverDomain)
+		if err != nil {
+			return fmt.Errorf(
+				"DNS resolution failed for %q: %w\n"+
+					"  Possible causes:\n"+
+					"  - The hosts file was not patched correctly\n"+
+					"  - DNS server does not have a record for this domain\n"+
+					"  - Network is not connected",
+				serverDomain, err,
+			)
+		}
+		// Verify the resolved IP matches the expected server IP
+		if serverIP != "" {
+			found := false
+			for _, addr := range addrs {
+				if addr == serverIP {
+					found = true
+					break
+				}
+			}
+			if !found {
+				return fmt.Errorf(
+					"DNS resolution mismatch: %q resolved to %v, expected %s\n"+
+						"  Check the hosts file or DNS configuration",
+					serverDomain, addrs, serverIP,
+				)
+			}
+		}
+	}
+
+	// ── TCP connectivity check ─────────────────────────────────────────────────
+	target := serverIP
+	if target == "" {
+		target = serverDomain
+	}
+	if target == "" || serverPort == "" {
+		return fmt.Errorf("cannot ping server: IP/domain and port are required")
+	}
+
+	addr := net.JoinHostPort(target, serverPort)
+	conn, err := net.DialTimeout("tcp", addr, 5*time.Second)
+	if err != nil {
+		return fmt.Errorf(
+			"TCP connection to %s failed: %w\n"+
+				"  Possible causes:\n"+
+				"  - The C2 server is not running or not listening on port %s\n"+
+				"  - A firewall is blocking the connection\n"+
+				"  - The server IP address is incorrect",
+			addr, err, serverPort,
+		)
+	}
+	conn.Close()
+
+	return nil
+}
+

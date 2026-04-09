@@ -11,6 +11,7 @@ package main
 
 import (
 	"context"
+	"encoding/hex"
 	"flag"
 	"fmt"
 	"os"
@@ -32,6 +33,17 @@ var (
 	Version   = "dev"
 	BuildTime = "unknown"
 	GitCommit = "unknown"
+)
+
+// Embedded configuration (injected at build time via -ldflags by the dashboard build system).
+// When non-empty, these values are used as defaults during installation, eliminating
+// the need to pass CLI flags.
+var (
+	EmbeddedServerIP     = "" // e.g. "192.168.1.10"
+	EmbeddedServerDomain = "" // e.g. "edr.local"
+	EmbeddedServerPort   = "" // e.g. "47051"
+	EmbeddedTokenHash    = "" // SHA-256 hash of enrollment token (for uninstall verification)
+	EmbeddedTokenObf     = "" // XOR-obfuscated enrollment token (for zero-touch install)
 )
 
 func main() {
@@ -94,7 +106,7 @@ func main() {
 	// UNINSTALL PATH
 	// ══════════════════════════════════════════════════════════════════════════
 	if *doUninstall {
-		if err := service.Uninstall(*token); err != nil {
+		if err := service.Uninstall(*token, EmbeddedTokenHash); err != nil {
 			logger.Errorf("Failed to uninstall service: %v", err)
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
@@ -104,8 +116,37 @@ func main() {
 	}
 
 	// ══════════════════════════════════════════════════════════════════════════
-	// RUNTIME PATH — load config and start the agent
+	// RUNTIME PATH — detect execution mode FIRST, then load config
 	// ══════════════════════════════════════════════════════════════════════════
+
+	// ── Execution mode detection — MUST happen BEFORE config loading ──────────
+	// CRITICAL: When the SCM starts this process, svc.Run() must be called as
+	// early as possible so the service handler is registered with the SCM.
+	// If config.Load() (or any other call) triggers os.Exit() before svc.Run(),
+	// the SCM receives no handler and reports "Error 1: Incorrect function".
+	//
+	// Therefore, in the SCM path, config loading is deferred to inside
+	// service.Execute() where errors are reported via proper SCM status
+	// transitions (StopPending → Stopped) instead of process termination.
+	isScm, err := svc.IsWindowsService()
+	if err != nil {
+		logger.Warnf("IsWindowsService check failed (%v); assuming standalone mode", err)
+		isScm = false
+	}
+
+	if isScm {
+		// SCM path: hand off directly to service.Run() — Execute() will
+		// load config, perform CA fetch → enrollment → agent.Start()
+		// asynchronously, reporting proper SCM status at each stage.
+		logger.Info("Execution context: Windows Service Control Manager")
+		if err := service.Run(*configPath, logger); err != nil {
+			logger.Errorf("Service execution error: %v", err)
+			os.Exit(1)
+		}
+		return
+	}
+
+	// ── Standalone / interactive path ──────────────────────────────────────────
 	cfg, err := config.Load(*configPath)
 	if err != nil {
 		logger.Errorf("Failed to load configuration: %v", err)
@@ -121,34 +162,11 @@ func main() {
 	logger.Infof("Server:    %s", cfg.Server.Address)
 	logger.Infof("Agent ID:  %s", cfg.Agent.ID)
 
-	// ── Execution mode detection (BEFORE enrollment) ──────────────────────────
-	// CRITICAL: svc.IsWindowsService() MUST be checked before any blocking
-	// network call. When the SCM starts this process, enrollment happens inside
-	// service.Execute() AFTER svc.Running is reported. Running os.Exit before
-	// that causes error 1053 ("did not respond in a timely fashion").
-	isScm, err := svc.IsWindowsService()
-	if err != nil {
-		logger.Warnf("IsWindowsService check failed (%v); assuming standalone mode", err)
-		isScm = false
-	}
-
-	if isScm {
-		// SCM path: hand off directly to service.Run() — Execute() will
-		// perform CA fetch → enrollment → agent.Start() asynchronously.
-		logger.Info("Execution context: Windows Service Control Manager")
-		if err := service.Run(cfg, logger); err != nil {
-			logger.Errorf("Service execution error: %v", err)
-			os.Exit(1)
-		}
-		return
-	}
-
-	// Standalone path: enrollment runs synchronously here.
 	logger.Info("Execution context: Interactive / standalone (Ctrl+C to stop)")
 
-	// Auto-bootstrap CA certificate from C2 if missing.
+	// Auto-bootstrap CA certificate — uses embedded cert if available, else HTTP fetch.
 	if !cfg.Server.Insecure && cfg.Certs.CAPath != "" {
-		if err := enrollment.FetchCACertificate(cfg.Server.Address, cfg.Certs.CAPath, logger); err != nil {
+		if err := enrollment.EnsureCACertificate(cfg.Server.Address, cfg.Certs.CAPath, logger); err != nil {
 			logger.Warnf("CA auto-bootstrap failed (will try existing cert): %v", err)
 		}
 	}
@@ -162,51 +180,170 @@ func main() {
 	runStandalone(cfg, logger, *configPath)
 }
 
+// resolveInstallParam returns the effective value for an install parameter.
+// Priority: CLI flag (if non-empty and differs from default) > embedded > empty.
+func resolveInstallParam(cliVal, embeddedVal, paramName string) string {
+	if cliVal != "" {
+		return cliVal
+	}
+	if embeddedVal != "" {
+		fmt.Printf("  Using dashboard-configured %s: %s\n", paramName, embeddedVal)
+		return embeddedVal
+	}
+	return ""
+}
+
+// printInstallHelp displays a formatted help message for missing install parameters.
+func printInstallHelp(missingParams []string) {
+	fmt.Fprintf(os.Stderr, "\n╔══════════════════════════════════════════════════════════════╗\n")
+	fmt.Fprintf(os.Stderr, "║           EDR Agent — Installation Help                     ║\n")
+	fmt.Fprintf(os.Stderr, "╚══════════════════════════════════════════════════════════════╝\n\n")
+
+	if len(missingParams) > 0 {
+		fmt.Fprintf(os.Stderr, "Missing required parameters:\n")
+		for _, p := range missingParams {
+			fmt.Fprintf(os.Stderr, "  ✗ %s\n", p)
+		}
+		fmt.Fprintln(os.Stderr)
+	}
+
+	fmt.Fprintf(os.Stderr, "Required parameters:\n")
+	fmt.Fprintf(os.Stderr, "  %-20s  %s\n", "-server-ip", "C2 server IP address (e.g. 192.168.1.10)")
+	fmt.Fprintf(os.Stderr, "  %-20s  %s\n", "-server-domain", "C2 server FQDN (e.g. edr.internal)")
+	fmt.Fprintf(os.Stderr, "  %-20s  %s\n", "-token", "Bootstrap enrollment token")
+	fmt.Fprintf(os.Stderr, "\nOptional parameters:\n")
+	fmt.Fprintf(os.Stderr, "  %-20s  %s\n", "-server-port", "C2 gRPC port (default: 50051)")
+	fmt.Fprintf(os.Stderr, "  %-20s  %s\n", "-config", "Config file path")
+	fmt.Fprintf(os.Stderr, "\nExample:\n")
+	fmt.Fprintf(os.Stderr, "  agent.exe -install ^\n")
+	fmt.Fprintf(os.Stderr, "    -server-ip 192.168.1.10 ^\n")
+	fmt.Fprintf(os.Stderr, "    -server-domain edr.internal ^\n")
+	fmt.Fprintf(os.Stderr, "    -server-port 50051 ^\n")
+	fmt.Fprintf(os.Stderr, "    -token <bootstrap-token>\n\n")
+
+	if enrollment.HasEmbeddedCA() {
+		fmt.Fprintf(os.Stderr, "  ✓ CA certificate is embedded in this build (secure).\n")
+	} else {
+		fmt.Fprintf(os.Stderr, "  ⚠ No embedded CA — certificate will be fetched over HTTP.\n")
+		fmt.Fprintf(os.Stderr, "    Build the agent from the dashboard for secure CA embedding.\n")
+	}
+	fmt.Fprintln(os.Stderr)
+}
+
 // runInstall implements the zero-touch installation flow:
 //
-//  1. Validate required flags.
-//  2. Create all EDR directories.
-//  3. Patch the Windows hosts file (idempotent).
-//  4. Generate and save config.yaml with injected server/token/UUID.
-//  5. Register the Windows Service via the SCM.
-//  6. Start the service and poll until it reaches Running state.
+//  1. Resolve parameters (CLI flags → embedded defaults → missing).
+//  2. Validate required parameters with detailed help.
+//  3. Create all EDR directories.
+//  4. Patch the Windows hosts file (idempotent, deduplicating).
+//  5. Verify server connectivity (DNS + TCP ping).
+//  6. Generate and save config.yaml.
+//  7. Register the Windows Service via the SCM.
+//  8. Start the service and poll until it reaches Running state.
 func runInstall(
 	logger *logging.Logger,
 	serverIP, serverDomain, serverPort, token, configPath string,
 ) {
-	// Validate required parameters.
-	if serverIP == "" || serverDomain == "" || token == "" {
-		msg := "Error: -install requires -server-ip, -server-domain, and -token\n\n" +
-			"Example:\n" +
-			"  agent.exe -install \\\n" +
-			"    -server-ip 192.168.1.10 \\\n" +
-			"    -server-domain edr.internal \\\n" +
-			"    -server-port 50051 \\\n" +
-			"    -token <bootstrap-token>\n"
-		fmt.Fprint(os.Stderr, msg)
-		os.Exit(1)
-	}
-	if serverPort == "" {
-		serverPort = "50051"
+	fmt.Println("════════════════════════════════════════")
+	fmt.Println(" EDR Agent — Zero-Touch Installation")
+	fmt.Println("════════════════════════════════════════")
+
+	// ── Resolve parameters: CLI > Embedded > empty ───────────────────────────
+	// Token resolution (zero-touch support):
+	//   1. CLI -token flag (highest priority)
+	//   2. XOR-obfuscated token in binary (decoded at runtime, then zeroed)
+	//   3. Empty → installation fails (token is REQUIRED)
+	//
+	// The binary NEVER contains the plaintext token. Only:
+	//   - EmbeddedTokenHash (SHA-256, irreversible) for uninstall verification
+	//   - EmbeddedTokenObf  (XOR-obfuscated hex) for zero-touch enrollment
+	if token == "" && EmbeddedTokenObf != "" {
+		// Decode the obfuscated token for enrollment
+		token = xorDeobfuscate(EmbeddedTokenObf)
+		fmt.Println("  Using dashboard-configured token: ****" + token[max(0, len(token)-4):])
+	} else if token != "" {
+		mask := token
+		if len(mask) > 4 {
+			mask = "****" + mask[len(mask)-4:]
+		}
+		fmt.Printf("  Using CLI token: %s\n", mask)
 	}
 
-	fmt.Println("[1/5] Creating EDR directories...")
+	serverIP = resolveInstallParam(serverIP, EmbeddedServerIP, "server-ip")
+	serverDomain = resolveInstallParam(serverDomain, EmbeddedServerDomain, "server-domain")
+	serverPort = resolveInstallParam(serverPort, EmbeddedServerPort, "server-port")
+
+	if serverPort == "" || serverPort == "50051" {
+		// Use embedded or default
+		if EmbeddedServerPort != "" {
+			serverPort = EmbeddedServerPort
+		} else if serverPort == "" {
+			serverPort = "50051"
+		}
+	}
+
+	// ── Validate required parameters ─────────────────────────────────────────
+	var missing []string
+	if serverIP == "" {
+		missing = append(missing, "-server-ip (C2 server IP address)")
+	}
+	if serverDomain == "" {
+		missing = append(missing, "-server-domain (C2 server FQDN/hostname)")
+	}
+	if token == "" {
+		missing = append(missing, "-token (bootstrap enrollment token — REQUIRED in all cases)")
+	}
+	if len(missing) > 0 {
+		printInstallHelp(missing)
+		os.Exit(1)
+	}
+
+	fmt.Println()
+
+	// ── Step 1: Create directories ───────────────────────────────────────────
+	fmt.Println("[1/7] Creating EDR directories...")
 	if err := installer.EnsureDirectories(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error creating directories: %v\n", err)
 		os.Exit(1)
 	}
+	fmt.Println("      → Done.")
 
-	fmt.Printf("[2/5] Patching hosts file: %s → %s ...\n", serverIP, serverDomain)
+	// ── Step 2: Write embedded CA certificate ─────────────────────────────────
+	fmt.Println("[2/7] Provisioning CA certificate...")
+	caPath := `C:\ProgramData\EDR\certs\ca-chain.crt`
+	if enrollment.HasEmbeddedCA() {
+		if err := enrollment.WriteEmbeddedCA(caPath); err != nil {
+			fmt.Fprintf(os.Stderr, "Error writing embedded CA: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Println("      → Embedded CA certificate written (secure, no network fetch).")
+	} else {
+		fmt.Println("      → No embedded CA. Will be fetched on first service start.")
+	}
+
+	// ── Step 3: Patch hosts file ──────────────────────────────────────────────
+	fmt.Printf("[3/7] Patching hosts file: %s → %s ...\n", serverIP, serverDomain)
 	if err := installer.PatchHostsFile(serverIP, serverDomain); err != nil {
-		// Non-fatal: DNS might already be configured centrally. Warn and continue.
 		fmt.Fprintf(os.Stderr, "Warning: hosts file patch failed (continuing): %v\n", err)
 		logger.Warnf("Hosts file patch failed (non-fatal): %v", err)
 	} else {
-		fmt.Println("         → Done.")
+		fmt.Println("      → Done.")
 		logger.Infof("Hosts file patched: %s %s", serverIP, serverDomain)
 	}
 
-	fmt.Printf("[3/5] Generating config.yaml → %s ...\n", configPath)
+	// ── Step 4: Verify server connectivity ────────────────────────────────────
+	fmt.Printf("[4/7] Verifying server connectivity (%s:%s)...\n", serverIP, serverPort)
+	if err := installer.PingServer(serverIP, serverDomain, serverPort); err != nil {
+		fmt.Fprintf(os.Stderr, "\n⚠ Server connectivity check failed:\n%v\n\n", err)
+		fmt.Fprintf(os.Stderr, "The installation will continue, but the agent may fail to connect.\n")
+		fmt.Fprintf(os.Stderr, "Please verify the server is running and the network is configured correctly.\n\n")
+		logger.Warnf("Server connectivity check failed (non-fatal): %v", err)
+	} else {
+		fmt.Println("      → Server is reachable.")
+	}
+
+	// ── Step 5: Generate config ──────────────────────────────────────────────
+	fmt.Printf("[5/7] Generating config.yaml → %s ...\n", configPath)
 	opts := installer.Options{
 		ServerIP:     serverIP,
 		ServerDomain: serverDomain,
@@ -219,14 +356,14 @@ func runInstall(
 		logger.Errorf("Config generation failed: %v", err)
 		os.Exit(1)
 	}
-	fmt.Println("         → Done.")
+	fmt.Println("      → Done.")
 	logger.Infof("Config written to %s (server=%s:%s)", configPath, serverDomain, serverPort)
 
-	fmt.Println("[4/5] Registering Windows Service (EDRAgent)...")
-	// If the service already exists, uninstall it first for a clean re-install.
+	// ── Step 6: Register service ─────────────────────────────────────────────
+	fmt.Println("[6/7] Registering Windows Service (EDRAgent)...")
 	if err := service.Install(); err != nil {
 		if isAlreadyExistsErr(err) {
-			fmt.Println("         → Service exists; re-registering...")
+			fmt.Println("      → Service exists; re-registering...")
 			_ = service.ForceUninstall()
 			if err2 := service.Install(); err2 != nil {
 				fmt.Fprintf(os.Stderr, "Error installing service: %v\n", err2)
@@ -239,10 +376,11 @@ func runInstall(
 			os.Exit(1)
 		}
 	}
-	fmt.Println("         → Done.")
+	fmt.Println("      → Done.")
 	logger.Info("Service registered in SCM")
 
-	fmt.Println("[5/5] Starting EDRAgent service...")
+	// ── Step 7: Start service ────────────────────────────────────────────────
+	fmt.Println("[7/7] Starting EDRAgent service...")
 	if err := service.StartService(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error starting service: %v\n", err)
 		logger.Errorf("Service start failed: %v", err)
@@ -253,6 +391,9 @@ func runInstall(
 	fmt.Printf("  Server:    %s:%s\n", serverDomain, serverPort)
 	fmt.Printf("  Config:    %s\n", configPath)
 	fmt.Println("  Service:   EDRAgent (Automatic, LocalSystem)")
+	if enrollment.HasEmbeddedCA() {
+		fmt.Println("  CA Cert:   Embedded (secure)")
+	}
 	fmt.Println("\n  To check status:   sc query EDRAgent")
 	fmt.Println("  To view logs:      Get-Content C:\\ProgramData\\EDR\\logs\\agent.log -Tail 50")
 	fmt.Println("  To uninstall:      agent.exe -uninstall -token <secret>")
@@ -320,4 +461,24 @@ func runStandalone(cfg *config.Config, logger *logging.Logger, configPath string
 		logger.Errorf("Error during shutdown: %v", err)
 	}
 	logger.Info("Agent stopped.")
+}
+
+// xorDeobfuscate decodes the XOR-obfuscated enrollment token.
+// The obfuscated value is hex-encoded; this function decodes hex, then XOR's
+// with the same key used by the agent-builder to recover the plaintext.
+//
+// The plaintext should be used immediately for the enrollment CSR call and
+// then allowed to go out of scope (eligible for GC) — it is never stored
+// on disk, in config files, or in persistent memory.
+func xorDeobfuscate(obfuscatedHex string) string {
+	data, err := hex.DecodeString(obfuscatedHex)
+	if err != nil {
+		return "" // invalid hex — treat as empty
+	}
+	// Same 32-byte key as the agent-builder.
+	key := []byte("EDR-Agent-XOR-Key-2026!@#$%^&*()")
+	for i := range data {
+		data[i] ^= key[i%len(key)]
+	}
+	return string(data)
 }

@@ -59,7 +59,7 @@ import (
 //   - A kernel driver (ring-0)
 //   - PsExec -s (runs as SYSTEM)
 //   - A process running as SYSTEM
-//   These are acceptable limitations for a user-mode EDR agent.
+//     These are acceptable limitations for a user-mode EDR agent.
 func ProtectProcess() error {
 	// SDDL breakdown:
 	//   D:           → DACL follows
@@ -98,9 +98,9 @@ func ProtectProcess() error {
 // =========================================================================
 
 var (
-	advapi32                                 = windows.NewLazySystemDLL("advapi32.dll")
-	procSetServiceObjectSecurity             = advapi32.NewProc("SetServiceObjectSecurity")
-	procConvertStringSecurityDescriptorToSD   = advapi32.NewProc("ConvertStringSecurityDescriptorToSecurityDescriptorW")
+	advapi32                                = windows.NewLazySystemDLL("advapi32.dll")
+	procSetServiceObjectSecurity            = advapi32.NewProc("SetServiceObjectSecurity")
+	procConvertStringSecurityDescriptorToSD = advapi32.NewProc("ConvertStringSecurityDescriptorToSecurityDescriptorW")
 )
 
 // HardenServiceDACL modifies the security descriptor of the named service
@@ -151,8 +151,8 @@ func HardenServiceDACL(serviceName string) error {
 	// Interactive Users = query status, query config, read-only
 	const hardenedSDDL = "D:" +
 		"(A;;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;SY)" + // SYSTEM: full (including SERVICE_CHANGE_CONFIG)
-		"(A;;CCLCSWLOCRRC;;;BA)" +                // Admins: query-only
-		"(A;;CCLCSWLOCRRC;;;IU)"                  // Interactive: query-only
+		"(A;;CCLCSWLOCRRC;;;BA)" + // Admins: query-only
+		"(A;;CCLCSWLOCRRC;;;IU)" // Interactive: query-only
 
 	sd, sdSize, err := convertSDDLToSD(hardenedSDDL)
 	if err != nil {
@@ -203,9 +203,9 @@ func RestoreServiceDACL(serviceName string) error {
 
 	// Default Windows service SDDL — full admin control restored.
 	const defaultSDDL = "D:" +
-		"(A;;CCLCSWRPWPDTLOCRRC;;;SY)" +      // SYSTEM
+		"(A;;CCLCSWRPWPDTLOCRRC;;;SY)" + // SYSTEM
 		"(A;;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;BA)" + // Admins: full
-		"(A;;CCLCSWLOCRRC;;;IU)"               // Interactive: query
+		"(A;;CCLCSWLOCRRC;;;IU)" // Interactive: query
 
 	sd, _, err := convertSDDLToSD(defaultSDDL)
 	if err != nil {
@@ -344,9 +344,9 @@ func VerifyUninstallToken(providedToken, embeddedHash string) error {
 	providedHash := sha256HexString(providedToken)
 
 	// If no embedded hash (dev build without dashboard), use legacy default.
-	if embeddedHash == "" {
-		embeddedHash = sha256HexString("EDR-Uninstall-2026!")
-	}
+	// if embeddedHash == "" {
+	// 	embeddedHash = sha256HexString("EDR-Uninstall-2026!")
+	// }
 
 	// Constant-time comparison prevents timing side-channel attacks.
 	if subtle.ConstantTimeCompare([]byte(providedHash), []byte(embeddedHash)) != 1 {

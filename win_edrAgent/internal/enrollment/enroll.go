@@ -146,6 +146,16 @@ func EnsureEnrolled(cfg *config.Config, logger *logging.Logger, configFilePath s
 	cfg.Agent.ID = resp.GetAgentId()
 	logger.Infof("Enrollment successful; agent ID: %s", cfg.Agent.ID)
 
+	// SECURITY: Wipe the bootstrap token from config IMMEDIATELY after
+	// successful enrollment. The token is a one-time secret used only for
+	// the initial RegisterAgent RPC. Leaving it on disk would allow anyone
+	// with file access to read the plaintext token and use it to:
+	//   - Register rogue agents
+	//   - Uninstall the agent (same token)
+	// After this point, the agent authenticates via mTLS certificate only.
+	cfg.Certs.BootstrapToken = ""
+	logger.Info("Bootstrap token wiped from config (one-time use)")
+
 	if configFilePath != "" {
 		if err := cfg.Save(configFilePath); err != nil {
 			return fmt.Errorf("save config after enrollment: %w", err)

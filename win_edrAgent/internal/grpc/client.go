@@ -294,18 +294,35 @@ func discoverGatewayIPs() []string {
 	return gateways
 }
 
-// loadTLSConfig loads mTLS configuration from certificate files.
+// loadTLSConfig loads mTLS configuration.
+// Prefers inline PEM data from Registry (zero disk footprint).
+// Falls back to file paths for backward compatibility.
 func (c *Client) loadTLSConfig() (*tls.Config, error) {
-	// Load client certificate
-	cert, err := tls.LoadX509KeyPair(c.cfg.Certs.CertPath, c.cfg.Certs.KeyPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to load client certificate: %w", err)
+	var cert tls.Certificate
+	var err error
+
+	// Load client certificate: prefer in-memory PEM from Registry
+	if len(c.cfg.Certs.CertPEM) > 0 && len(c.cfg.Certs.KeyPEM) > 0 {
+		cert, err = tls.X509KeyPair(c.cfg.Certs.CertPEM, c.cfg.Certs.KeyPEM)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse client cert from Registry PEM: %w", err)
+		}
+	} else {
+		cert, err = tls.LoadX509KeyPair(c.cfg.Certs.CertPath, c.cfg.Certs.KeyPath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load client certificate: %w", err)
+		}
 	}
 
-	// Load CA certificate
-	caCert, err := os.ReadFile(c.cfg.Certs.CAPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read CA certificate: %w", err)
+	// Load CA certificate: prefer in-memory PEM from Registry
+	var caCert []byte
+	if len(c.cfg.Certs.CACertPEM) > 0 {
+		caCert = c.cfg.Certs.CACertPEM
+	} else {
+		caCert, err = os.ReadFile(c.cfg.Certs.CAPath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read CA certificate: %w", err)
+		}
 	}
 
 	caCertPool := x509.NewCertPool()

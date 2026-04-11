@@ -7,7 +7,6 @@ package agent
 
 import (
 	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/edr-platform/win-agent/internal/security"
@@ -25,11 +24,12 @@ import (
 // during development).
 func (a *Agent) initSecurity() {
 	// ── 1. Harden directories ───────────────────────────────────────────────
+	// NOTE: certs/ and config/ are no longer hardened because cert data and
+	// config.yaml have been migrated to the protected Registry. Only
+	// directories with active data remain.
 	dirs := []string{
 		`C:\ProgramData\EDR\queue`,
 		`C:\ProgramData\EDR\logs`,
-		`C:\ProgramData\EDR\certs`,
-		`C:\ProgramData\EDR\config`,
 		`C:\ProgramData\EDR\quarantine`,
 	}
 	if err := security.HardenDirectories(dirs, a.logger); err != nil {
@@ -73,17 +73,11 @@ func (a *Agent) initSecurity() {
 	security.StartRetentionCleaner(a.ctx, retentionDirs, 48*time.Hour, a.logger)
 
 	// ── 5. File integrity watchdog ──────────────────────────────────────────
+	// Only watch the agent binary — cert files and config.yaml no longer
+	// exist on disk (migrated to Registry).
 	var watchPaths []string
 	if exe, err := os.Executable(); err == nil {
 		watchPaths = append(watchPaths, exe)
 	}
-	if a.cfg.Certs.CertPath != "" {
-		watchPaths = append(watchPaths, a.cfg.Certs.CertPath)
-	}
-	if a.cfg.Certs.CAPath != "" {
-		watchPaths = append(watchPaths, a.cfg.Certs.CAPath)
-	}
-	configPath := filepath.Join(`C:\ProgramData\EDR\config`, "config.yaml")
-	watchPaths = append(watchPaths, configPath)
 	security.StartFileWatchdog(a.ctx, watchPaths, a.logger)
 }

@@ -156,11 +156,29 @@ func EnsureEnrolled(cfg *config.Config, logger *logging.Logger, configFilePath s
 	cfg.Certs.BootstrapToken = ""
 	logger.Info("Bootstrap token wiped from config (one-time use)")
 
-	// Save updated config to Registry (primary storage)
+	// ── Migrate certificate files to Registry (zero disk footprint) ──────
+	// Read cert/key/CA PEM data from disk files into config struct,
+	// then delete the files. The PEM data lives in the protected Registry.
+	if certPEM, err := os.ReadFile(cfg.Certs.CertPath); err == nil {
+		cfg.Certs.CertPEM = certPEM
+	}
+	if keyPEM, err := os.ReadFile(cfg.Certs.KeyPath); err == nil {
+		cfg.Certs.KeyPEM = keyPEM
+	}
+	if caPEM, err := os.ReadFile(cfg.Certs.CAPath); err == nil {
+		cfg.Certs.CACertPEM = caPEM
+	}
+
+	// Save updated config (with inline PEM data) to Registry
 	if err := cfg.SaveToRegistry(); err != nil {
 		logger.Warnf("Failed to save post-enrollment config to Registry: %v", err)
 	} else {
-		logger.Info("Post-enrollment config saved to protected Registry")
+		logger.Info("Post-enrollment config + certificates saved to protected Registry")
+		// Delete cert files from disk — they now live in Registry
+		_ = os.Remove(cfg.Certs.CertPath)
+		_ = os.Remove(cfg.Certs.KeyPath)
+		_ = os.Remove(cfg.Certs.CAPath)
+		logger.Info("Certificate files deleted from disk (migrated to Registry)")
 	}
 
 	return nil

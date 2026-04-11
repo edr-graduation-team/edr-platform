@@ -117,12 +117,20 @@ type LoggingConfig struct {
 	MaxAgeDays int    `yaml:"max_age_days"`
 }
 
-// CertConfig defines certificate paths.
+// CertConfig defines certificate paths and optional inline PEM data.
+// When CertPEM/KeyPEM/CACertPEM are populated (from Registry), they take
+// priority over file paths. This eliminates cert files from disk entirely.
 type CertConfig struct {
-	CertPath       string `yaml:"cert_path"`
-	KeyPath        string `yaml:"key_path"`
-	CAPath         string `yaml:"ca_path"`
-	BootstrapToken string `yaml:"bootstrap_token"`
+	CertPath       string `yaml:"cert_path" json:"cert_path"`
+	KeyPath        string `yaml:"key_path" json:"key_path"`
+	CAPath         string `yaml:"ca_path" json:"ca_path"`
+	BootstrapToken string `yaml:"bootstrap_token" json:"bootstrap_token"`
+
+	// Inline PEM data — stored in Registry, loaded into memory at startup.
+	// When these are set, the file paths above are ignored for TLS.
+	CertPEM   []byte `yaml:"-" json:"cert_pem,omitempty"`
+	KeyPEM    []byte `yaml:"-" json:"key_pem,omitempty"`
+	CACertPEM []byte `yaml:"-" json:"ca_cert_pem,omitempty"`
 }
 
 // DefaultConfig returns a configuration with sensible defaults.

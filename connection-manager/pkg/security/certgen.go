@@ -303,10 +303,29 @@ func ipsToStrings(ips []net.IP) []string {
 // Full PKI Bootstrap — auto-generates ALL required crypto material
 // ---------------------------------------------------------------------------
 
-// EnsureCA checks if the CA certificate and key exist at the given paths.
-// If either is missing, it generates a new self-signed Root CA (RSA 4096)
-// and writes both files to disk. This allows the server to start on a
-// completely fresh machine without any manual cert provisioning.
+// validateCAPair verifies that the CA certificate and private key on disk form a valid cryptographic pair.
+func validateCAPair(certPath, keyPath string) bool {
+	caCert, signer, err := loadCA(certPath, keyPath)
+	if err != nil {
+		return false // Corrupted or missing
+	}
+
+	certPubBytes, err := x509.MarshalPKIXPublicKey(caCert.PublicKey)
+	if err != nil {
+		return false
+	}
+
+	signerPubBytes, err := x509.MarshalPKIXPublicKey(signer.Public())
+	if err != nil {
+		return false
+	}
+
+	return string(certPubBytes) == string(signerPubBytes)
+}
+
+// EnsureCA checks if the CA certificate and key exist at the given paths and form a valid pair.
+// If either is missing, corrupted, or mismatched (e.g. from git syncing), it dynamically regenerates
+// a new self-signed Root CA (RSA 4096) and overwrites the files.
 //
 // Returns (generated bool, err error).
 func EnsureCA(caCertPath, caKeyPath string, logger *logrus.Logger) (bool, error) {
@@ -314,11 +333,16 @@ func EnsureCA(caCertPath, caKeyPath string, logger *logrus.Logger) (bool, error)
 	_, certErr := os.Stat(caCertPath)
 	_, keyErr := os.Stat(caKeyPath)
 	if certErr == nil && keyErr == nil {
-		logger.Info("PKI Bootstrap: CA certificate and key already exist — skipping generation")
-		return false, nil
+		if validateCAPair(caCertPath, caKeyPath) {
+			logger.Info("PKI Bootstrap: CA certificate and key exist and match — skipping generation")
+			return false, nil
+		}
+		logger.Warn("PKI Bootstrap: CA certificate and key exist but are MISMATCHED/CORRUPTED! Forcing regeneration of Root CA...")
 	}
 
-	logger.Info("PKI Bootstrap: CA certificate or key not found — generating new Root CA...")
+	if certErr != nil || keyErr != nil {
+		logger.Info("PKI Bootstrap: CA certificate or key not found — generating new Root CA...")
+	}
 
 	// Ensure the directory exists
 	certDir := filepath.Dir(caCertPath)

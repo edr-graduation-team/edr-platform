@@ -7,6 +7,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -23,6 +24,7 @@ import (
 	"github.com/edr-platform/win-agent/internal/enrollment"
 	"github.com/edr-platform/win-agent/internal/logging"
 	"github.com/edr-platform/win-agent/internal/protection"
+	"github.com/edr-platform/win-agent/internal/security"
 )
 
 const (
@@ -73,19 +75,57 @@ func (s *edrService) Execute(args []string, r <-chan svc.ChangeRequest, changes 
 	changes <- svc.Status{State: svc.StartPending}
 
 	// ── 1b. Load configuration ─────────────────────────────────────────────────
-	// Config loading happens HERE (inside Execute) rather than in main() to
-	// guarantee that svc.Run() has already registered the service handler.
-	// If config loading happened in main() and failed, os.Exit() would kill
-	// the process before the SCM received a handler → "Error 1: Incorrect function".
-	cfg, err := config.Load(s.configPath)
+	// Priority: Registry (secure, SYSTEM-only) > YAML file (fallback, first boot only)
+	//
+	// After the first successful boot, config.yaml is migrated to the
+	// protected Registry key and DELETED from disk. This ensures:
+	//   - No plaintext config file visible to Administrators
+	//   - Config survives file system tampering
+	//   - Only SYSTEM can read the configuration
+	var (
+		cfg *config.Config
+		err error
+	)
+
+	// Try Registry first (primary source after initial migration)
+	cfg, err = config.LoadFromRegistry()
 	if err != nil {
-		s.logger.Errorf("[SCM] Failed to load configuration from %s: %v", s.configPath, err)
-		changes <- svc.Status{State: svc.StopPending}
-		return false, 2 // service-specific error code 2 = config load failure
+		s.logger.Warnf("[SCM] Registry config corrupted, falling back to YAML: %v", err)
+		cfg = nil
 	}
+	if cfg != nil {
+		s.logger.Info("[SCM] Config loaded from protected Registry (no YAML needed)")
+		// Clean up any orphaned YAML from a crashed/aborted install
+		if err := config.DeleteConfigFile(s.configPath); err == nil {
+			s.logger.Info("[SCM] Cleaned up orphaned config.yaml from disk")
+		}
+	} else {
+		// Fallback: load from YAML file (first boot / fresh install)
+		cfg, err = config.Load(s.configPath)
+		if err != nil {
+			s.logger.Errorf("[SCM] Failed to load configuration from %s: %v", s.configPath, err)
+			changes <- svc.Status{State: svc.StopPending}
+			return false, 2 // service-specific error code 2 = config load failure
+		}
+		s.logger.Infof("[SCM] Config loaded from YAML file: %s", s.configPath)
+
+		// Migrate to Registry and delete YAML file
+		if err := cfg.SaveToRegistry(); err != nil {
+			s.logger.Warnf("[SCM] Failed to migrate config to Registry: %v", err)
+		} else {
+			s.logger.Info("[SCM] Config migrated to protected Registry")
+			// Delete the plaintext YAML file — no longer needed
+			if err := config.DeleteConfigFile(s.configPath); err != nil {
+				s.logger.Warnf("[SCM] Failed to delete config YAML: %v", err)
+			} else {
+				s.logger.Info("[SCM] config.yaml deleted from disk (migrated to Registry)")
+			}
+		}
+	}
+
 	s.cfg = cfg
 	s.logger.SetLevel(cfg.Logging.Level)
-	s.logger.Infof("[SCM] Config loaded successfully: server=%s agent=%s", cfg.Server.Address, cfg.Agent.ID)
+	s.logger.Infof("[SCM] Config active: server=%s agent=%s", cfg.Server.Address, cfg.Agent.ID)
 
 	// ── 2. Prepare agent (pure in-memory, cannot fail) ────────────────────────
 	ctx, cancel := context.WithCancel(context.Background())
@@ -132,16 +172,92 @@ func (s *edrService) Execute(args []string, r <-chan svc.ChangeRequest, changes 
 	}
 
 	// ── Anti-Tamper Layer 3: Registry Key Protection ───────────────────
-	// Protects HKLM\SYSTEM\CurrentControlSet\Services\EDRAgent from direct
-	// registry deletion (reg delete) by Administrators.
+	// Protects HKLM\SYSTEM\CurrentControlSet\Services\EDRAgent AND all
+	// numbered ControlSets (ControlSet001, 002...) from direct registry
+	// deletion by Administrators via regedit, reg.exe, or PowerShell.
 	if err := protection.HardenServiceRegistryKey(ServiceName); err != nil {
 		s.logger.Warnf("[SCM] Registry key hardening failed (non-fatal): %v", err)
 	} else {
-		s.logger.Info("[SCM] Service registry key hardened — reg delete blocked")
+		s.logger.Info("[SCM] Service registry keys hardened (all ControlSets) — reg delete blocked")
 	}
 
+	// ── Anti-Tamper Layer 4: Agent Config Registry Protection ─────────
+	// Protects HKLM\SOFTWARE\EDR\Agent (token hash, critical config backup)
+	if err := protection.HardenAgentRegistryKey(); err != nil {
+		s.logger.Warnf("[SCM] Agent registry key hardening failed (non-fatal): %v", err)
+	} else {
+		s.logger.Info("[SCM] Agent config registry key hardened — SYSTEM-only access")
+	}
+
+	// ── Anti-Tamper Layer 5: File System ACL on bin directory ──────────
+	binDir := `C:\ProgramData\EDR\bin`
+	if err := security.HardenDirectories([]string{binDir}, s.logger); err != nil {
+		s.logger.Warnf("[SCM] Bin directory hardening failed (non-fatal): %v", err)
+	}
+
+	// ── Continuous Protection Watchdog: Process DACL ──────────────────
+	// Re-applies process DACL every 10 seconds. If an attacker manages to
+	// remove the DACL (e.g., via a SYSTEM-level tool), this goroutine
+	// will restore it within 10 seconds.
+	go func() {
+		ticker := time.NewTicker(10 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if err := protection.ProtectProcess(); err != nil {
+					s.logger.Warnf("[WATCHDOG] Process DACL re-apply failed: %v", err)
+				}
+			}
+		}
+	}()
+	s.logger.Info("[SCM] Process DACL watchdog started (re-apply every 10s)")
+
+	// ── Continuous Protection Watchdog: Registry Integrity ────────────
+	// Checks every 5 seconds that the service registry key AND agent config
+	// key still exist and are hardened. Re-applies if tampered.
+	go func() {
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				// Re-harden service registry keys (all ControlSets)
+				_ = protection.HardenServiceRegistryKey(ServiceName)
+				// Re-harden agent config registry key
+				_ = protection.HardenAgentRegistryKey()
+			}
+		}
+	}()
+	s.logger.Info("[SCM] Registry integrity watchdog started (check every 5s)")
+
+	// ── Save critical config to protected Registry ───────────────────
+	// This runs after config is loaded, providing a tamper-proof backup.
+	go func() {
+		// Wait for config to be fully loaded (after enrollment)
+		time.Sleep(15 * time.Second)
+		if s.cfg != nil {
+			if err := protection.SaveCriticalConfig(
+				s.cfg.Server.Address,
+				s.cfg.Agent.ID,
+				s.cfg.Certs.CAPath,
+				s.cfg.Certs.CertPath,
+				s.cfg.Certs.KeyPath,
+			); err != nil {
+				s.logger.Warnf("[SCM] Failed to save critical config to registry: %v", err)
+			} else {
+				s.logger.Info("[SCM] Critical config backed up to protected registry")
+				_ = protection.HardenAgentRegistryKey()
+			}
+		}
+	}()
+
 	// ── Uninstall File Watcher ─────────────────────────────────────────
-	// Polls for C:\ProgramData\EDR\uninstall.dat every 2 seconds.
+	// Polls for C:\ProgramData\EDR\uninstall.dat every second.
 	// When a valid token hash is found, the service (SYSTEM) restores DACL
 	// and registry permissions, then signals the control loop to stop.
 	uninstallCh := make(chan struct{}, 1)
@@ -259,6 +375,8 @@ func (s *edrService) Execute(args []string, r <-chan svc.ChangeRequest, changes 
 		}
 	}
 
+	// This is structurally unreachable (the for-select loop returns internally),
+	// but required by Go's compiler for the function signature.
 	return false, 0
 }
 
@@ -361,7 +479,14 @@ func (s *edrService) watchUninstallFile(ctx context.Context, uninstallCh chan<- 
 			if err := protection.RestoreServiceRegistryKey(ServiceName); err != nil {
 				s.logger.Errorf("[UNINSTALL] RestoreServiceRegistryKey failed: %v", err)
 			} else {
-				s.logger.Info("[UNINSTALL] Registry key DACL restored")
+				s.logger.Info("[UNINSTALL] Service registry key DACL restored")
+			}
+
+			// Restore agent config registry key (allow Admin to delete during cleanup)
+			if err := protection.RestoreAgentRegistryKey(); err != nil {
+				s.logger.Errorf("[UNINSTALL] RestoreAgentRegistryKey failed: %v", err)
+			} else {
+				s.logger.Info("[UNINSTALL] Agent config registry key DACL restored")
 			}
 
 			_ = os.Remove(uninstallFile)
@@ -395,14 +520,42 @@ func serviceExists() bool {
 }
 
 // Install installs the Windows service.
-func Install() error {
-	exePath, err := os.Executable()
+// embeddedTokenHash is saved to a protected registry key for uninstall verification.
+func Install(embeddedTokenHash string) error {
+	srcPath, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("failed to get executable path: %w", err)
 	}
-	exePath, err = filepath.Abs(exePath)
+	srcPath, err = filepath.Abs(srcPath)
 	if err != nil {
 		return fmt.Errorf("failed to get absolute path: %w", err)
+	}
+
+	// ── Create required directories (including secure bin dir) ────────────
+	dirs := []string{
+		"C:\\ProgramData\\EDR",
+		"C:\\ProgramData\\EDR\\bin",
+		"C:\\ProgramData\\EDR\\config",
+		"C:\\ProgramData\\EDR\\certs",
+		"C:\\ProgramData\\EDR\\logs",
+		"C:\\ProgramData\\EDR\\queue",
+		"C:\\ProgramData\\EDR\\quarantine",
+	}
+	for _, dir := range dirs {
+		os.MkdirAll(dir, 0700)
+	}
+
+	// ── Relocate EXE to secure path ──────────────────────────────────────
+	// Copy the agent binary to C:\ProgramData\EDR\bin\ which will be
+	// protected by SYSTEM-only DACL. The service is registered to run from
+	// this secure path, so even if the original download is deleted, the
+	// agent survives reboots.
+	dstPath := filepath.Join("C:\\ProgramData\\EDR\\bin", "edr-agent.exe")
+	if !strings.EqualFold(srcPath, dstPath) {
+		if err := copyFile(srcPath, dstPath); err != nil {
+			return fmt.Errorf("failed to copy agent to secure path: %w", err)
+		}
+		fmt.Printf("      Agent binary secured: %s\n", dstPath)
 	}
 
 	// Connect to service manager
@@ -412,13 +565,13 @@ func Install() error {
 	}
 	defer m.Disconnect()
 
-	// Check if service already exists (using minimal permissions that work with hardened DACL)
+	// Check if service already exists
 	if serviceExists() {
 		return fmt.Errorf("service %s already exists", ServiceName)
 	}
 
-	// Create service
-	s, err := m.CreateService(ServiceName, exePath, mgr.Config{
+	// ── Register service from the SECURE path (not from Downloads!) ──────
+	s, err := m.CreateService(ServiceName, dstPath, mgr.Config{
 		DisplayName:      ServiceDisplayName,
 		Description:      ServiceDescription,
 		StartType:        mgr.StartAutomatic,
@@ -439,53 +592,68 @@ func Install() error {
 		{Type: mgr.ServiceRestart, Delay: 0},
 	}
 	if err := s.SetRecoveryActions(recoveryActions, 24*60*60); err != nil {
-		// Non-fatal, just log
 		fmt.Printf("Warning: failed to set recovery actions: %v\n", err)
 	}
 
 	// Create event log source
 	if err := eventlog.InstallAsEventCreate(ServiceName, eventlog.Error|eventlog.Warning|eventlog.Info); err != nil {
-		// Non-fatal error
 		fmt.Printf("Warning: failed to create event log source: %v\n", err)
 	}
 
-	// Create required directories
-	// NOTE: installer.EnsureDirectories() is called before Install() during zero-touch
-	// setup, but we keep directory creation here as a safety net for manual installs.
-	dirs := []string{
-		"C:\\ProgramData\\EDR",
-		"C:\\ProgramData\\EDR\\config",
-		"C:\\ProgramData\\EDR\\certs",
-		"C:\\ProgramData\\EDR\\logs",
-		"C:\\ProgramData\\EDR\\queue",
-		"C:\\ProgramData\\EDR\\quarantine",
-	}
-	for _, dir := range dirs {
-		os.MkdirAll(dir, 0755)
+	// ── Save token hash to protected Registry ────────────────────────────
+	// This ensures uninstall verification works even if the EXE is replaced
+	// or the embedded hash is somehow lost.
+	if err := protection.SaveTokenHashToRegistry(embeddedTokenHash); err != nil {
+		fmt.Printf("Warning: failed to save token hash to registry: %v\n", err)
 	}
 
-	// NOTE: config.yaml is intentionally NOT written here. During a zero-touch
-	// install, installer.GenerateConfig() has already written the dynamically
-	// parameterised config before Install() was called. During a manual install
-	// (legacy -install without flags), the agent will load defaults at startup
-	// and the operator must edit config.yaml afterwards.
-
+	// NOTE: HardenAgentRegistryKey is NOT called here because Install()
+	// runs as Administrator, which cannot set OWNER=SYSTEM. The hardening
+	// is applied in Execute() which runs as SYSTEM.
 
 	return nil
 }
 
+// copyFile copies a file from src to dst, preserving content.
+func copyFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+
+	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0700)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+
+	_, err = io.Copy(out, in)
+	return err
+}
+
 // Uninstall removes the Windows service. Requires a valid anti-tamper token.
-// embeddedTokenHash is the SHA-256 hash of the enrollment token, compiled into the binary.
+// embeddedTokenHash is the SHA-256 hash of the enrollment token, compiled into
+// the binary. If the registry also contains a stored hash, it is used as the
+// primary source (more tamper-resistant than the embedded value).
 //
 // Flow:
-//  1. Verify the plaintext token against the embedded hash (first gate).
-//  2. Write the token's SHA-256 hash to C:\ProgramData\EDR\uninstall.dat.
-//  3. The running service (SYSTEM) detects the file via its watcher goroutine,
+//  1. Determine the authoritative token hash (registry > embedded).
+//  2. Verify the plaintext token against the authoritative hash.
+//  3. Write the token's SHA-256 hash to C:\ProgramData\EDR\uninstall.dat.
+//  4. The running service (SYSTEM) detects the file via its watcher goroutine,
 //     verifies the hash, restores DACL + registry permissions, and stops.
-//  4. This function polls until the service stops, then deletes it from the SCM.
+//  5. This function polls until the service stops, then deletes it from the SCM.
 func Uninstall(token, embeddedTokenHash string) error {
+	// ── Resolve authoritative token hash ────────────────────────────────────
+	// Priority: Registry (tamper-proof) > Embedded in EXE > legacy default
+	authoritativeHash := protection.ReadTokenHashFromRegistry()
+	if authoritativeHash == "" {
+		authoritativeHash = embeddedTokenHash
+	}
+
 	// ── Anti-Tamper: Verify uninstall token ──────────────────────────────────
-	if err := protection.VerifyUninstallToken(token, embeddedTokenHash); err != nil {
+	if err := protection.VerifyUninstallToken(token, authoritativeHash); err != nil {
 		return fmt.Errorf("uninstall blocked: %w", err)
 	}
 
@@ -498,10 +666,7 @@ func Uninstall(token, embeddedTokenHash string) error {
 
 	fmt.Println("  Token verified. Signaling service to release protections...")
 
-	// Poll until the service stops (the watcher goroutine inside the service
-	// will detect uninstall.dat, verify the hash, restore DACL, and stop).
-	// Re-write uninstall.dat every 5 seconds to handle race conditions
-	// where a previous service instance consumed the file before stopping.
+	// Poll until the service stops
 	stopped := false
 	for i := 0; i < 30; i++ {
 		time.Sleep(1 * time.Second)
@@ -510,8 +675,6 @@ func Uninstall(token, embeddedTokenHash string) error {
 			stopped = true
 			break
 		}
-		// Re-write the signal file every 5 seconds in case it was consumed
-		// by a restarting service instance (before recovery was disabled).
 		if i%5 == 4 {
 			_ = os.WriteFile(hashFilePath, []byte(providedHash), 0600)
 			fmt.Printf("  Waiting for service to stop... (%d/30s)\n", i+1)
@@ -523,9 +686,10 @@ func Uninstall(token, embeddedTokenHash string) error {
 		fmt.Println("  Service did not stop within 30s. Attempting forced removal...")
 	}
 
-	// Clean up signal and residual files
+	// Clean up signal, residual files, and agent registry key
 	_ = os.Remove(hashFilePath)
 	cleanupResidualFiles()
+	protection.CleanAgentRegistryKey()
 
 	return forceRemoveService()
 }

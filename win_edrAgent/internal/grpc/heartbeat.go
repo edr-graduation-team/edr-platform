@@ -44,6 +44,11 @@ type Heartbeat struct {
 	getQueueDepth      func() int
 	getEventsDropped   func() uint64 // filter + rate limiter drops
 
+	// Config update callback — called when the server pushes a new config.
+	// The callback receives the raw JSON bytes and is responsible for
+	// parsing, validating, saving to Registry, and applying the new config.
+	onConfigUpdate func(newConfig []byte)
+
 	// Heartbeat counters
 	heartbeatsSent atomic.Uint64
 	lastHeartbeat  time.Time
@@ -79,6 +84,10 @@ type HeartbeatResponse struct {
 	ConfigUpdateAvailable bool      `json:"config_update_available"`
 	RecommendedBatchSize  int       `json:"recommended_batch_size,omitempty"`
 	RecommendedIntervalMs int       `json:"recommended_interval_ms,omitempty"`
+
+	// NewConfig holds the updated configuration bytes (JSON-encoded)
+	// sent by the server when ConfigUpdateAvailable is true.
+	NewConfig []byte `json:"new_config,omitempty"`
 }
 
 // NewHeartbeat creates a new heartbeat manager.
@@ -94,6 +103,13 @@ func NewHeartbeat(cfg *config.Config, logger *logging.Logger) *Heartbeat {
 		interval: interval,
 		status:   StatusHealthy,
 	}
+}
+
+// SetOnConfigUpdate registers a callback that is invoked when the server
+// pushes a new configuration via the heartbeat response.
+// The callback receives raw JSON bytes of the new config.
+func (h *Heartbeat) SetOnConfigUpdate(fn func(newConfig []byte)) {
+	h.onConfigUpdate = fn
 }
 
 // SetMetricsCollectors sets the functions used to collect metrics.
@@ -316,10 +332,17 @@ func (h *Heartbeat) processResponse(resp *HeartbeatResponse) {
 		// TODO: Trigger certificate renewal
 	}
 
-	// Handle config update
-	if resp.ConfigUpdateAvailable {
-		h.logger.Info("Configuration update available")
-		// TODO: Trigger config fetch
+	// Handle config update from server
+	if resp.ConfigUpdateAvailable && len(resp.NewConfig) > 0 {
+		h.logger.Info("[Heartbeat] Server pushed configuration update — applying...")
+		if h.onConfigUpdate != nil {
+			h.onConfigUpdate(resp.NewConfig)
+			h.logger.Info("[Heartbeat] Configuration update applied and saved to Registry")
+		} else {
+			h.logger.Warn("[Heartbeat] Config update received but no handler registered")
+		}
+	} else if resp.ConfigUpdateAvailable {
+		h.logger.Info("[Heartbeat] Config update flag set but no config payload received")
 	}
 
 	// Handle rate adjustment

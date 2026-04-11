@@ -25,6 +25,7 @@ import (
 	"github.com/edr-platform/win-agent/internal/enrollment"
 	"github.com/edr-platform/win-agent/internal/installer"
 	"github.com/edr-platform/win-agent/internal/logging"
+	"github.com/edr-platform/win-agent/internal/protection"
 	"github.com/edr-platform/win-agent/internal/service"
 )
 
@@ -343,7 +344,7 @@ func runInstall(
 	}
 
 	// ── Step 5: Generate config ──────────────────────────────────────────────
-	fmt.Printf("[5/7] Generating config.yaml → %s ...\n", configPath)
+	fmt.Printf("[5/7] Generating agent configuration...\n")
 	opts := installer.Options{
 		ServerIP:     serverIP,
 		ServerDomain: serverDomain,
@@ -356,16 +357,43 @@ func runInstall(
 		logger.Errorf("Config generation failed: %v", err)
 		os.Exit(1)
 	}
-	fmt.Println("      → Done.")
-	logger.Infof("Config written to %s (server=%s:%s)", configPath, serverDomain, serverPort)
+
+	// ── Migrate config to Registry immediately and delete YAML ──────────
+	// Load the generated YAML, save to protected Registry (with token for
+	// first-boot enrollment), then delete the plaintext YAML from disk.
+	installCfg, err := config.Load(configPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error loading generated config: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Best-effort: restore DACL on any existing hardened key from a previous install.
+	// This allows re-install to succeed without requiring SYSTEM context.
+	_ = protection.RestoreAgentRegistryKey()
+
+	if err := installCfg.SaveToRegistry(); err != nil {
+		// Non-fatal: the service (running as SYSTEM) will migrate config.yaml
+		// to Registry on first boot. The YAML file is kept temporarily.
+		fmt.Printf("      → Config written to %s (will be secured on service start).\n", configPath)
+		logger.Warnf("Registry config save deferred to service start: %v", err)
+	} else {
+		// Success: delete config.yaml — config is now in Registry
+		if err := config.DeleteConfigFile(configPath); err != nil {
+			fmt.Printf("      → Warning: could not delete %s: %v\n", configPath, err)
+			logger.Warnf("Failed to delete config.yaml after Registry migration: %v", err)
+		} else {
+			fmt.Println("      → Config saved to protected Registry (no file on disk).")
+			logger.Info("Config migrated to Registry and YAML deleted")
+		}
+	}
 
 	// ── Step 6: Register service ─────────────────────────────────────────────
 	fmt.Println("[6/7] Registering Windows Service (EDRAgent)...")
-	if err := service.Install(); err != nil {
+	if err := service.Install(EmbeddedTokenHash); err != nil {
 		if isAlreadyExistsErr(err) {
 			fmt.Println("      → Service exists; re-registering...")
 			_ = service.ForceUninstall(EmbeddedTokenHash)
-			if err2 := service.Install(); err2 != nil {
+			if err2 := service.Install(EmbeddedTokenHash); err2 != nil {
 				fmt.Fprintf(os.Stderr, "Error installing service: %v\n", err2)
 				logger.Errorf("Service install failed: %v", err2)
 				os.Exit(1)
@@ -390,13 +418,16 @@ func runInstall(
 	fmt.Println("\n✓ EDR Agent installed and running successfully.")
 	fmt.Printf("  Server:    %s:%s\n", serverDomain, serverPort)
 	fmt.Printf("  Config:    %s\n", configPath)
+	fmt.Println("  Binary:    C:\\ProgramData\\EDR\\bin\\edr-agent.exe (secured)")
 	fmt.Println("  Service:   EDRAgent (Automatic, LocalSystem)")
 	if enrollment.HasEmbeddedCA() {
 		fmt.Println("  CA Cert:   Embedded (secure)")
 	}
 	fmt.Println("\n  To check status:   sc query EDRAgent")
 	fmt.Println("  To view logs:      Get-Content C:\\ProgramData\\EDR\\logs\\agent.log -Tail 50")
-	fmt.Println("  To uninstall:      agent.exe -uninstall -token <secret>")
+	fmt.Println("  To uninstall:      edr-agent.exe -uninstall -token <secret>")
+	fmt.Println("\n  You can safely delete this installer file — the agent binary")
+	fmt.Println("  has been copied to the secure path above.")
 	logger.Infof("Zero-touch installation complete: server=%s:%s", serverDomain, serverPort)
 	os.Exit(0)
 }

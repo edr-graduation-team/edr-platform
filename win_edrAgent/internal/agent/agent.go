@@ -153,6 +153,30 @@ func (a *Agent) Start(ctx context.Context) error {
 		func() int { return a.diskQueue.FileCount() },
 		nil, // events dropped — no filter/rate-limiter integrated yet
 	)
+
+	// Register config update handler — when the server pushes a new config
+	// via the heartbeat response, save it to the protected Registry.
+	a.heartbeat.SetOnConfigUpdate(func(newConfig []byte) {
+		var updatedCfg config.Config
+		if err := config.UnmarshalJSON(newConfig, &updatedCfg); err != nil {
+			a.logger.Errorf("[ConfigSync] Invalid config from server: %v", err)
+			return
+		}
+		if err := updatedCfg.Validate(); err != nil {
+			a.logger.Errorf("[ConfigSync] Server config failed validation: %v", err)
+			return
+		}
+		// Preserve local-only fields that the server should not override
+		updatedCfg.Certs = a.cfg.Certs
+		updatedCfg.Agent.ID = a.cfg.Agent.ID
+
+		if err := updatedCfg.SaveToRegistry(); err != nil {
+			a.logger.Errorf("[ConfigSync] Failed to save server config to Registry: %v", err)
+			return
+		}
+		a.logger.Info("[ConfigSync] Server config saved to Registry (effective after restart)")
+	})
+
 	a.heartbeat.Start(a.ctx, a.grpcClient.SendHeartbeat)
 
 	a.wg.Add(1)
@@ -326,16 +350,11 @@ func (a *Agent) UpdateConfig(newCfg *config.Config) error {
 		return fmt.Errorf("UpdateConfig: validation failed: %w", err)
 	}
 
-	// 2. Persist to disk so the new config survives a service restart.
-	a.mu.RLock()
-	cfgPath := a.configFilePath
-	a.mu.RUnlock()
-
-	if cfgPath == "" {
-		cfgPath = `C:\ProgramData\EDR\config\config.yaml`
-	}
-	if err := newCfg.Save(cfgPath); err != nil {
-		return fmt.Errorf("UpdateConfig: failed to persist config: %w", err)
+	// 2. Persist to Registry so the new config survives a service restart.
+	// No YAML file is written — all config lives exclusively in the
+	// protected Registry key (HKLM\SOFTWARE\EDR\Agent\ConfigData).
+	if err := newCfg.SaveToRegistry(); err != nil {
+		return fmt.Errorf("UpdateConfig: failed to persist config to Registry: %w", err)
 	}
 
 	// 3. Atomic config swap.

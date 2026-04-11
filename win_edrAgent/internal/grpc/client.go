@@ -537,9 +537,13 @@ func (c *Client) SendHeartbeat(req *HeartbeatRequest) (*HeartbeatResponse, error
 	}
 
 	resp := &HeartbeatResponse{
-		ServerStatus:        protoResp.GetServerStatus().String(),
-		HasPendingCommands:  protoResp.GetHasPendingCommands(),
-		CertRenewalRequired: protoResp.GetCertRenewalRequired(),
+		ServerStatus:          protoResp.GetServerStatus().String(),
+		HasPendingCommands:    protoResp.GetHasPendingCommands(),
+		CertRenewalRequired:   protoResp.GetCertRenewalRequired(),
+		ConfigUpdateAvailable: protoResp.GetConfigUpdateAvailable(),
+		NewConfig:             protoResp.GetNewConfig(),
+		RecommendedBatchSize:  int(protoResp.GetRecommendedBatchSize()),
+		RecommendedIntervalMs: int(protoResp.GetRecommendedIntervalMs()),
 	}
 	if protoResp.GetServerTimestamp() != nil {
 		resp.AckTimestamp = protoResp.GetServerTimestamp().AsTime()

@@ -47,8 +47,8 @@ func EnsureEnrolled(cfg *config.Config, logger *logging.Logger, configFilePath s
 				logger.Infof("Syncing Agent.ID from certificate CN: %s → %s", cfg.Agent.ID, certID)
 				cfg.Agent.ID = certID
 				if configFilePath != "" {
-					if err := cfg.Save(configFilePath); err != nil {
-						logger.Warnf("Failed to save config after CN sync: %v", err)
+					if err := cfg.SaveToRegistry(); err != nil {
+						logger.Warnf("Failed to save config to Registry after CN sync: %v", err)
 					}
 				}
 			}
@@ -156,12 +156,13 @@ func EnsureEnrolled(cfg *config.Config, logger *logging.Logger, configFilePath s
 	cfg.Certs.BootstrapToken = ""
 	logger.Info("Bootstrap token wiped from config (one-time use)")
 
-	if configFilePath != "" {
-		if err := cfg.Save(configFilePath); err != nil {
-			return fmt.Errorf("save config after enrollment: %w", err)
-		}
-		logger.Infof("Config saved to %s", configFilePath)
+	// Save updated config to Registry (primary storage)
+	if err := cfg.SaveToRegistry(); err != nil {
+		logger.Warnf("Failed to save post-enrollment config to Registry: %v", err)
+	} else {
+		logger.Info("Post-enrollment config saved to protected Registry")
 	}
+
 	return nil
 }
 

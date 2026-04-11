@@ -2,11 +2,13 @@
 package config
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"time"
 
 	"github.com/google/uuid"
+	"golang.org/x/sys/windows/registry"
 	"gopkg.in/yaml.v3"
 )
 
@@ -348,4 +350,93 @@ func (c *Config) Clone() *Config {
 	clone.Filtering.ExcludePaths = append([]string{}, c.Filtering.ExcludePaths...)
 	clone.Filtering.IncludePaths = append([]string{}, c.Filtering.IncludePaths...)
 	return &clone
+}
+
+// =========================================================================
+// Registry-Based Configuration Storage
+// =========================================================================
+//
+// These functions store the full agent config in the Windows Registry under:
+//   HKLM\SOFTWARE\EDR\Agent\ConfigData  (REG_SZ, JSON-encoded)
+//
+// Benefits over config.yaml:
+//   - Protected by DACL: only SYSTEM can read/write (after hardening)
+//   - Owner set to SYSTEM: Administrators cannot change permissions
+//   - Not visible as a plaintext file on disk
+//   - Survives file system tampering
+//
+// The config.yaml file is used ONLY during initial installation, then
+// migrated to Registry and deleted from disk.
+
+const configRegistryPath = `SOFTWARE\EDR\Agent`
+
+// SaveToRegistry serializes the entire configuration as JSON and stores it
+// in a protected registry key. The caller is responsible for clearing
+// sensitive fields (e.g., BootstrapToken) before calling this function.
+//
+// During install: called WITH token (for first-boot enrollment).
+// After enrollment: called WITHOUT token (enrollment code wipes it first).
+func (c *Config) SaveToRegistry() error {
+	data, err := json.Marshal(c)
+	if err != nil {
+		return fmt.Errorf("config: marshal for registry: %w", err)
+	}
+
+	k, _, err := registry.CreateKey(registry.LOCAL_MACHINE, configRegistryPath, registry.ALL_ACCESS)
+	if err != nil {
+		return fmt.Errorf("config: create registry key: %w", err)
+	}
+	defer k.Close()
+
+	if err := k.SetStringValue("ConfigData", string(data)); err != nil {
+		return fmt.Errorf("config: write config to registry: %w", err)
+	}
+	return nil
+}
+
+// LoadFromRegistry attempts to load the full configuration from the protected
+// registry key. Returns nil, nil if no config is stored (not an error — caller
+// should fall back to YAML or defaults).
+func LoadFromRegistry() (*Config, error) {
+	k, err := registry.OpenKey(registry.LOCAL_MACHINE, configRegistryPath, registry.QUERY_VALUE)
+	if err != nil {
+		return nil, nil // Key doesn't exist — first boot / fresh install
+	}
+	defer k.Close()
+
+	raw, _, err := k.GetStringValue("ConfigData")
+	if err != nil || raw == "" {
+		return nil, nil // No config stored yet
+	}
+
+	cfg := DefaultConfig()
+	if err := json.Unmarshal([]byte(raw), cfg); err != nil {
+		return nil, fmt.Errorf("config: unmarshal registry config: %w", err)
+	}
+
+	if err := cfg.Validate(); err != nil {
+		return nil, fmt.Errorf("config: invalid registry config: %w", err)
+	}
+
+	return cfg, nil
+}
+
+// DeleteConfigFile removes the plaintext config.yaml from disk.
+// Called after the config has been successfully migrated to Registry.
+// This is a one-way migration — the YAML file is no longer needed.
+func DeleteConfigFile(path string) error {
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("config: delete yaml file: %w", err)
+	}
+	return nil
+}
+
+// UnmarshalJSON deserializes a JSON-encoded config into the given struct.
+// Used by the config sync pipeline when the server pushes a new config
+// via gRPC HeartbeatResponse.new_config.
+func UnmarshalJSON(data []byte, cfg *Config) error {
+	if err := json.Unmarshal(data, cfg); err != nil {
+		return fmt.Errorf("config: unmarshal JSON: %w", err)
+	}
+	return nil
 }

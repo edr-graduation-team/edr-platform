@@ -6,7 +6,7 @@ import {
     AlertTriangle, Copy, Loader2, HardDrive, Info,
     ShieldCheck, Cpu, ChevronRight, ExternalLink
 } from 'lucide-react';
-import { agentBuildApi, type EnrollmentToken } from '../api/client';
+import { agentBuildApi, authApi, type EnrollmentToken } from '../api/client';
 import { Modal } from '../components';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -403,14 +403,16 @@ export default function AgentDeployment() {
                         Build, configure, and deploy the EDR agent to endpoint machines.
                     </p>
                 </div>
-                <button
-                    id="build-agent-btn"
-                    onClick={() => setIsModalOpen(true)}
-                    className="flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-700 hover:to-blue-700 text-white rounded-xl font-medium transition-all duration-200 shadow-lg shadow-cyan-500/20 hover:shadow-cyan-500/30"
-                >
-                    <Cpu className="w-5 h-5" />
-                    Build Agent
-                </button>
+                {authApi.canBuildAgent() && (
+                    <button
+                        id="build-agent-btn"
+                        onClick={() => setIsModalOpen(true)}
+                        className="flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-700 hover:to-blue-700 text-white rounded-xl font-medium transition-all duration-200 shadow-lg shadow-cyan-500/20 hover:shadow-cyan-500/30"
+                    >
+                        <Cpu className="w-5 h-5" />
+                        Build Agent
+                    </button>
+                )}
             </div>
 
             {/* Status Cards */}

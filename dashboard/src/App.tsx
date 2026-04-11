@@ -106,20 +106,20 @@ const Navigation = memo(function Navigation() {
     {
       title: 'SECURITY',
       items: [
-        { path: '/alerts', icon: AlertTriangle, label: 'Alerts' },
-        { path: '/endpoints', icon: Monitor, label: 'Endpoints' },
-        { path: '/endpoint-risk', icon: TrendingUp, label: 'Risk Intelligence' },
-        { path: '/threats', icon: Target, label: 'Threats' },
-        { path: '/rules', icon: FileText, label: 'Rules' },
-        ...(authApi.canViewAuditLogs() ? [{ path: '/responses', icon: Zap, label: 'Action Center' }] : []),
+        ...(authApi.canViewAlerts()     ? [{ path: '/alerts', icon: AlertTriangle, label: 'Alerts' }] : []),
+        ...(authApi.canViewEndpoints()  ? [{ path: '/endpoints', icon: Monitor, label: 'Endpoints' }] : []),
+        ...(authApi.canViewAlerts()     ? [{ path: '/endpoint-risk', icon: TrendingUp, label: 'Risk Intelligence' }] : []),
+        ...(authApi.canViewAlerts()     ? [{ path: '/threats', icon: Target, label: 'Threats' }] : []),
+        ...(authApi.canViewRules()      ? [{ path: '/rules', icon: FileText, label: 'Rules' }] : []),
+        ...(authApi.canViewResponses()  ? [{ path: '/responses', icon: Zap, label: 'Action Center' }] : []),
       ]
     },
     {
       title: 'SYSTEM',
       items: [
-        ...(authApi.canViewAuditLogs() ? [{ path: '/audit', icon: Activity, label: 'Audit Logs' }] : []),
-        { path: '/tokens', icon: Key, label: 'Enrollment Tokens' },
-        ...(authApi.canViewAuditLogs() ? [{ path: '/deploy', icon: Download, label: 'Agent Deployment' }] : []),
+        ...(authApi.canViewAuditLogs()  ? [{ path: '/audit', icon: Activity, label: 'Audit Logs' }] : []),
+        ...(authApi.canViewTokens()     ? [{ path: '/tokens', icon: Key, label: 'Enrollment Tokens' }] : []),
+        ...(authApi.canViewAgentDeploy()? [{ path: '/deploy', icon: Download, label: 'Agent Deployment' }] : []),
         { path: '/settings', icon: SettingsIcon, label: 'Settings' },
       ]
     }
@@ -280,34 +280,10 @@ function AppRoutes() {
       <Route path="/*" element={
         <Layout>
           <Routes>
+            {/* Dashboard & Stats: all authenticated users */}
             <Route path="/" element={
               <ProtectedRoute>
                 <Dashboard />
-              </ProtectedRoute>
-            } />
-            <Route path="/alerts" element={
-              <ProtectedRoute>
-                <Alerts />
-              </ProtectedRoute>
-            } />
-            <Route path="/endpoints" element={
-              <ProtectedRoute>
-                <Endpoints />
-              </ProtectedRoute>
-            } />
-            <Route path="/endpoint-risk" element={
-              <ProtectedRoute>
-                <EndpointRisk />
-              </ProtectedRoute>
-            } />
-            <Route path="/threats" element={
-              <ProtectedRoute>
-                <Threats />
-              </ProtectedRoute>
-            } />
-            <Route path="/rules" element={
-              <ProtectedRoute>
-                <Rules />
               </ProtectedRoute>
             } />
             <Route path="/stats" element={
@@ -315,26 +291,71 @@ function AppRoutes() {
                 <Stats />
               </ProtectedRoute>
             } />
+
+            {/* Alerts: alerts:read → all roles */}
+            <Route path="/alerts" element={
+              <ProtectedRoute roles={['admin', 'security', 'analyst', 'operations', 'viewer']}>
+                <Alerts />
+              </ProtectedRoute>
+            } />
+
+            {/* Endpoints: endpoints:read → all roles */}
+            <Route path="/endpoints" element={
+              <ProtectedRoute roles={['admin', 'security', 'analyst', 'operations', 'viewer']}>
+                <Endpoints />
+              </ProtectedRoute>
+            } />
+
+            {/* Risk Intelligence: alerts:read → all roles */}
+            <Route path="/endpoint-risk" element={
+              <ProtectedRoute roles={['admin', 'security', 'analyst', 'operations', 'viewer']}>
+                <EndpointRisk />
+              </ProtectedRoute>
+            } />
+
+            {/* Threats: alerts:read → all roles */}
+            <Route path="/threats" element={
+              <ProtectedRoute roles={['admin', 'security', 'analyst', 'operations', 'viewer']}>
+                <Threats />
+              </ProtectedRoute>
+            } />
+
+            {/* Rules: rules:read → admin, security, analyst, viewer */}
+            <Route path="/rules" element={
+              <ProtectedRoute roles={['admin', 'security', 'analyst', 'viewer']}>
+                <Rules />
+              </ProtectedRoute>
+            } />
+
+            {/* Action Center: responses:read → admin, security, analyst, operations */}
+            <Route path="/responses" element={
+              <ProtectedRoute roles={['admin', 'security', 'analyst', 'operations']}>
+                <ActionCenter />
+              </ProtectedRoute>
+            } />
+
+            {/* Audit Logs: audit:read → admin, security */}
             <Route path="/audit" element={
               <ProtectedRoute roles={['admin', 'security']}>
                 <AuditLogs />
               </ProtectedRoute>
             } />
+
+            {/* Enrollment Tokens: tokens:read → all roles */}
             <Route path="/tokens" element={
-              <ProtectedRoute>
+              <ProtectedRoute roles={['admin', 'security', 'analyst', 'operations', 'viewer']}>
                 <EnrollmentTokens />
               </ProtectedRoute>
             } />
-            <Route path="/responses" element={
-              <ProtectedRoute roles={['admin', 'security']}>
-                <ActionCenter />
-              </ProtectedRoute>
-            } />
+
+            {/* Agent Deployment: agents:read → admin, security, operations */}
             <Route path="/deploy" element={
-              <ProtectedRoute roles={['admin', 'security']}>
+              <ProtectedRoute roles={['admin', 'security', 'operations']}>
                 <AgentDeployment />
               </ProtectedRoute>
             } />
+
+            {/* Settings: settings:read → all roles */}
             <Route path="/settings" element={
               <ProtectedRoute>
                 <Settings />

@@ -12,7 +12,7 @@ export const SETTINGS_NAV: SettingsNavItem[] = [
     { id: 'profile', label: 'Profile', icon: 'User', description: 'Personal info & preferences' },
     { id: 'system', label: 'System', icon: 'Settings', description: 'Platform configuration' },
     { id: 'users', label: 'Users', icon: 'Users', description: 'User management', requiredRole: ['admin', 'security'] },
-    { id: 'roles', label: 'Roles & Permissions', icon: 'Shield', description: 'Access control', requiredRole: ['admin'] },
+    { id: 'roles', label: 'Roles & Permissions', icon: 'Shield', description: 'Access control', requiredRole: ['admin', 'security'] },
 ];
 
 export const ROLE_COLORS: Record<string, { bg: string; text: string; border: string; dot: string }> = {

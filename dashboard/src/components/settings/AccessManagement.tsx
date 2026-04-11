@@ -3,7 +3,7 @@ import {
     Search, Plus, Edit3, Trash2, Lock, Unlock, RefreshCw,
     X, AlertCircle, Check, UserPlus, ChevronDown,
 } from 'lucide-react';
-import { usersApi, type User } from '../../api/client';
+import { usersApi, authApi, type User } from '../../api/client';
 import { ROLE_COLORS, STATUS_STYLES } from './types';
 
 const ROLES = ['admin', 'security', 'analyst', 'operations', 'viewer'] as const;
@@ -149,12 +149,14 @@ export default function AccessManagement() {
                         {total} user{total !== 1 ? 's' : ''} registered
                     </p>
                 </div>
-                <button
-                    onClick={() => setShowAddModal(true)}
-                    className="flex items-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors text-sm font-medium"
-                >
-                    <UserPlus size={15} /> Add User
-                </button>
+                {authApi.canManageUsers() && (
+                    <button
+                        onClick={() => setShowAddModal(true)}
+                        className="flex items-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors text-sm font-medium"
+                    >
+                        <UserPlus size={15} /> Add User
+                    </button>
+                )}
             </div>
 
             {/* ── Toasts ── */}
@@ -239,13 +241,17 @@ export default function AccessManagement() {
                                         : <span className="italic opacity-80">— Never —</span>}
                                 </td>
                                 <td className="px-5 py-3.5">
-                                    <div className="flex items-center justify-end gap-1">
-                                        <button onClick={() => setEditUser({ ...user })} className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-500/10 dark:hover:text-blue-400 rounded-lg transition-all" title="Edit"><Edit3 size={15} /></button>
-                                        <button onClick={() => handleToggleStatus(user)} className="p-2 text-gray-400 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-500/10 dark:hover:text-amber-400 rounded-lg transition-all" title={user.status === 'active' ? 'Deactivate' : 'Activate'}>
-                                            {user.status === 'active' ? <Lock size={15} /> : <Unlock size={15} />}
-                                        </button>
-                                        <button onClick={() => handleDelete(user.id, user.full_name || user.username)} className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-500/10 dark:hover:text-red-400 rounded-lg transition-all" title="Delete"><Trash2 size={15} /></button>
-                                    </div>
+                                    {authApi.canManageUsers() ? (
+                                        <div className="flex items-center justify-end gap-1">
+                                            <button onClick={() => setEditUser({ ...user })} className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-500/10 dark:hover:text-blue-400 rounded-lg transition-all" title="Edit"><Edit3 size={15} /></button>
+                                            <button onClick={() => handleToggleStatus(user)} className="p-2 text-gray-400 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-500/10 dark:hover:text-amber-400 rounded-lg transition-all" title={user.status === 'active' ? 'Deactivate' : 'Activate'}>
+                                                {user.status === 'active' ? <Lock size={15} /> : <Unlock size={15} />}
+                                            </button>
+                                            <button onClick={() => handleDelete(user.id, user.full_name || user.username)} className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-500/10 dark:hover:text-red-400 rounded-lg transition-all" title="Delete"><Trash2 size={15} /></button>
+                                        </div>
+                                    ) : (
+                                        <span className="text-xs text-gray-400 italic">Read-only</span>
+                                    )}
                                 </td>
                             </tr>
                         ))}

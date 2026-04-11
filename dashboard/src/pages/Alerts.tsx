@@ -5,7 +5,7 @@ import {
     AlertTriangle, Clock, CheckCircle, XCircle, Shield, ArrowUpDown,
     GitBranch, Activity, TrendingUp, Cpu, Zap, Info, ChevronDown, ChevronUp
 } from 'lucide-react';
-import { alertsApi, type Alert, type ContextSnapshot, type ScoreBreakdown, type AncestorEntry } from '../api/client';
+import { alertsApi, authApi, type Alert, type ContextSnapshot, type ScoreBreakdown, type AncestorEntry } from '../api/client';
 import {
     Modal, MultiSelect, DateRangePicker, type DateRange, type MultiSelectOption,
     useToast, SkeletonTable
@@ -529,7 +529,7 @@ function AlertDetailModal({
         { id: 'context', label: '⚡ Context', highlight: hasContext },
         { id: 'event', label: 'Event Details' },
         { id: 'mitre', label: 'MITRE ATT&CK' },
-        { id: 'actions', label: 'Actions' },
+        ...(authApi.canWriteAlerts() ? [{ id: 'actions', label: 'Actions' }] : []),
     ];
 
     return (
@@ -785,6 +785,7 @@ const BulkActionsToolbar = React.memo(function BulkActionsToolbar({
     onClear: () => void;
 }) {
     if (selectedCount === 0) return null;
+    if (!authApi.canWriteAlerts()) return null;
 
     return (
         <div className="flex items-center gap-4 p-3 bg-primary-50 dark:bg-primary-900/20 rounded-lg mb-4 animate-slide-up">

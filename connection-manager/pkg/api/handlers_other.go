@@ -5,6 +5,7 @@ import (
 	"context"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -571,6 +572,12 @@ func (h *Handlers) DeleteUser(c echo.Context) error {
 }
 
 // ChangePassword changes a user's password via AuthService.
+//
+// After a successful password change:
+//   - The current JWT is blacklisted so the session is immediately invalidated.
+//   - The response includes force_logout: true so the dashboard redirects to login.
+//   - If an admin resets another user's password, the admin's own session is NOT
+//     invalidated (only the target user's next login will use the new password).
 func (h *Handlers) ChangePassword(c echo.Context) error {
 	if h.authSvc == nil {
 		return errorResponse(c, http.StatusServiceUnavailable, "DB_UNAVAILABLE", "Database is unavailable")
@@ -611,10 +618,47 @@ func (h *Handlers) ChangePassword(c echo.Context) error {
 	// Audit: password changed
 	h.fireAudit(c, models.AuditActionPasswordChanged, "user", targetUserID, "", false, "")
 
+	// ── Invalidate session: blacklist current JWT ────────────────────────
+	// When a user changes their OWN password, we force logout by blacklisting
+	// their current access token. This ensures:
+	//   1. If the token was stolen, the attacker loses access immediately
+	//   2. The user must re-authenticate with the new password
+	forceLogout := false
+	if isSelf {
+		authHeader := c.Request().Header.Get("Authorization")
+		if parts := splitBearer(authHeader); parts != "" {
+			if h.redis != nil && h.jwtManager != nil {
+				if jti, err := h.jwtManager.GetTokenID(parts); err == nil && jti != "" {
+					expiresAt := time.Now().Add(24 * time.Hour) // blacklist for token's max TTL
+					if err := h.redis.BlacklistToken(c.Request().Context(), jti, expiresAt, "password_changed"); err != nil {
+						h.logger.WithError(err).Warn("Failed to blacklist token after password change")
+					} else {
+						h.logger.WithField("user", currentUser.Username).Info("JWT blacklisted after password change — forced re-login")
+						forceLogout = true
+					}
+				}
+			}
+		}
+	}
+
 	return c.JSON(http.StatusOK, map[string]interface{}{
-		"message": "Password changed successfully",
-		"meta":    responseMeta(c),
+		"message":      "Password changed successfully",
+		"force_logout": forceLogout,
+		"meta":         responseMeta(c),
 	})
+}
+
+// splitBearer extracts the token string from a "Bearer <token>" header value.
+// Returns empty string if the header is malformed.
+func splitBearer(authHeader string) string {
+	if authHeader == "" {
+		return ""
+	}
+	parts := strings.SplitN(authHeader, " ", 2)
+	if len(parts) != 2 || strings.ToLower(parts[0]) != "bearer" {
+		return ""
+	}
+	return parts[1]
 }
 
 // ============================================================================

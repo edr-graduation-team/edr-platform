@@ -39,10 +39,12 @@ const createApiClient = (baseURL: string): AxiosInstance => {
         (response) => response,
         (error) => {
             if (error.response?.status === 401) {
+                // Token expired or revoked (e.g. after password change) — force re-login
                 localStorage.removeItem('auth_token');
                 localStorage.removeItem('user');
                 window.location.href = '/login';
             }
+            // 403: RBAC denied — don't redirect, let the caller show an error
             return Promise.reject(error);
         }
     );
@@ -753,15 +755,68 @@ export const authApi = {
         const user = authApi.getCurrentUser();
         return user ? roles.includes(user.role) : false;
     },
-    canExecuteCommands: () => {
-        return authApi.hasRole(['admin', 'security', 'analyst']);
-    },
-    canViewAuditLogs: () => {
-        return authApi.hasRole(['admin', 'security']);
-    },
-    canManageUsers: () => {
-        return authApi.hasRole(['admin']);
-    },
+
+    // ── Permission helpers ───────────────────────────────────────────────
+    // These mirror the RBAC matrix from migration 015_create_roles_permissions.
+    // The backend enforces permissions server-side via RequirePermission middleware;
+    // these helpers are for UI visibility (hiding buttons, nav items, routes).
+    //
+    // Permission Matrix (from DB seed):
+    //   admin:      ALL permissions
+    //   security:   alerts:*, endpoints:*, rules:r/w, responses:*, settings:r, users:r, roles:r, audit:r, tokens:r, agents:r/w
+    //   analyst:    alerts:r/w, endpoints:r, rules:r, responses:r/execute, settings:r, tokens:r
+    //   operations: alerts:r, endpoints:r/manage, responses:r, settings:r, tokens:r
+    //   viewer:     alerts:r, endpoints:r, rules:r, settings:r, tokens:r
+
+    // Alerts: view alerts page and details
+    canViewAlerts: () => authApi.hasRole(['admin', 'security', 'analyst', 'operations', 'viewer']),
+    // Alerts: update status, assign, add notes
+    canWriteAlerts: () => authApi.hasRole(['admin', 'security', 'analyst']),
+    // Alerts: delete alerts
+    canDeleteAlerts: () => authApi.hasRole(['admin', 'security']),
+
+    // Endpoints: view endpoint list
+    canViewEndpoints: () => authApi.hasRole(['admin', 'security', 'analyst', 'operations', 'viewer']),
+    // Endpoints: update tags, delete
+    canManageEndpoints: () => authApi.hasRole(['admin', 'security', 'operations']),
+    // Endpoints: network isolation
+    canIsolateEndpoints: () => authApi.hasRole(['admin', 'security']),
+
+    // Rules: view detection rules
+    canViewRules: () => authApi.hasRole(['admin', 'security', 'analyst', 'viewer']),
+    // Rules: create/edit rules
+    canWriteRules: () => authApi.hasRole(['admin', 'security']),
+
+    // Responses (Action Center): view command history
+    canViewResponses: () => authApi.hasRole(['admin', 'security', 'analyst', 'operations']),
+    // Responses: execute remote commands
+    canExecuteCommands: () => authApi.hasRole(['admin', 'security', 'analyst']),
+
+    // Settings: view
+    canViewSettings: () => authApi.hasRole(['admin', 'security', 'analyst', 'operations', 'viewer']),
+    // Settings: modify
+    canWriteSettings: () => authApi.hasRole(['admin']),
+
+    // Users: view user accounts
+    canViewUsers: () => authApi.hasRole(['admin', 'security']),
+    // Users: create/update
+    canManageUsers: () => authApi.hasRole(['admin']),
+
+    // Roles: view roles and permissions
+    canViewRoles: () => authApi.hasRole(['admin', 'security']),
+
+    // Audit: view audit logs
+    canViewAuditLogs: () => authApi.hasRole(['admin', 'security']),
+
+    // Tokens: view enrollment tokens
+    canViewTokens: () => authApi.hasRole(['admin', 'security', 'analyst', 'operations', 'viewer']),
+    // Tokens: generate/revoke
+    canManageTokens: () => authApi.hasRole(['admin', 'security']),
+
+    // Agents: view deployment page
+    canViewAgentDeploy: () => authApi.hasRole(['admin', 'security', 'operations']),
+    // Agents: build and download
+    canBuildAgent: () => authApi.hasRole(['admin', 'security']),
 };
 
 // ============================================================================

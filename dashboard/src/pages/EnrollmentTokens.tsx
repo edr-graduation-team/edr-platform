@@ -233,7 +233,7 @@ export default function EnrollmentTokens() {
     const [createdToken, setCreatedToken] = useState<EnrollmentToken | null>(null);
     const [copiedId, setCopiedId] = useState<string | null>(null);
 
-    const canManage = authApi.hasRole(['admin']);
+    const canManage = authApi.canManageTokens();
 
     // Fetch tokens
     const { data, isLoading, error } = useQuery({

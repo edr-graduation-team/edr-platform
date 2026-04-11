@@ -44,9 +44,16 @@ export default function UserProfile() {
         setSaving(true);
         try {
             await usersApi.changePassword(currentUser.id, oldPw, newPw);
-            setFeedback({ type: 'success', msg: 'Password changed successfully' });
-            setPwExpanded(false);
-            setOldPw(''); setNewPw(''); setConfirmPw('');
+            // Password changed successfully — force logout and redirect to login.
+            // The backend has already blacklisted the current JWT, so any subsequent
+            // API call would fail with 401 anyway. Clear local state preemptively.
+            localStorage.removeItem('auth_token');
+            localStorage.removeItem('user');
+            // Brief delay so the user sees the success message before redirect
+            setFeedback({ type: 'success', msg: 'Password changed — redirecting to login…' });
+            setTimeout(() => {
+                window.location.href = '/login';
+            }, 1200);
         } catch (err: any) {
             setFeedback({ type: 'error', msg: err?.response?.data?.message || 'Failed to change password' });
         } finally {

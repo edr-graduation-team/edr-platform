@@ -1,4 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { authApi } from '../api/client';
 import React, { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import {
@@ -1198,10 +1199,12 @@ export default function Endpoints() {
                                                 </span>
                                             </td>
                                             <td className="py-4 px-4 text-right" onClick={(e) => e.stopPropagation()}>
-                                                <QuickActionsDropdown
-                                                    agent={agent}
-                                                    onCommand={(cmd) => handleCommand(agent, cmd)}
-                                                />
+                                                {authApi.canExecuteCommands() && (
+                                                    <QuickActionsDropdown
+                                                        agent={agent}
+                                                        onCommand={(cmd) => handleCommand(agent, cmd)}
+                                                    />
+                                                )}
                                             </td>
                                         </tr>
                                         {/* ── Inline expandable detail panel ── */}

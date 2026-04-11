@@ -78,6 +78,11 @@ func NewServer(cfg *config.APIConfig, logger *logrus.Logger, m *metrics.Metrics)
 }
 
 // RegisterRoutes registers all API routes.
+//
+// RBAC enforcement: every route has a RequirePermission middleware that checks
+// the user's role against the permissions table. This prevents unauthorized
+// access even if the dashboard UI hides certain elements — the backend is the
+// single source of truth for access control.
 func (s *Server) RegisterRoutes(handlers *Handlers) {
 	// Health check (no auth)
 	s.echo.GET("/healthz", s.healthCheck)
@@ -96,67 +101,69 @@ func (s *Server) RegisterRoutes(handlers *Handlers) {
 	auth.POST("/logout", handlers.Logout, handlers.AuthMiddleware)
 	auth.GET("/me", handlers.GetCurrentUser, handlers.AuthMiddleware)
 
-	// Protected endpoints
+	// Protected endpoints — all require valid JWT
 	protected := v1.Group("")
 	protected.Use(handlers.AuthMiddleware)
 
-	// Agent endpoints
+	// ── Agent/Endpoint endpoints ─────────────────────────────────────────
+	// Read: endpoints:read | Modify: endpoints:manage | Isolate: endpoints:isolate
 	agents := protected.Group("/agents")
-	agents.GET("", handlers.ListAgents)
-	agents.GET("/stats", handlers.GetAgentStats)
-	agents.GET("/:id", handlers.GetAgent)
-	agents.PATCH("/:id", handlers.UpdateAgent)
-	agents.DELETE("/:id", handlers.DeleteAgent)
-	agents.GET("/:id/events", handlers.GetAgentEvents)
-	agents.GET("/:id/commands", handlers.GetAgentCommands)
-	agents.POST("/:id/commands", handlers.ExecuteAgentCommand)
+	agents.GET("", handlers.ListAgents, handlers.RequirePermission("endpoints", "read"))
+	agents.GET("/stats", handlers.GetAgentStats, handlers.RequirePermission("endpoints", "read"))
+	agents.GET("/:id", handlers.GetAgent, handlers.RequirePermission("endpoints", "read"))
+	agents.PATCH("/:id", handlers.UpdateAgent, handlers.RequirePermission("endpoints", "manage"))
+	agents.DELETE("/:id", handlers.DeleteAgent, handlers.RequirePermission("endpoints", "manage"))
+	agents.GET("/:id/events", handlers.GetAgentEvents, handlers.RequirePermission("endpoints", "read"))
+	agents.GET("/:id/commands", handlers.GetAgentCommands, handlers.RequirePermission("responses", "read"))
+	agents.POST("/:id/commands", handlers.ExecuteAgentCommand, handlers.RequirePermission("responses", "execute"))
 	// Backward-compat alias: some clients may omit the trailing 's'
-	agents.POST("/:id/command", handlers.ExecuteAgentCommand)
+	agents.POST("/:id/command", handlers.ExecuteAgentCommand, handlers.RequirePermission("responses", "execute"))
 
-	// Command history endpoints (Action Center)
+	// ── Command history endpoints (Action Center) ────────────────────────
 	commands := protected.Group("/commands")
-	commands.GET("", handlers.ListCommands)
-	commands.GET("/stats", handlers.GetCommandStats)
+	commands.GET("", handlers.ListCommands, handlers.RequirePermission("responses", "read"))
+	commands.GET("/stats", handlers.GetCommandStats, handlers.RequirePermission("responses", "read"))
 
-	// Alert endpoints
+	// ── Alert endpoints ──────────────────────────────────────────────────
 	alerts := protected.Group("/alerts")
-	alerts.GET("", handlers.ListAlerts)
-	alerts.POST("/search", handlers.SearchAlerts)
-	alerts.GET("/stats", handlers.GetAlertStats)
-	alerts.GET("/endpoint-risk", handlers.GetEndpointRisk)
-	alerts.GET("/:id", handlers.GetAlert)
-	alerts.PATCH("/:id", handlers.UpdateAlert)
-	alerts.POST("/:id/resolve", handlers.ResolveAlert)
-	alerts.POST("/:id/notes", handlers.AddAlertNote)
-	alerts.DELETE("/:id", handlers.DeleteAlert)
+	alerts.GET("", handlers.ListAlerts, handlers.RequirePermission("alerts", "read"))
+	alerts.POST("/search", handlers.SearchAlerts, handlers.RequirePermission("alerts", "read"))
+	alerts.GET("/stats", handlers.GetAlertStats, handlers.RequirePermission("alerts", "read"))
+	alerts.GET("/endpoint-risk", handlers.GetEndpointRisk, handlers.RequirePermission("alerts", "read"))
+	alerts.GET("/:id", handlers.GetAlert, handlers.RequirePermission("alerts", "read"))
+	alerts.PATCH("/:id", handlers.UpdateAlert, handlers.RequirePermission("alerts", "write"))
+	alerts.POST("/:id/resolve", handlers.ResolveAlert, handlers.RequirePermission("alerts", "write"))
+	alerts.POST("/:id/notes", handlers.AddAlertNote, handlers.RequirePermission("alerts", "write"))
+	alerts.DELETE("/:id", handlers.DeleteAlert, handlers.RequirePermission("alerts", "delete"))
 
-
-	// Event endpoints
+	// ── Event endpoints ──────────────────────────────────────────────────
+	// Events are part of the alert investigation workflow → alerts:read
 	events := protected.Group("/events")
-	events.POST("/search", handlers.SearchEvents)
-	events.GET("/stats", handlers.GetEventStats)
-	events.GET("/:id", handlers.GetEvent)
-	events.POST("/export", handlers.ExportEvents)
+	events.POST("/search", handlers.SearchEvents, handlers.RequirePermission("alerts", "read"))
+	events.GET("/stats", handlers.GetEventStats, handlers.RequirePermission("alerts", "read"))
+	events.GET("/:id", handlers.GetEvent, handlers.RequirePermission("alerts", "read"))
+	events.POST("/export", handlers.ExportEvents, handlers.RequirePermission("alerts", "read"))
 
-	// Policy endpoints
+	// ── Policy endpoints ─────────────────────────────────────────────────
 	policies := protected.Group("/policies")
-	policies.GET("", handlers.ListPolicies)
-	policies.POST("", handlers.CreatePolicy)
-	policies.GET("/:id", handlers.GetPolicy)
-	policies.PATCH("/:id", handlers.UpdatePolicy)
-	policies.DELETE("/:id", handlers.DeletePolicy)
-	policies.GET("/:id/agents", handlers.GetPolicyAgents)
+	policies.GET("", handlers.ListPolicies, handlers.RequirePermission("settings", "read"))
+	policies.POST("", handlers.CreatePolicy, handlers.RequirePermission("settings", "write"))
+	policies.GET("/:id", handlers.GetPolicy, handlers.RequirePermission("settings", "read"))
+	policies.PATCH("/:id", handlers.UpdatePolicy, handlers.RequirePermission("settings", "write"))
+	policies.DELETE("/:id", handlers.DeletePolicy, handlers.RequirePermission("settings", "write"))
+	policies.GET("/:id/agents", handlers.GetPolicyAgents, handlers.RequirePermission("settings", "read"))
 
-	// User endpoints (granular permission-based access)
+	// ── User endpoints ───────────────────────────────────────────────────
 	users := protected.Group("/users")
 	users.GET("", handlers.ListUsers, handlers.RequirePermission("users", "read"))
 	users.POST("", handlers.CreateUser, handlers.RequirePermission("users", "write"))
 	users.GET("/:id", handlers.GetUser, handlers.RequirePermission("users", "read"))
 	users.PATCH("/:id", handlers.UpdateUser, handlers.RequirePermission("users", "write"))
 	users.DELETE("/:id", handlers.DeleteUser, handlers.RequirePermission("users", "delete"))
+	// Password change: in-handler authorization (self or admin) — no middleware
 	users.POST("/:id/password", handlers.ChangePassword)
 
-	// Role & Permission endpoints (admin-only for writes)
+	// ── Role & Permission endpoints ──────────────────────────────────────
 	roles := protected.Group("/roles")
 	roles.GET("", handlers.ListRoles, handlers.RequirePermission("roles", "read"))
 	roles.POST("", handlers.CreateRole, handlers.RequirePermission("roles", "write"))
@@ -166,18 +173,18 @@ func (s *Server) RegisterRoutes(handlers *Handlers) {
 	// Permissions listing (read access for roles:read holders)
 	protected.GET("/permissions", handlers.ListPermissions, handlers.RequirePermission("roles", "read"))
 
-	// Audit endpoints
+	// ── Audit endpoints ──────────────────────────────────────────────────
 	audit := protected.Group("/audit")
 	audit.GET("/logs", handlers.ListAuditLogs, handlers.RequirePermission("audit", "read"))
 	audit.GET("/logs/:id", handlers.GetAuditLog, handlers.RequirePermission("audit", "read"))
 
-	// Enrollment token management
+	// ── Enrollment token management ──────────────────────────────────────
 	tokens := protected.Group("/enrollment-tokens")
 	tokens.GET("", handlers.ListEnrollmentTokens, handlers.RequirePermission("tokens", "read"))
 	tokens.POST("", handlers.GenerateEnrollmentToken, handlers.RequirePermission("tokens", "write"))
 	tokens.POST("/:id/revoke", handlers.RevokeEnrollmentToken, handlers.RequirePermission("tokens", "write"))
 
-	// Agent build (dashboard-driven compilation with embedded CA + config)
+	// ── Agent build (deployment) ─────────────────────────────────────────
 	protected.POST("/agent/build", handlers.BuildAgent, handlers.RequirePermission("agents", "write"))
 }
 

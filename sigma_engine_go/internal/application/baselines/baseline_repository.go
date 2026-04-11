@@ -155,9 +155,19 @@ func (r *PostgresBaselineRepository) Upsert(ctx context.Context, in AggregationI
 			min_executions_per_hour = LEAST(
 				process_baselines.min_executions_per_hour, 1
 			),
-			-- Running online stddev approximation via Welford's method (simplified)
+			-- Exponentially Weighted Moving Variance (EWMV)
+			-- Formula: σ_new = √((1-α)×σ²_old + α×(x - μ_new)²)
+			-- where μ_new = (1-α)×μ_old + α×x, α=0.10, x=1.0
+			-- Reference: Roberts (1959) EWMA control charts, ISO 7870-6
 			stddev_executions = ROUND(
-				ABS(1.0 - process_baselines.avg_executions_per_hour)::numeric, 4
+				SQRT(GREATEST(
+					0.90 * POWER(process_baselines.stddev_executions, 2)
+					+ 0.10 * POWER(
+						1.0 - (0.90 * process_baselines.avg_executions_per_hour + 0.10 * 1.0),
+						2
+					),
+					0.000001
+				))::numeric, 4
 			),
 			observation_days = LEAST(process_baselines.observation_days + 1, 14),
 			-- Confidence: 1 - exp(-days/7), capped to 0.99
@@ -211,6 +221,18 @@ func (r *PostgresBaselineRepository) Upsert(ctx context.Context, in AggregationI
 		DO UPDATE SET
 			avg_executions_per_hour = ROUND(
 				(0.90 * process_baselines.avg_executions_per_hour + 0.10 * 1.0)::numeric, 4
+			),
+			-- EWMV: σ_new = √((1-α)×σ²_old + α×(x - μ_new)²)
+			-- Reference: Roberts (1959) EWMA control charts, ISO 7870-6
+			stddev_executions = ROUND(
+				SQRT(GREATEST(
+					0.90 * POWER(process_baselines.stddev_executions, 2)
+					+ 0.10 * POWER(
+						1.0 - (0.90 * process_baselines.avg_executions_per_hour + 0.10 * 1.0),
+						2
+					),
+					0.000001
+				))::numeric, 4
 			),
 			observation_days = LEAST(process_baselines.observation_days + 1, 14),
 			confidence_score = ROUND(

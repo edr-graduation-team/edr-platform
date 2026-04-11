@@ -91,6 +91,7 @@ export interface ScoreBreakdown {
     ueba_bonus: number;
     ueba_discount: number;
     ueba_signal: 'anomaly' | 'normal' | 'none' | string;
+    interaction_bonus: number; // Cross-dimensional signal convergence bonus
     raw_score: number;
     final_score: number;
 }

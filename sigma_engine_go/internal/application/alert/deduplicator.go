@@ -102,6 +102,11 @@ func (d *Deduplicator) Deduplicate(alerts []*domain.Alert) []*domain.Alert {
 }
 
 // generateSignature creates a unique signature for an alert.
+// FIX ISSUE-12: Removed confidence from the deduplication hash.
+// Two alerts for the same event + same rule + same critical fields ARE
+// the same alert regardless of confidence. Including confidence caused
+// near-duplicates (e.g., confidence 0.79 vs 0.81 → quantized 7 vs 8)
+// to produce different hashes and escape deduplication.
 func (d *Deduplicator) generateSignature(alert *domain.Alert) string {
 	h := fnv.New64a()
 	h.Write([]byte(alert.RuleID))
@@ -116,9 +121,8 @@ func (d *Deduplicator) generateSignature(alert *domain.Alert) string {
 		}
 	}
 
-	// Include confidence level (rounded to 0.1 precision)
-	confidenceLevel := int(alert.Confidence * 10)
-	h.Write([]byte(fmt.Sprintf("%d", confidenceLevel)))
+	// NOTE: Confidence intentionally excluded from signature.
+	// Confidence is a scoring quality metric, not an event identity attribute.
 
 	return fmt.Sprintf("%x", h.Sum64())
 }

@@ -419,7 +419,15 @@ function ScoreBreakdownPanel({ breakdown, totalScore }: { breakdown: ScoreBreakd
             sign: '+',
             color: 'text-red-600 dark:text-red-400',
             icon: <Zap className="w-3.5 h-3.5" />,
-            description: 'First-seen hour or statistical spike',
+            description: 'First-seen hour or statistical spike (Z>3σ)',
+        },
+        {
+            label: 'Interaction',
+            value: breakdown.interaction_bonus || 0,
+            sign: '+',
+            color: 'text-pink-600 dark:text-pink-400',
+            icon: <ArrowUpDown className="w-3.5 h-3.5" />,
+            description: 'Cross-dimensional signal convergence (≥2 high signals)',
         },
         {
             label: 'FP Discount',
@@ -435,12 +443,13 @@ function ScoreBreakdownPanel({ breakdown, totalScore }: { breakdown: ScoreBreakd
             sign: '−',
             color: 'text-teal-600 dark:text-teal-400',
             icon: <CheckCircle className="w-3.5 h-3.5" />,
-            description: 'Process within its normal baseline',
+            description: 'Process within its normal baseline (within 1σ)',
         },
     ];
 
     const maxBar = 100;
     const { bg: scoreBg, text: scoreText } = getRiskScoreStyle(totalScore);
+    const interactionVal = breakdown.interaction_bonus || 0;
 
     return (
         <div className="space-y-4">
@@ -478,6 +487,7 @@ function ScoreBreakdownPanel({ breakdown, totalScore }: { breakdown: ScoreBreakd
                     <div className="text-xs text-gray-500 font-mono">
                         {breakdown.base_score} + {breakdown.lineage_bonus} + {breakdown.privilege_bonus} + {breakdown.burst_bonus}
                         {breakdown.ueba_bonus > 0 && ` + ${breakdown.ueba_bonus}`}
+                        {interactionVal > 0 && ` + ${interactionVal}`}
                         {breakdown.fp_discount > 0 && ` − ${breakdown.fp_discount}`}
                         {breakdown.ueba_discount > 0 && ` − ${breakdown.ueba_discount}`}
                         {' '}= {breakdown.raw_score} → clamped to {breakdown.final_score}

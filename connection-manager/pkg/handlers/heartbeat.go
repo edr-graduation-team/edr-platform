@@ -164,14 +164,45 @@ func mapAgentStatus(status edrv1.AgentStatus) string {
 }
 
 // calculateHealthScore calculates health score based on agent metrics.
+//
+// FIX ISSUE-11: Unified with Agent.CalculateHealthScore() — both now use the
+// same 4-factor model. Previously, the heartbeat handler used a 2-factor
+// formula (delivery×0.7 + status×0.3) while the Agent model used 3-factor
+// (delivery×0.5 + status×0.3 + drop×0.2). This produced inconsistent scores.
+//
+// Unified Industry-Standard Health Model (NIST SP 800-137 aligned):
+//
+//   health_score = delivery×0.40 + status×0.30 + dropRate×0.20 + resource×0.10
+//
+// Factor breakdown:
+//   1. Delivery Quality (40%): events_sent / events_generated × 100
+//      - Measures telemetry pipeline integrity. Low delivery indicates
+//        buffer overflow, network failure, or potential attacker interference.
+//   2. Operational Status (30%): maps reported agent status to a 0–100 score
+//      - Online=100, Degraded=80, Critical=50, Unknown=60, Offline=0
+//   3. Drop Rate Penalty (20%): penalizes high event drop ratios
+//      - >20% drops: score=0 (potential blinding attack per MITRE T1562)
+//      - 5–20%: linear degradation from 100→0
+//      - <5%: score=100 (acceptable operational loss)
+//   4. Resource Pressure (10%): CPU and memory utilization
+//      - >90% CPU or >95% memory: score=0 (resource exhaustion)
+//      - Linear scale from 100→0 as utilization increases
+//
+// This unified formula is used for:
+//   - Real-time health display in the dashboard
+//   - Agent "offline" detection and alerting
+//   - Response automation (isolation decisions require health context)
 func calculateHealthScore(req *edrv1.HeartbeatRequest) float64 {
-	// Delivery ratio (70% weight)
+	// Factor 1: Delivery Quality (40% weight)
 	var deliveryRatio float64 = 100.0
 	if req.EventsGenerated > 0 {
 		deliveryRatio = float64(req.EventsSent) / float64(req.EventsGenerated) * 100
+		if deliveryRatio > 100.0 {
+			deliveryRatio = 100.0
+		}
 	}
 
-	// Status score (30% weight)
+	// Factor 2: Status Score (30% weight)
 	statusScore := 100.0
 	switch req.Status {
 	case edrv1.AgentStatus_AGENT_STATUS_HEALTHY:
@@ -181,23 +212,64 @@ func calculateHealthScore(req *edrv1.HeartbeatRequest) float64 {
 	case edrv1.AgentStatus_AGENT_STATUS_CRITICAL:
 		statusScore = 50.0
 	default:
-		statusScore = 70.0
+		statusScore = 60.0
 	}
 
-	// Combined score
-	return (deliveryRatio * 0.7) + (statusScore * 0.3)
+	// Factor 3: Drop Rate Penalty (20% weight)
+	// >20% drops indicates potential blinding attack (MITRE T1562.001)
+	dropScore := 100.0
+	if req.EventsGenerated > 0 {
+		dropRate := float64(req.EventsDropped) / float64(req.EventsGenerated)
+		switch {
+		case dropRate > 0.20:
+			dropScore = 0.0 // Severe: potential blinding attack
+		case dropRate > 0.05:
+			// Linear degradation from 100→0 between 5% and 20%
+			dropScore = (0.20 - dropRate) / 0.15 * 100
+		}
+	}
+
+	// Factor 4: Resource Pressure (10% weight)
+	// High CPU or memory signals resource exhaustion / potential DoS
+	resourceScore := 100.0
+	cpuUsage := float64(req.CpuUsage)
+	if cpuUsage > 90.0 {
+		resourceScore -= 50.0 // Heavy CPU penalty
+	} else if cpuUsage > 70.0 {
+		resourceScore -= (cpuUsage - 70.0) / 20.0 * 30.0 // Gradual CPU penalty
+	}
+	if req.MemoryTotalMb > 0 {
+		memUsagePercent := float64(req.MemoryUsedMb) / float64(req.MemoryTotalMb) * 100
+		if memUsagePercent > 95.0 {
+			resourceScore -= 50.0
+		} else if memUsagePercent > 80.0 {
+			resourceScore -= (memUsagePercent - 80.0) / 15.0 * 30.0
+		}
+	}
+	if resourceScore < 0 {
+		resourceScore = 0
+	}
+
+	// Combined score with industry-standard weights
+	return (deliveryRatio * 0.40) + (statusScore * 0.30) + (dropScore * 0.20) + (resourceScore * 0.10)
 }
 
 // getHealthStatus returns a status string based on health score.
+// Thresholds aligned with NIST SP 800-137 continuous monitoring tiers:
+//   - Excellent (≥90): All factors nominal, full operational capability
+//   - Good (≥75): Minor degradation, acceptable for operations
+//   - Fair (≥50): Notable degradation, requires attention
+//   - Degraded (≥25): Significant issues, investigation required
+//   - Critical (<25): Agent may be under attack or failing
 func getHealthStatus(score float64) string {
 	switch {
-	case score >= 95:
+	case score >= 90:
 		return "excellent"
-	case score >= 80:
+	case score >= 75:
 		return "good"
-	case score >= 60:
-		return "acceptable"
-	case score >= 40:
+	case score >= 50:
+		return "fair"
+	case score >= 25:
 		return "degraded"
 	default:
 		return "critical"

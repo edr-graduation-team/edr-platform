@@ -3,6 +3,7 @@ package analytics
 
 import (
 	"fmt"
+	"math"
 	"sync"
 	"time"
 
@@ -86,35 +87,50 @@ func (m *CorrelationManager) CorrelateAlert(alert *domain.Alert) []AlertRelation
 			continue
 		}
 
-		// Check for same agent
-		// Would need agent ID in alert
+		timeDelta := alert.Timestamp.Sub(cached.Timestamp).Abs()
+
+		// FIX ISSUE-09: Time-decayed correlation scoring.
+		// Reference: MITRE ATT&CK Kill Chain — alerts closer in time are
+		// more likely to be part of the same attack chain.
+		// Formula: score = baseScore × exp(-timeDelta / halfLife)
+		//   halfLife = 2.5 minutes → alerts 10s apart ≈ 0.97×, 4 min apart ≈ 0.20×
+		timeDecay := math.Exp(-timeDelta.Seconds() / 150.0) // 150s = 2.5min half-life
 
 		// Check for same rule
 		if cached.RuleID == alert.RuleID {
-			rel := AlertRelationship{
-				ID:               uuid.New().String(),
-				Alert1ID:         cached.ID,
-				Alert2ID:         alert.ID,
-				RelationType:     CorrSameRule,
-				CorrelationScore: 0.8,
-				CreatedAt:        time.Now(),
+			// Same rule correlation: base 0.85 × time decay
+			// (higher base than before because same-rule is very strong signal)
+			score := 0.85 * timeDecay
+			if score > 0.1 { // Only record if meaningful
+				rel := AlertRelationship{
+					ID:               uuid.New().String(),
+					Alert1ID:         cached.ID,
+					Alert2ID:         alert.ID,
+					RelationType:     CorrSameRule,
+					CorrelationScore: score,
+					CreatedAt:        time.Now(),
+				}
+				correlations = append(correlations, rel)
+				m.relationships = append(m.relationships, rel)
 			}
-			correlations = append(correlations, rel)
-			m.relationships = append(m.relationships, rel)
 		}
 
-		// Check for time-based (within 5 minutes)
-		if alert.Timestamp.Sub(cached.Timestamp).Abs() < 5*time.Minute {
-			rel := AlertRelationship{
-				ID:               uuid.New().String(),
-				Alert1ID:         cached.ID,
-				Alert2ID:         alert.ID,
-				RelationType:     CorrTimeBased,
-				CorrelationScore: 0.5,
-				CreatedAt:        time.Now(),
+		// Check for time-based correlation (within 10 minutes window)
+		if timeDelta < 10*time.Minute {
+			// Time-based correlation: base 0.6 × time decay
+			score := 0.6 * timeDecay
+			if score > 0.1 {
+				rel := AlertRelationship{
+					ID:               uuid.New().String(),
+					Alert1ID:         cached.ID,
+					Alert2ID:         alert.ID,
+					RelationType:     CorrTimeBased,
+					CorrelationScore: score,
+					CreatedAt:        time.Now(),
+				}
+				correlations = append(correlations, rel)
+				m.relationships = append(m.relationships, rel)
 			}
-			correlations = append(correlations, rel)
-			m.relationships = append(m.relationships, rel)
 		}
 	}
 

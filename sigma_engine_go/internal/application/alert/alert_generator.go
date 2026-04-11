@@ -416,6 +416,13 @@ func (ag *AlertGenerator) GenerateAggregatedAlert(
 // Implements severity promotion rules:
 //   - If matchCount > 3 AND severity is Low/Medium → promote to High
 //   - If matchCount > 5 AND combined confidence > 0.8 → promote to Critical
+//   - If combined confidence > 0.9 → +1 level
+//
+// FIX ISSUE-08: Maximum promotion capped at +2 levels from original severity.
+// Rationale (NIST SP 800-61): Unbounded severity promotion can cause alert
+// fatigue when low-fidelity detections are over-escalated. A cap of +2 ensures
+// that Low→High is the maximum jump for aggregate-only signals; reaching Critical
+// requires at least a Medium base severity combined with strong multi-match evidence.
 //
 // Returns (finalSeverity, wasPromoted).
 func (ag *AlertGenerator) calculateAggregatedSeverity(
@@ -442,6 +449,16 @@ func (ag *AlertGenerator) calculateAggregatedSeverity(
 	if combinedConfidence > 0.9 && finalSeverity < domain.SeverityCritical {
 		finalSeverity++
 		promoted = true
+	}
+
+	// FIX ISSUE-08: Cap maximum promotion at +2 levels from original severity.
+	// This prevents Low severity from jumping to Critical on aggregate signals alone.
+	maxSeverity := baseSeverity + 2
+	if maxSeverity > domain.SeverityCritical {
+		maxSeverity = domain.SeverityCritical
+	}
+	if finalSeverity > maxSeverity {
+		finalSeverity = maxSeverity
 	}
 
 	return finalSeverity, promoted

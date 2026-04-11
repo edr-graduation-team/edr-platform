@@ -287,17 +287,33 @@ func (ec *EventCounter) cleanOldOccurrences(group *eventGroup, now time.Time) {
 }
 
 // calculateTrend calculates the trend of event occurrences.
-// Compares first half vs second half of occurrences.
+// FIX ISSUE-10: Splits at the temporal midpoint instead of the count midpoint.
+// Previously, splitting by array index could misrepresent the trend when events
+// are clustered in time (e.g., 90% in the last 30s of a 5-min window).
+// Now we split at the chronological midpoint for accurate trend assessment.
 // Returns "↑" (uptrend), "↓" (downtrend), or "→" (stable).
 func (ec *EventCounter) calculateTrend(occurrences []time.Time) string {
 	if len(occurrences) < 2 {
 		return "→"
 	}
 
-	// Split into two halves
-	mid := len(occurrences) / 2
-	firstHalf := occurrences[:mid]
-	secondHalf := occurrences[mid:]
+	// Calculate temporal midpoint (halfway between first and last event)
+	first := occurrences[0]
+	last := occurrences[len(occurrences)-1]
+	timeMid := first.Add(last.Sub(first) / 2)
+
+	// Split occurrences at temporal midpoint using binary search
+	splitIdx := sort.Search(len(occurrences), func(i int) bool {
+		return occurrences[i].After(timeMid)
+	})
+
+	// Need at least 2 events in each half for meaningful comparison
+	if splitIdx < 2 || len(occurrences)-splitIdx < 2 {
+		return "→"
+	}
+
+	firstHalf := occurrences[:splitIdx]
+	secondHalf := occurrences[splitIdx:]
 
 	// Calculate average interval for each half
 	firstInterval := ec.avgInterval(firstHalf)

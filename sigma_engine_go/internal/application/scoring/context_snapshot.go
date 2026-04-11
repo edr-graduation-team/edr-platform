@@ -81,16 +81,17 @@ type AncestorEntry struct {
 // Enables forensic transparency and academic justification.
 //
 // risk_score = clamp(BaseScore + LineageBonus + PrivilegeBonus + BurstBonus
-//	           + UEBABonus - FPDiscount - UEBADiscount, 0, 100)
+//	           + UEBABonus + InteractionBonus - FPDiscount - UEBADiscount, 0, 100)
 type ScoreBreakdown struct {
-	BaseScore      int    `json:"base_score"`      // from Sigma severity + multi-match
-	LineageBonus   int    `json:"lineage_bonus"`   // from suspicious parent-child pair
-	PrivilegeBonus int    `json:"privilege_bonus"` // from SYSTEM/elevated/unsigned
-	BurstBonus     int    `json:"burst_bonus"`     // from temporal repeat firing
-	FPDiscount     int    `json:"fp_discount"`     // subtracted for trusted signature
-	UEBABonus      int    `json:"ueba_bonus"`      // +15 when process is anomalous
-	UEBADiscount   int    `json:"ueba_discount"`   // +10 subtracted when process is normal
-	UEBASignal     string `json:"ueba_signal"`     // "anomaly", "normal", or "none"
-	RawScore       int    `json:"raw_score"`       // before clamp
-	FinalScore     int    `json:"final_score"`     // after clamp(0,100)
+	BaseScore        int    `json:"base_score"`        // from Sigma severity + multi-match
+	LineageBonus     int    `json:"lineage_bonus"`     // from suspicious parent-child pair
+	PrivilegeBonus   int    `json:"privilege_bonus"`   // from SYSTEM/elevated/unsigned
+	BurstBonus       int    `json:"burst_bonus"`       // from temporal repeat firing
+	FPDiscount       int    `json:"fp_discount"`       // subtracted for trusted signature
+	UEBABonus        int    `json:"ueba_bonus"`        // +15 when process is anomalous
+	UEBADiscount     int    `json:"ueba_discount"`     // +10 subtracted when process is normal
+	UEBASignal       string `json:"ueba_signal"`       // "anomaly", "normal", or "none"
+	InteractionBonus int    `json:"interaction_bonus"` // +10/+15 when multiple high signals co-occur
+	RawScore         int    `json:"raw_score"`         // before clamp
+	FinalScore       int    `json:"final_score"`       // after clamp(0,100)
 }

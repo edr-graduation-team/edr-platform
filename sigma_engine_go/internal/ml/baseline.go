@@ -1,4 +1,22 @@
 // Package ml provides machine learning for baseline learning and anomaly detection.
+//
+// DEPRECATED (FIX ISSUE-14 and ISSUE-04):
+// This package is the OLDER prototype baseline system and should NOT be used
+// for production scoring. It has known mathematical issues:
+//   - Uses Poisson (√count) for stddev, which is inappropriate for bursty
+//     process execution patterns (process execution is overdispersed,
+//     not Poisson-distributed).
+//   - Stores baselines in-memory only (lost on restart).
+//   - Does not use EMA smoothing or confidence gating.
+//
+// The PRODUCTION baseline system lives in:
+//   internal/application/baselines/baseline_repository.go
+//   internal/application/baselines/baseline_aggregator.go
+// which uses PostgreSQL storage, Welford-derived standard deviation via EMA
+// (α=0.10), and exponential confidence decay with a 0.30 confidence gate.
+//
+// This package is retained ONLY for backward compatibility with the
+// GetMLStatus() API endpoint. No scoring decisions should route through here.
 package ml
 
 import (

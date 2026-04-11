@@ -1200,7 +1200,7 @@ export default function Alerts() {
                                                         >
                                                             <Eye className="w-4 h-4" />
                                                         </button>
-                                                        {alert.status === 'open' && (
+                                                        {alert.status === 'open' && authApi.canWriteAlerts() && (
                                                             <button
                                                                 onClick={() => handleStatusChange(alert.id, 'acknowledged')}
                                                                 className="p-1.5 text-slate-400 hover:text-green-600 hover:bg-green-50 dark:hover:bg-green-900/20 rounded transition-colors"

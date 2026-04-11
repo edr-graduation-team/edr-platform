@@ -817,6 +817,15 @@ export const authApi = {
     canViewAgentDeploy: () => authApi.hasRole(['admin', 'security', 'operations']),
     // Agents: build and download
     canBuildAgent: () => authApi.hasRole(['admin', 'security']),
+
+    // Endpoints: push filter policy to agent (equivalent to executing a C2 command)
+    canPushPolicy: () => authApi.hasRole(['admin', 'security', 'analyst']),
+
+    // Tokens: copy raw token value (sensitive — only roles that can manage tokens)
+    canCopyTokens: () => authApi.hasRole(['admin', 'security']),
+
+    // Stats: export data (CSV/PDF/JSON)
+    canExportStats: () => authApi.hasRole(['admin', 'security', 'analyst']),
 };
 
 // ============================================================================

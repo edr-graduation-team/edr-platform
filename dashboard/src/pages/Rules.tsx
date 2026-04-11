@@ -1,10 +1,11 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Plus, Search, Edit, Trash2, Power, PowerOff, CheckCircle, XCircle, Shield, ChevronDown, Activity, Settings2 } from 'lucide-react';
-import { rulesApi, statsApi, type Rule } from '../api/client';
+import { rulesApi, statsApi, authApi, type Rule } from '../api/client';
 
 export default function Rules() {
     const queryClient = useQueryClient();
+    const canWrite = authApi.canWriteRules();
     const [searchTerm, setSearchTerm] = useState('');
     const [showModal, setShowModal] = useState(false);
     const [editingRule, setEditingRule] = useState<Rule | null>(null);
@@ -59,16 +60,18 @@ export default function Rules() {
                         <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Manage Sigma and YARA behavioral signatures</p>
                     </div>
                     
-                    <button
-                        onClick={() => {
-                            setEditingRule(null);
-                            setShowModal(true);
-                        }}
-                        className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded-lg transition-colors shadow-sm shadow-indigo-500/20 pointer-events-auto cursor-pointer"
-                    >
-                        <Plus className="w-4 h-4" />
-                        Create Rule
-                    </button>
+                    {canWrite && (
+                        <button
+                            onClick={() => {
+                                setEditingRule(null);
+                                setShowModal(true);
+                            }}
+                            className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded-lg transition-colors shadow-sm shadow-indigo-500/20 pointer-events-auto cursor-pointer"
+                        >
+                            <Plus className="w-4 h-4" />
+                            Create Rule
+                        </button>
+                    )}
                 </div>
 
                 {/* KPI Cards */}
@@ -173,7 +176,7 @@ export default function Rules() {
                                         <th className="px-6 py-4 text-xs uppercase tracking-wider text-slate-400 font-semibold">Severity</th>
                                         <th className="px-6 py-4 text-xs uppercase tracking-wider text-slate-400 font-semibold">Category</th>
                                         <th className="px-6 py-4 text-xs uppercase tracking-wider text-slate-400 font-semibold">Status</th>
-                                        <th className="px-6 py-4 text-xs uppercase tracking-wider text-slate-400 font-semibold text-right">Actions</th>
+                                        {canWrite && <th className="px-6 py-4 text-xs uppercase tracking-wider text-slate-400 font-semibold text-right">Actions</th>}
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60">
@@ -218,52 +221,54 @@ export default function Rules() {
                                                     </span>
                                                 )}
                                             </td>
-                                            <td className="px-6 py-4 text-right">
-                                                <div className="flex items-center justify-end gap-1.5 md:opacity-0 group-hover:opacity-100 transition-opacity">
-                                                    <button
-                                                        onClick={() => {
-                                                            setEditingRule(rule);
-                                                            setShowModal(true);
-                                                        }}
-                                                        className="p-1.5 rounded-md hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors pointer-events-auto cursor-pointer"
-                                                        title="Edit Rule"
-                                                    >
-                                                        <Edit className="w-4 h-4" />
-                                                    </button>
-                                                    
-                                                    {rule.enabled ? (
+                                            {canWrite && (
+                                                <td className="px-6 py-4 text-right">
+                                                    <div className="flex items-center justify-end gap-1.5 md:opacity-0 group-hover:opacity-100 transition-opacity">
                                                         <button
-                                                            onClick={() => disableMutation.mutate(rule.id)}
-                                                            className="p-1.5 rounded-md hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-400 hover:text-orange-600 dark:hover:text-orange-400 transition-colors pointer-events-auto cursor-pointer"
-                                                            title="Disable Rule"
+                                                            onClick={() => {
+                                                                setEditingRule(rule);
+                                                                setShowModal(true);
+                                                            }}
+                                                            className="p-1.5 rounded-md hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors pointer-events-auto cursor-pointer"
+                                                            title="Edit Rule"
                                                         >
-                                                            <PowerOff className="w-4 h-4" />
+                                                            <Edit className="w-4 h-4" />
                                                         </button>
-                                                    ) : (
-                                                        <button
-                                                            onClick={() => enableMutation.mutate(rule.id)}
-                                                            className="p-1.5 rounded-md hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors pointer-events-auto cursor-pointer"
-                                                            title="Enable Rule"
-                                                        >
-                                                            <Power className="w-4 h-4" />
-                                                        </button>
-                                                    )}
-                                                    
-                                                    <div className="w-px h-4 bg-slate-200 dark:bg-slate-700 mx-1"></div>
+                                                        
+                                                        {rule.enabled ? (
+                                                            <button
+                                                                onClick={() => disableMutation.mutate(rule.id)}
+                                                                className="p-1.5 rounded-md hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-400 hover:text-orange-600 dark:hover:text-orange-400 transition-colors pointer-events-auto cursor-pointer"
+                                                                title="Disable Rule"
+                                                            >
+                                                                <PowerOff className="w-4 h-4" />
+                                                            </button>
+                                                        ) : (
+                                                            <button
+                                                                onClick={() => enableMutation.mutate(rule.id)}
+                                                                className="p-1.5 rounded-md hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors pointer-events-auto cursor-pointer"
+                                                                title="Enable Rule"
+                                                            >
+                                                                <Power className="w-4 h-4" />
+                                                            </button>
+                                                        )}
+                                                        
+                                                        <div className="w-px h-4 bg-slate-200 dark:bg-slate-700 mx-1"></div>
 
-                                                    <button
-                                                        onClick={() => {
-                                                            if (confirm('Delete this rule? This action cannot be undone.')) {
-                                                                deleteMutation.mutate(rule.id);
-                                                            }
-                                                        }}
-                                                        className="p-1.5 rounded-md hover:bg-rose-50 dark:hover:bg-rose-500/10 text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 transition-colors pointer-events-auto cursor-pointer"
-                                                        title="Delete Rule"
-                                                    >
-                                                        <Trash2 className="w-4 h-4" />
-                                                    </button>
-                                                </div>
-                                            </td>
+                                                        <button
+                                                            onClick={() => {
+                                                                if (confirm('Delete this rule? This action cannot be undone.')) {
+                                                                    deleteMutation.mutate(rule.id);
+                                                                }
+                                                            }}
+                                                            className="p-1.5 rounded-md hover:bg-rose-50 dark:hover:bg-rose-500/10 text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 transition-colors pointer-events-auto cursor-pointer"
+                                                            title="Delete Rule"
+                                                        >
+                                                            <Trash2 className="w-4 h-4" />
+                                                        </button>
+                                                    </div>
+                                                </td>
+                                            )}
                                         </tr>
                                     ))}
                                 </tbody>

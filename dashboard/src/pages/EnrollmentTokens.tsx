@@ -455,17 +455,19 @@ export default function EnrollmentTokens() {
                                             </td>
                                             <td className="py-4 px-4 text-right">
                                                 <div className="flex items-center justify-end gap-1">
-                                                    <button
-                                                        onClick={() => handleCopyToken(token.token, token.id)}
-                                                        className="p-1.5 text-slate-400 hover:text-cyan-500 hover:bg-cyan-50 dark:hover:bg-cyan-500/10 rounded transition-colors"
-                                                        title="Copy Token"
-                                                    >
-                                                        {copiedId === token.id ? (
-                                                            <CheckCircle className="w-4 h-4 text-emerald-500" />
-                                                        ) : (
-                                                            <Copy className="w-4 h-4" />
-                                                        )}
-                                                    </button>
+                                                    {canManage && (
+                                                        <button
+                                                            onClick={() => handleCopyToken(token.token, token.id)}
+                                                            className="p-1.5 text-slate-400 hover:text-cyan-500 hover:bg-cyan-50 dark:hover:bg-cyan-500/10 rounded transition-colors"
+                                                            title="Copy Token"
+                                                        >
+                                                            {copiedId === token.id ? (
+                                                                <CheckCircle className="w-4 h-4 text-emerald-500" />
+                                                            ) : (
+                                                                <Copy className="w-4 h-4" />
+                                                            )}
+                                                        </button>
+                                                    )}
                                                     {canManage && token.is_active && (
                                                         <button
                                                             onClick={() => handleRevoke(token.id)}

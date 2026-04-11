@@ -5,7 +5,7 @@ import {
     Tooltip, ResponsiveContainer
 } from 'recharts';
 import { Download, TrendingUp, Activity, Shield, AlertTriangle, Target, ChevronDown } from 'lucide-react';
-import { statsApi, type TimelineDataPoint } from '../api/client';
+import { statsApi, authApi, type TimelineDataPoint } from '../api/client';
 
 const COLORS = ['#ef4444', '#f97316', '#eab308', '#3b82f6', '#22c55e'];
 
@@ -80,6 +80,7 @@ function AlertStatusOverview({ data }: { data: Record<string, number> }) {
 }
 
 export default function Stats() {
+    const canExport = authApi.canExportStats();
     const [dateRange, setDateRange] = useState('7d');
     const [customFrom, setCustomFrom] = useState('');
     const [customTo, setCustomTo] = useState('');
@@ -263,25 +264,29 @@ export default function Stats() {
                         </div>
                     )}
 
-                    <div className="relative">
-                        <select
-                            value={exportFormat}
-                            onChange={(e) => setExportFormat(e.target.value)}
-                            className="appearance-none bg-slate-900/60 border border-slate-700 text-slate-200 rounded-lg pl-4 pr-10 py-2 hover:bg-slate-800 focus:ring-2 focus:ring-cyan-500/50 focus:border-cyan-500 focus:outline-none transition-all cursor-pointer font-medium text-sm w-28"
-                        >
-                            <option value="csv">CSV</option>
-                            <option value="pdf">PDF</option>
-                            <option value="json">JSON</option>
-                        </select>
-                        <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3 text-slate-400">
-                            <ChevronDown className="w-4 h-4" />
-                        </div>
-                    </div>
+                    {canExport && (
+                        <>
+                            <div className="relative">
+                                <select
+                                    value={exportFormat}
+                                    onChange={(e) => setExportFormat(e.target.value)}
+                                    className="appearance-none bg-slate-900/60 border border-slate-700 text-slate-200 rounded-lg pl-4 pr-10 py-2 hover:bg-slate-800 focus:ring-2 focus:ring-cyan-500/50 focus:border-cyan-500 focus:outline-none transition-all cursor-pointer font-medium text-sm w-28"
+                                >
+                                    <option value="csv">CSV</option>
+                                    <option value="pdf">PDF</option>
+                                    <option value="json">JSON</option>
+                                </select>
+                                <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3 text-slate-400">
+                                    <ChevronDown className="w-4 h-4" />
+                                </div>
+                            </div>
 
-                    <button onClick={handleExport} className="bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white shadow-md hover:shadow-cyan-500/25 transition-all rounded-lg px-5 py-2 text-sm font-semibold flex items-center gap-2">
-                        <Download className="w-4 h-4" />
-                        Export
-                    </button>
+                            <button onClick={handleExport} className="bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white shadow-md hover:shadow-cyan-500/25 transition-all rounded-lg px-5 py-2 text-sm font-semibold flex items-center gap-2">
+                                <Download className="w-4 h-4" />
+                                Export
+                            </button>
+                        </>
+                    )}
                 </div>
             </div>
 

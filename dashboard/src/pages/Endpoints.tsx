@@ -646,6 +646,7 @@ function getEffectiveStatus(agent: Agent): Agent['status'] {
 function InlineAgentDetail({ agent }: { agent: Agent }) {
     const queryClient = useQueryClient();
     const { showToast } = useToast();
+    const canPushPolicy = authApi.canPushPolicy();
     const [policyJson, setPolicyJson] = useState(JSON.stringify({
         exclude_processes: ['svchost.exe'],
         exclude_event_ids: [4, 7, 15, 22],
@@ -920,29 +921,31 @@ function InlineAgentDetail({ agent }: { agent: Agent }) {
                         </div>
 
                         {/* Editable Push Form */}
-                        <div className="pt-2 border-t border-gray-100 dark:border-gray-700">
-                            <span className="text-[10px] text-gray-400 uppercase tracking-wider">Push New Policy via C2</span>
-                            <textarea
-                                className="mt-1.5 w-full px-2.5 py-2 text-[11px] font-mono bg-gray-50 dark:bg-gray-900/60 border border-gray-200 dark:border-gray-600 rounded-lg resize-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500 transition-all"
-                                rows={6}
-                                value={policyJson}
-                                onChange={(e) => { setPolicyJson(e.target.value); setPolicyError(''); }}
-                                spellCheck={false}
-                            />
-                            {policyError && (
-                                <p className="text-[10px] text-red-500 mt-1 flex items-center gap-1">
-                                    <AlertTriangle className="w-3 h-3" /> {policyError}
-                                </p>
-                            )}
-                            <button
-                                onClick={handlePolicySubmit}
-                                disabled={policyMutation.isPending}
-                                className="mt-2 w-full text-xs py-2 bg-primary-600 hover:bg-primary-700 text-white rounded-lg flex items-center justify-center gap-2 transition-all disabled:opacity-50 shadow-sm hover:shadow-md"
-                            >
-                                {policyMutation.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Shield className="w-3.5 h-3.5" />}
-                                Push Policy to Agent
-                            </button>
-                        </div>
+                        {canPushPolicy && (
+                            <div className="pt-2 border-t border-gray-100 dark:border-gray-700">
+                                <span className="text-[10px] text-gray-400 uppercase tracking-wider">Push New Policy via C2</span>
+                                <textarea
+                                    className="mt-1.5 w-full px-2.5 py-2 text-[11px] font-mono bg-gray-50 dark:bg-gray-900/60 border border-gray-200 dark:border-gray-600 rounded-lg resize-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500 transition-all"
+                                    rows={6}
+                                    value={policyJson}
+                                    onChange={(e) => { setPolicyJson(e.target.value); setPolicyError(''); }}
+                                    spellCheck={false}
+                                />
+                                {policyError && (
+                                    <p className="text-[10px] text-red-500 mt-1 flex items-center gap-1">
+                                        <AlertTriangle className="w-3 h-3" /> {policyError}
+                                    </p>
+                                )}
+                                <button
+                                    onClick={handlePolicySubmit}
+                                    disabled={policyMutation.isPending}
+                                    className="mt-2 w-full text-xs py-2 bg-primary-600 hover:bg-primary-700 text-white rounded-lg flex items-center justify-center gap-2 transition-all disabled:opacity-50 shadow-sm hover:shadow-md"
+                                >
+                                    {policyMutation.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Shield className="w-3.5 h-3.5" />}
+                                    Push Policy to Agent
+                                </button>
+                            </div>
+                        )}
                     </div>
                 </div>
             </div>

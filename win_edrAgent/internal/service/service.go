@@ -293,13 +293,32 @@ func (s *edrService) Execute(args []string, r <-chan svc.ChangeRequest, changes 
 			}
 		}
 
-		// 4b. Enrollment — this is where TLS handshakes happen.
-		// On failure we log the error and signal the control loop to stop cleanly.
-		if err := ensureEnrolled(s.cfg, s.logger, s.configPath); err != nil {
-			s.logger.Errorf("[SCM] Enrollment failed — service will stop: %v", err)
-			agentErrCh <- err
-			cancel()
-			return
+		// 4b. Enrollment — TLS to C2. Transient errors (server down, refused, etc.)
+		// are retried so the SCM stays Running; only fatal errors stop the service.
+		const enrollRetryInterval = 30 * time.Second
+		for {
+			if ctx.Err() != nil {
+				s.logger.Infof("[SCM] Enrollment cancelled: %v", ctx.Err())
+				agentErrCh <- ctx.Err()
+				return
+			}
+			err := ensureEnrolled(s.cfg, s.logger, s.configPath)
+			if err == nil {
+				break
+			}
+			if enrollment.IsFatalEnrollmentError(err) {
+				s.logger.Errorf("[SCM] Enrollment failed (fatal) — service will stop: %v", err)
+				agentErrCh <- err
+				cancel()
+				return
+			}
+			s.logger.Warnf("[SCM] Enrollment will retry in %s: %v", enrollRetryInterval, err)
+			select {
+			case <-ctx.Done():
+				agentErrCh <- ctx.Err()
+				return
+			case <-time.After(enrollRetryInterval):
+			}
 		}
 
 		// 4c. Start the agent collectors and gRPC pipeline.

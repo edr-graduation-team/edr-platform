@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"google.golang.org/grpc"
@@ -23,6 +24,25 @@ import (
 
 const registerTimeout = 30 * time.Second
 
+// ErrBootstrapTokenRequired is returned when first-time enrollment needs a token but none is configured.
+var ErrBootstrapTokenRequired = errors.New("bootstrap token is required for enrollment")
+
+// IsFatalEnrollmentError reports errors that retrying will not fix (bad token, rejected, bad CSR, missing CA PEM).
+func IsFatalEnrollmentError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, ErrBootstrapTokenRequired) {
+		return true
+	}
+	s := err.Error()
+	return strings.Contains(s, "enrollment rejected:") ||
+		strings.Contains(s, "generate CSR:") ||
+		strings.Contains(s, "failed to parse CA certificate") ||
+		strings.Contains(s, "server approved but did not return certificate") ||
+		strings.Contains(s, "save certificate:")
+}
+
 // EnsureEnrolled ensures the agent has a valid client certificate. If cert and key
 // already exist at the configured paths, it returns nil. Otherwise it performs
 // registration with the Connection Manager using the bootstrap token and CSR,
@@ -36,7 +56,22 @@ func EnsureEnrolled(cfg *config.Config, logger *logging.Logger, configFilePath s
 		return errors.New("logger is required")
 	}
 
-	// Already enrolled if both cert and key exist
+	// Already enrolled if certificates live in Registry (zero-disk mode).
+	if len(cfg.Certs.CertPEM) > 0 && len(cfg.Certs.KeyPEM) > 0 {
+		if certID := extractCertCNFromPEM(cfg.Certs.CertPEM); certID != "" && certID != cfg.Agent.ID {
+			logger.Infof("Syncing Agent.ID from certificate CN: %s → %s", cfg.Agent.ID, certID)
+			cfg.Agent.ID = certID
+			if configFilePath != "" {
+				if err := cfg.SaveToRegistry(); err != nil {
+					logger.Warnf("Failed to save config to Registry after CN sync: %v", err)
+				}
+			}
+		}
+		logger.Info("Agent already enrolled (certificates in Registry)")
+		return nil
+	}
+
+	// Already enrolled if both cert and key exist on disk
 	if _, err := os.Stat(cfg.Certs.CertPath); err == nil {
 		if _, err := os.Stat(cfg.Certs.KeyPath); err == nil {
 			// Sync cfg.Agent.ID from the certificate CN.
@@ -60,7 +95,7 @@ func EnsureEnrolled(cfg *config.Config, logger *logging.Logger, configFilePath s
 	cm := grpcclient.NewCertManagerFromConfig(cfg, logger)
 
 	if cfg.Certs.BootstrapToken == "" {
-		return errors.New("bootstrap token is required for enrollment; set certs.bootstrap_token in config")
+		return fmt.Errorf("%w; set certs.bootstrap_token in config", ErrBootstrapTokenRequired)
 	}
 
 	csrPEM, err := cm.GenerateCSR(cfg.Agent.ID, cfg.Agent.Hostname)
@@ -76,8 +111,13 @@ func EnsureEnrolled(cfg *config.Config, logger *logging.Logger, configFilePath s
 		dialOpt = grpc.WithTransportCredentials(insecure.NewCredentials())
 		logger.Warn("Enrollment using PLAINTEXT gRPC (insecure mode)")
 	} else {
-		caCert, err := os.ReadFile(cfg.Certs.CAPath)
-		if err != nil {
+		var caCert []byte
+		if b, err := os.ReadFile(cfg.Certs.CAPath); err == nil {
+			caCert = b
+		} else if len(cfg.Certs.CACertPEM) > 0 {
+			caCert = cfg.Certs.CACertPEM
+			logger.Info("Enrollment TLS: using CA certificate from Registry (embedded CA)")
+		} else {
 			return fmt.Errorf("read CA certificate for enrollment TLS: %w", err)
 		}
 		caPool := x509.NewCertPool()
@@ -130,7 +170,7 @@ func EnsureEnrolled(cfg *config.Config, logger *logging.Logger, configFilePath s
 		if msg == "" {
 			msg = "registration not approved"
 		}
-		return fmt.Errorf("enrollment rejected: %s", msg)
+		return fmt.Errorf("enrollment rejected: %s", msg) // fatal — IsFatalEnrollmentError matches substring
 	}
 
 	cert := resp.GetCertificate()
@@ -191,7 +231,11 @@ func extractCertCN(certPath string, logger *logging.Logger) string {
 	if err != nil {
 		return ""
 	}
-	block, _ := pem.Decode(data)
+	return extractCertCNFromPEM(data)
+}
+
+func extractCertCNFromPEM(pemData []byte) string {
+	block, _ := pem.Decode(pemData)
 	if block == nil {
 		return ""
 	}

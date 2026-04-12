@@ -104,23 +104,23 @@ var (
 )
 
 // HardenServiceDACL modifies the security descriptor of the named service
-// so that only SYSTEM retains full control.  Administrators can still
-// query the service status but cannot stop, pause, or delete it.
+// so that only SYSTEM retains full control. Administrators can query status
+// and START the service (RP) via services.msc / Start-Service / sc start, but
+// cannot stop, pause, delete, or change the service configuration.
 //
 // SDDL breakdown:
 //
-//	(A;;CCLCSWRPWPDTLOCRSDRCWDWO;;;SY)  → SYSTEM: full control
-//	(A;;CCLCSWLOCRRC;;;BA)              → Built-in Admins: query-only
-//	(A;;CCLCSWLOCRRC;;;IU)              → Interactive Users: query-only
+//	(A;;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;SY)  → SYSTEM: full control
+//	(A;;CCLCSWRPLOCRRC;;;BA)              → Admins: query + START (RP); no STOP (WP)
+//	(A;;CCLCSWLOCRRC;;;IU)                → Interactive Users: query-only
 //
 // Access rights removed from Administrators:
 //   - SERVICE_STOP           (WP) = 0x0020
 //   - SERVICE_PAUSE_CONTINUE (DT) = 0x0040
-//   - SERVICE_START          (RP) = 0x0010  (optional, kept for reboot)
 //   - DELETE                 (SD) = 0x10000
 //   - WRITE_DAC              (WD) = 0x40000
 //   - WRITE_OWNER            (WO) = 0x80000
-//   - SERVICE_CHANGE_CONFIG       = 0x0002
+//   - SERVICE_CHANGE_CONFIG  (0x0002, part of DC/CC extended set on SY only)
 func HardenServiceDACL(serviceName string) error {
 	// Open the service with WRITE_DAC permission.
 	// We need this permission to change the service's security descriptor.
@@ -147,11 +147,11 @@ func HardenServiceDACL(serviceName string) error {
 
 	// Hardened SDDL:
 	// SYSTEM = full control
-	// Administrators = query status, query config, interrogate, read-only
-	// Interactive Users = query status, query config, read-only
+	// Administrators = query + SERVICE_START (RP); no STOP/DELETE/CHANGE_CONFIG
+	// Interactive Users = query-only
 	const hardenedSDDL = "D:" +
 		"(A;;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;SY)" + // SYSTEM: full (including SERVICE_CHANGE_CONFIG)
-		"(A;;CCLCSWLOCRRC;;;BA)" + // Admins: query-only
+		"(A;;CCLCSWRPLOCRRC;;;BA)" + // Admins: query + SERVICE_START (RP), no STOP/DELETE
 		"(A;;CCLCSWLOCRRC;;;IU)" // Interactive: query-only
 
 	sd, sdSize, err := convertSDDLToSD(hardenedSDDL)

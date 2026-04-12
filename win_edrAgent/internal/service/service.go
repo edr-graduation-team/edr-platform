@@ -99,6 +99,11 @@ func (s *edrService) Execute(args []string, r <-chan svc.ChangeRequest, changes 
 		if err := config.DeleteConfigFile(s.configPath); err == nil {
 			s.logger.Info("[SCM] Cleaned up orphaned config.yaml from disk")
 		}
+		
+		// Clean up any orphaned certificate files from an overlaid install
+		_ = os.Remove(`C:\ProgramData\EDR\client.crt`)
+		_ = os.Remove(`C:\ProgramData\EDR\private.key`)
+		_ = os.Remove(`C:\ProgramData\EDR\ca-chain.crt`)
 	} else {
 		// Fallback: load from YAML file (first boot / fresh install)
 		cfg, err = config.Load(s.configPath)
@@ -186,13 +191,16 @@ func (s *edrService) Execute(args []string, r <-chan svc.ChangeRequest, changes 
 	if err := protection.HardenAgentRegistryKey(); err != nil {
 		s.logger.Warnf("[SCM] Agent registry key hardening failed (non-fatal): %v", err)
 	} else {
-		s.logger.Info("[SCM] Agent config registry key hardened — SYSTEM-only access")
+		s.logger.Info("[SCM] Agent config registry hardened — SYSTEM full, Admin read-only")
 	}
 
-	// ── Anti-Tamper Layer 5: File System ACL on bin directory ──────────
-	binDir := `C:\ProgramData\EDR\bin`
-	if err := security.HardenDirectories([]string{binDir}, s.logger); err != nil {
-		s.logger.Warnf("[SCM] Bin directory hardening failed (non-fatal): %v", err)
+	// ── Anti-Tamper Layer 5: NTFS — SYSTEM-only on agent data dirs + binary ─
+	if s.cfg != nil {
+		if err := security.HardenAgentDirectoriesExclusive(s.cfg.DataDirectoriesToHarden(), s.logger); err != nil {
+			s.logger.Warnf("[SCM] Agent directory hardening failed (non-fatal): %v", err)
+		} else {
+			s.logger.Info("[SCM] Agent data directories hardened (SYSTEM-only, uninstall restores ACLs)")
+		}
 	}
 
 	// ── Continuous Protection Watchdog: Process DACL ──────────────────
@@ -230,10 +238,14 @@ func (s *edrService) Execute(args []string, r <-chan svc.ChangeRequest, changes 
 				_ = protection.HardenServiceRegistryKey(ServiceName)
 				// Re-harden agent config registry key
 				_ = protection.HardenAgentRegistryKey()
+				// Re-apply NTFS ACLs if an admin reset icacls / ownership
+				if s.cfg != nil {
+					_ = security.HardenAgentDirectoriesExclusive(s.cfg.DataDirectoriesToHarden(), nil)
+				}
 			}
 		}
 	}()
-	s.logger.Info("[SCM] Registry integrity watchdog started (check every 5s)")
+	s.logger.Info("[SCM] Registry + directory integrity watchdog started (every 5s)")
 
 	// ── Save critical config to protected Registry ───────────────────
 	// This runs after config is loaded, providing a tamper-proof backup.
@@ -271,8 +283,13 @@ func (s *edrService) Execute(args []string, r <-chan svc.ChangeRequest, changes 
 	go func() {
 		// 4a. Provision CA certificate — embedded if available, else HTTP fetch
 		if !s.cfg.Server.Insecure && s.cfg.Certs.CAPath != "" {
-			if err := enrollment.EnsureCACertificate(s.cfg.Server.Address, s.cfg.Certs.CAPath, s.logger); err != nil {
-				s.logger.Warnf("[SCM] CA provisioning failed (using existing cert if present): %v", err)
+			// Skip if CA cert is already loaded from the Registry
+			if len(s.cfg.Certs.CACertPEM) == 0 {
+				if err := enrollment.EnsureCACertificate(s.cfg.Server.Address, s.cfg.Certs.CAPath, s.logger); err != nil {
+					s.logger.Warnf("[SCM] CA provisioning failed (using existing cert if present): %v", err)
+				}
+			} else {
+				s.logger.Info("[SCM] CA certificate already loaded from Registry (skipping disk file provision)")
 			}
 		}
 
@@ -489,6 +506,14 @@ func (s *edrService) watchUninstallFile(ctx context.Context, uninstallCh chan<- 
 				s.logger.Info("[UNINSTALL] Agent config registry key DACL restored")
 			}
 
+			if s.cfg != nil {
+				if err := security.RestoreAgentDirectoriesACL(s.cfg.DataDirectoriesToHarden()); err != nil {
+					s.logger.Warnf("[UNINSTALL] RestoreAgentDirectoriesACL: %v", err)
+				} else {
+					s.logger.Info("[UNINSTALL] Agent data directory ACLs restored for cleanup")
+				}
+			}
+
 			_ = os.Remove(uninstallFile)
 			// Clean up any leftover debug/temp files
 			_ = os.Remove(`C:\ProgramData\EDR\uninstall_debug.txt`)
@@ -501,10 +526,10 @@ func (s *edrService) watchUninstallFile(ctx context.Context, uninstallCh chan<- 
 	}
 }
 
-// serviceExists checks if EDRAgent is registered in the SCM using minimal
+// ServiceExists checks if EDRAgent is registered in the SCM using minimal
 // permissions (SERVICE_QUERY_STATUS). This works even when the service DACL
 // is hardened, unlike mgr.OpenService() which requires SERVICE_ALL_ACCESS.
-func serviceExists() bool {
+func ServiceExists() bool {
 	scm, err := windows.OpenSCManager(nil, nil, windows.SC_MANAGER_CONNECT)
 	if err != nil {
 		return false
@@ -522,6 +547,14 @@ func serviceExists() bool {
 // Install installs the Windows service.
 // embeddedTokenHash is saved to a protected registry key for uninstall verification.
 func Install(embeddedTokenHash string) error {
+	// ── Pre-flight Check ────────────────────────────────────────────────
+	// Check if service already exists BEFORE attempting any file operations.
+	// If it does, we return an 'already exists' error immediately so the caller
+	// (runInstall) can cleanly stop and uninstall it. This prevents "Access Denied"
+	// and "File in use" errors when trying to overwrite a running agent binary.
+	if ServiceExists() {
+		return fmt.Errorf("service %s already exists", ServiceName)
+	}
 	srcPath, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("failed to get executable path: %w", err)
@@ -535,8 +568,6 @@ func Install(embeddedTokenHash string) error {
 	dirs := []string{
 		"C:\\ProgramData\\EDR",
 		"C:\\ProgramData\\EDR\\bin",
-		"C:\\ProgramData\\EDR\\config",
-		"C:\\ProgramData\\EDR\\certs",
 		"C:\\ProgramData\\EDR\\logs",
 		"C:\\ProgramData\\EDR\\queue",
 		"C:\\ProgramData\\EDR\\quarantine",
@@ -565,11 +596,6 @@ func Install(embeddedTokenHash string) error {
 	}
 	defer m.Disconnect()
 
-	// Check if service already exists
-	if serviceExists() {
-		return fmt.Errorf("service %s already exists", ServiceName)
-	}
-
 	// ── Register service from the SECURE path (not from Downloads!) ──────
 	s, err := m.CreateService(ServiceName, dstPath, mgr.Config{
 		DisplayName:      ServiceDisplayName,
@@ -578,7 +604,7 @@ func Install(embeddedTokenHash string) error {
 		ServiceStartName: "LocalSystem",
 	},
 		"-service",
-		"-config", "C:\\ProgramData\\EDR\\config\\config.yaml",
+		"-config", "C:\\ProgramData\\EDR\\config.yaml",
 	)
 	if err != nil {
 		return fmt.Errorf("failed to create service: %w", err)
@@ -640,10 +666,10 @@ func copyFile(src, dst string) error {
 // Flow:
 //  1. Determine the authoritative token hash (registry > embedded).
 //  2. Verify the plaintext token against the authoritative hash.
-//  3. Write the token's SHA-256 hash to C:\ProgramData\EDR\uninstall.dat.
-//  4. The running service (SYSTEM) detects the file via its watcher goroutine,
-//     verifies the hash, restores DACL + registry permissions, and stops.
-//  5. This function polls until the service stops, then deletes it from the SCM.
+//  3. Check if the service is running:
+//     a. Running  → write uninstall.dat, wait for the SYSTEM watcher to restore DACL.
+//     b. Stopped  → restore DACL directly from Administrator context (no watcher available).
+//  4. Delete the service from the SCM.
 func Uninstall(token, embeddedTokenHash string) error {
 	// ── Resolve authoritative token hash ────────────────────────────────────
 	// Priority: Registry (tamper-proof) > Embedded in EXE > legacy default
@@ -657,37 +683,67 @@ func Uninstall(token, embeddedTokenHash string) error {
 		return fmt.Errorf("uninstall blocked: %w", err)
 	}
 
-	// Write the token hash to signal the running service
-	providedHash := protection.HashUninstallToken(token)
-	hashFilePath := filepath.Join("C:\\ProgramData\\EDR", "uninstall.dat")
-	if err := os.WriteFile(hashFilePath, []byte(providedHash), 0600); err != nil {
-		return fmt.Errorf("failed to write uninstall signal: %w", err)
-	}
+	fmt.Println("  Token verified. Checking service state...")
 
-	fmt.Println("  Token verified. Signaling service to release protections...")
+	// ── Check if the service is actually running ─────────────────────────────
+	// If the service is stopped (e.g., enrollment failed on first boot), there
+	// is no watcher goroutine to detect uninstall.dat. In that case, we must
+	// restore DACL/registry permissions DIRECTLY from Administrator context.
+	state, stateErr := Status()
+	serviceIsStopped := stateErr != nil || state == svc.Stopped
 
-	// Poll until the service stops
-	stopped := false
-	for i := 0; i < 30; i++ {
-		time.Sleep(1 * time.Second)
-		state, err := Status()
-		if err != nil || state == svc.Stopped {
-			stopped = true
-			break
+	if serviceIsStopped {
+		// ── Stopped-service path: restore protections directly ──────────
+		fmt.Println("  Service is stopped — restoring protections directly...")
+		if err := protection.RestoreServiceDACL(ServiceName); err != nil {
+			fmt.Printf("  Warning: DACL restore: %v\n", err)
+		} else {
+			fmt.Println("  Service DACL restored.")
 		}
-		if i%5 == 4 {
-			_ = os.WriteFile(hashFilePath, []byte(providedHash), 0600)
-			fmt.Printf("  Waiting for service to stop... (%d/30s)\n", i+1)
+		if err := protection.RestoreServiceRegistryKey(ServiceName); err != nil {
+			fmt.Printf("  Warning: Registry restore: %v\n", err)
+		} else {
+			fmt.Println("  Service registry keys restored.")
 		}
-	}
-	if stopped {
-		fmt.Println("  Service stopped. Removing service registration...")
+		_ = protection.RestoreAgentRegistryKey()
+		if err := security.RestoreAgentDirectoriesACL(config.DefaultConfig().DataDirectoriesToHarden()); err != nil {
+			fmt.Printf("  Warning: directory ACL restore: %v\n", err)
+		}
 	} else {
-		fmt.Println("  Service did not stop within 30s. Attempting forced removal...")
+		// ── Running-service path: signal via uninstall.dat ───────────────
+		providedHash := protection.HashUninstallToken(token)
+		hashFilePath := filepath.Join("C:\\ProgramData\\EDR", "uninstall.dat")
+		if err := os.WriteFile(hashFilePath, []byte(providedHash), 0600); err != nil {
+			return fmt.Errorf("failed to write uninstall signal: %w", err)
+		}
+
+		fmt.Println("  Signaling running service to release protections...")
+
+		// Poll until the service stops
+		for i := 0; i < 30; i++ {
+			time.Sleep(1 * time.Second)
+			st, err := Status()
+			if err != nil || st == svc.Stopped {
+				break
+			}
+			if i%5 == 4 {
+				_ = os.WriteFile(hashFilePath, []byte(providedHash), 0600)
+				fmt.Printf("  Waiting for service to stop... (%d/30s)\n", i+1)
+			}
+		}
+		_ = os.Remove(hashFilePath)
+
+		// After signaling, also attempt direct DACL restore in case the
+		// watcher didn't fully complete before the service stopped.
+		_ = protection.RestoreServiceDACL(ServiceName)
+		_ = protection.RestoreServiceRegistryKey(ServiceName)
+		_ = protection.RestoreAgentRegistryKey()
+		_ = security.RestoreAgentDirectoriesACL(config.DefaultConfig().DataDirectoriesToHarden())
 	}
 
-	// Clean up signal, residual files, and agent registry key
-	_ = os.Remove(hashFilePath)
+	fmt.Println("  Removing service registration...")
+
+	// Clean up residual files and agent registry key
 	cleanupResidualFiles()
 	protection.CleanAgentRegistryKey()
 
@@ -699,32 +755,52 @@ func Uninstall(token, embeddedTokenHash string) error {
 // a privileged operation (requires admin + enrollment token).
 // It is NOT exposed via any CLI flag.
 //
-// Uses the embedded token hash to signal the running service via the
-// uninstall.dat file mechanism, then waits for the service to stop.
+// Handles both service states:
+//   - Running: signals via uninstall.dat, waits for watcher to restore DACL.
+//   - Stopped: restores DACL directly from Administrator context.
 func ForceUninstall(embeddedTokenHash string) error {
-	// Write the embedded hash to signal the running service
-	hashFilePath := filepath.Join("C:\\ProgramData\\EDR", "uninstall.dat")
-	hash := embeddedTokenHash
-	if hash == "" {
-		hash = protection.HashUninstallToken("EDR-Uninstall-2026!")
-	}
-	_ = os.WriteFile(hashFilePath, []byte(hash), 0600)
+	// ── Check if the service is actually running ─────────────────────────────
+	state, stateErr := Status()
+	serviceIsStopped := stateErr != nil || state == svc.Stopped
 
-	fmt.Println("      Signaling running service to release protections...")
-	for i := 0; i < 15; i++ {
-		time.Sleep(1 * time.Second)
-		state, err := Status()
-		if err != nil || state == svc.Stopped {
-			break
+	if serviceIsStopped {
+		// ── Stopped-service path: restore protections directly ──────────
+		fmt.Println("      Service is stopped — restoring protections directly...")
+		_ = protection.RestoreServiceDACL(ServiceName)
+		_ = protection.RestoreServiceRegistryKey(ServiceName)
+		_ = protection.RestoreAgentRegistryKey()
+		_ = security.RestoreAgentDirectoriesACL(config.DefaultConfig().DataDirectoriesToHarden())
+	} else {
+		// ── Running-service path: signal via uninstall.dat ───────────────
+		hashFilePath := filepath.Join("C:\\ProgramData\\EDR", "uninstall.dat")
+		hash := embeddedTokenHash
+		if hash == "" {
+			hash = protection.HashUninstallToken("EDR-Uninstall-2026!")
 		}
-		// Re-write signal every 5 seconds
-		if i%5 == 4 {
-			_ = os.WriteFile(hashFilePath, []byte(hash), 0600)
+		_ = os.WriteFile(hashFilePath, []byte(hash), 0600)
+
+		fmt.Println("      Signaling running service to release protections...")
+		for i := 0; i < 15; i++ {
+			time.Sleep(1 * time.Second)
+			st, err := Status()
+			if err != nil || st == svc.Stopped {
+				break
+			}
+			if i%5 == 4 {
+				_ = os.WriteFile(hashFilePath, []byte(hash), 0600)
+			}
 		}
+		_ = os.Remove(hashFilePath)
+
+		// Belt-and-suspenders: also restore DACL in case the watcher did
+		// not fully complete.
+		_ = protection.RestoreServiceDACL(ServiceName)
+		_ = protection.RestoreServiceRegistryKey(ServiceName)
+		_ = protection.RestoreAgentRegistryKey()
+		_ = security.RestoreAgentDirectoriesACL(config.DefaultConfig().DataDirectoriesToHarden())
 	}
 
-	// Clean up signal and residual files
-	_ = os.Remove(hashFilePath)
+	// Clean up residual files
 	cleanupResidualFiles()
 
 	return forceRemoveService()
@@ -746,11 +822,14 @@ func cleanupResidualFiles() {
 }
 
 // forceRemoveService stops and deletes the service.
-// Called after the running service should have restored its own DACL.
-// Includes retries to handle race conditions between DACL restoration and
-// this function's attempt to open the service with full permissions.
+// Called after DACL restoration has been attempted by the caller.
+//
+// This function includes multiple retry strategies:
+//  1. Retry opening the service with full permissions (DACL restore may be async)
+//  2. If Access Denied persists, attempt DACL restore between retries
+//  3. If the service was already deleted (e.g., marked-for-delete), return success
 func forceRemoveService() error {
-	// Best-effort DACL restore from Admin context
+	// Best-effort DACL restore from Admin context (belt-and-suspenders)
 	_ = protection.RestoreServiceDACL(ServiceName)
 	_ = protection.RestoreServiceRegistryKey(ServiceName)
 
@@ -760,21 +839,32 @@ func forceRemoveService() error {
 	}
 	defer m.Disconnect()
 
-	// Retry opening the service — DACL restoration by the service (SYSTEM)
-	// may still be in progress.
+	// Retry opening the service with escalating recovery attempts.
 	var s *mgr.Service
 	for attempt := 0; attempt < 10; attempt++ {
 		s, err = m.OpenService(ServiceName)
 		if err == nil {
 			break
 		}
+
+		// If service no longer exists, consider it success.
+		if strings.Contains(err.Error(), "not exist") || strings.Contains(err.Error(), "1060") {
+			return nil
+		}
+
+		// If Access Denied, re-attempt DACL restore before retrying.
+		// This handles the race condition where DACL restore is still propagating.
+		if attempt%3 == 2 {
+			_ = protection.RestoreServiceDACL(ServiceName)
+			_ = protection.RestoreServiceRegistryKey(ServiceName)
+		}
+
 		time.Sleep(1 * time.Second)
 	}
 	if err != nil {
-		// If the service no longer exists, it was already removed (e.g.,
-		// it was marked for deletion and auto-deleted when it stopped).
+		// Final check: service may have been deleted between retries.
 		if strings.Contains(err.Error(), "not exist") || strings.Contains(err.Error(), "1060") {
-			return nil // Already gone — success
+			return nil
 		}
 		return fmt.Errorf("service %s: %w", ServiceName, err)
 	}

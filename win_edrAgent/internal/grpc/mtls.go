@@ -35,7 +35,7 @@ type CertManager struct {
 // paths are derived as client.crt, private.key, ca-chain.crt under certDir.
 func NewCertManager(certDir string, logger *logging.Logger) *CertManager {
 	if certDir == "" {
-		certDir = "C:\\ProgramData\\EDR\\certs"
+		certDir = "C:\\ProgramData\\EDR"
 	}
 
 	return &CertManager{
@@ -44,7 +44,7 @@ func NewCertManager(certDir string, logger *logging.Logger) *CertManager {
 		certPath:  filepath.Join(certDir, "client.crt"),
 		keyPath:   filepath.Join(certDir, "private.key"),
 		caPath:    filepath.Join(certDir, "ca-chain.crt"),
-		tokenPath: filepath.Join(certDir, "..", "bootstrap.token"),
+		tokenPath: filepath.Join(certDir, "bootstrap.token"),
 	}
 }
 
@@ -52,7 +52,7 @@ func NewCertManager(certDir string, logger *logging.Logger) *CertManager {
 // certPath, keyPath, and caPath are set from cfg.Certs; certDir is the directory
 // of the cert file (used by EnsureDirectories). GenerateCSR and SaveCertificate use only these internal paths.
 func NewCertManagerFromConfig(cfg *config.Config, logger *logging.Logger) *CertManager {
-	defaultDir := "C:\\ProgramData\\EDR\\certs"
+	defaultDir := "C:\\ProgramData\\EDR"
 	certPath := filepath.Join(defaultDir, "client.crt")
 	keyPath := filepath.Join(defaultDir, "private.key")
 	caPath := filepath.Join(defaultDir, "ca-chain.crt")
@@ -70,7 +70,7 @@ func NewCertManagerFromConfig(cfg *config.Config, logger *logging.Logger) *CertM
 	}
 
 	certDir := filepath.Dir(certPath)
-	tokenPath := filepath.Join(certDir, "..", "bootstrap.token")
+	tokenPath := filepath.Join(certDir, "bootstrap.token")
 
 	return &CertManager{
 		logger:    logger,

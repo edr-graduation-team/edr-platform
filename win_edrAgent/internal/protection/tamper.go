@@ -177,10 +177,19 @@ func HardenServiceDACL(serviceName string) error {
 // Windows default, allowing Administrators to stop and delete the service.
 // This must be called BEFORE stopping the service during a legitimate uninstall.
 //
-// Since the hardened DACL only gives WRITE_DAC to SYSTEM, this function
-// MUST be called from a SYSTEM-level context (e.g., PsExec -s) or from
-// within the service process itself.
+// Works from BOTH contexts:
+//   - SYSTEM: opens with WRITE_DAC directly (fast path)
+//   - Administrator: uses SeTakeOwnershipPrivilege to take ownership first,
+//     then reopens with WRITE_DAC (same pattern as restoreRegistryKeyByPath).
+//     This solves the chicken-and-egg problem where the hardened DACL only
+//     grants WRITE_DAC to SYSTEM, but the service is already stopped so the
+//     SYSTEM-level watcher cannot run.
 func RestoreServiceDACL(serviceName string) error {
+	// Enable privileges needed for Administrator context.
+	// Harmless for SYSTEM which already has them implicitly.
+	_ = enableTakeOwnershipPrivilege()
+	_ = enablePrivilege("SeRestorePrivilege")
+
 	scm, err := windows.OpenSCManager(nil, nil, windows.SC_MANAGER_CONNECT)
 	if err != nil {
 		return fmt.Errorf("tamper: OpenSCManager: %w", err)
@@ -192,12 +201,41 @@ func RestoreServiceDACL(serviceName string) error {
 		return err
 	}
 
-	// WRITE_DAC
-	svc, err := windows.OpenService(scm, svcNamePtr, 0x40000|0x20000)
+	// Fast path: try WRITE_DAC directly (succeeds from SYSTEM context).
+	svc, err := windows.OpenService(scm, svcNamePtr, 0x40000|0x20000) // WRITE_DAC | READ_CONTROL
 	if err != nil {
-		// If we can't open with WRITE_DAC, the caller isn't SYSTEM.
-		// This is expected for non-SYSTEM callers.
-		return fmt.Errorf("tamper: cannot restore DACL (are you running as SYSTEM?): %w", err)
+		// WRITE_DAC denied — we are Administrator, not SYSTEM.
+		// Use SeTakeOwnershipPrivilege to take ownership first.
+
+		// Step 1: Open with WRITE_OWNER (SeTakeOwnershipPrivilege grants this
+		// regardless of the current DACL).
+		svc, err = windows.OpenService(scm, svcNamePtr, 0x80000) // WRITE_OWNER
+		if err != nil {
+			return fmt.Errorf("tamper: cannot open service for ownership takeover: %w", err)
+		}
+
+		// Step 2: Set owner to Built-in Administrators (BA).
+		// Once we own the service, we implicitly gain READ_CONTROL and WRITE_DAC.
+		ownerSD, _, ownerErr := convertSDDLToSD("O:BA")
+		if ownerErr != nil {
+			windows.CloseServiceHandle(svc)
+			return fmt.Errorf("tamper: convert owner SDDL: %w", ownerErr)
+		}
+		ret, _, callErr := procSetServiceObjectSecurity.Call(
+			uintptr(svc),
+			uintptr(1), // OWNER_SECURITY_INFORMATION
+			uintptr(ownerSD),
+		)
+		windows.CloseServiceHandle(svc)
+		if ret == 0 {
+			return fmt.Errorf("tamper: set service owner to BA: %w", callErr)
+		}
+
+		// Step 3: Reopen with WRITE_DAC (now allowed because we are the owner).
+		svc, err = windows.OpenService(scm, svcNamePtr, 0x40000|0x20000)
+		if err != nil {
+			return fmt.Errorf("tamper: reopen service for DACL restore after ownership: %w", err)
+		}
 	}
 	defer windows.CloseServiceHandle(svc)
 
@@ -233,7 +271,7 @@ func serviceRegistryPaths(serviceName string) []string {
 		`SYSTEM\CurrentControlSet\Services\` + serviceName,
 	}
 	// Enumerate numbered ControlSets (001, 002, 003...)
-	for i := 1; i <= 3; i++ {
+	for i := 1; i <= 12; i++ {
 		csPath := fmt.Sprintf(`SYSTEM\ControlSet%03d\Services\%s`, i, serviceName)
 		// Only add if the key actually exists
 		k, err := registry.OpenKey(registry.LOCAL_MACHINE, csPath, registry.QUERY_VALUE)
@@ -245,25 +283,22 @@ func serviceRegistryPaths(serviceName string) []string {
 	return paths
 }
 
-// hardenRegistryKeyByPath applies a restrictive DACL on a single registry key
-// AND sets the OWNER to SYSTEM. This is critical because:
-//   - DACL alone is NOT enough: the key OWNER can always change the DACL
-//   - By default, service registry keys are owned by Administrators
-//   - Setting O:SY (Owner=SYSTEM) prevents Administrators from modifying
-//     permissions via regedit, reg.exe, or PowerShell
-func hardenRegistryKeyByPath(keyPath string) error {
-	// WRITE_OWNER (0x80000) is required to change the key owner
+// SDDL for service registry keys: SYSTEM full, Administrators read-only (query / enumerate).
+const sddlServiceRegistryHardened = "O:SYD:P(A;CI;KA;;;SY)(A;CI;KR;;;BA)"
+
+// SDDL for HKLM\SOFTWARE\EDR subtree: SYSTEM full, Administrators KEY_READ only.
+// Owner SYSTEM blocks changing DACL via regedit without take-ownership; KR allows
+// reading values (e.g. uninstall hash lookup) but not SET_VALUE / WRITE_DAC.
+const sddlAgentRegistryHardened = "O:SYD:P(A;CI;KA;;;SY)(A;CI;KR;;;BA)"
+
+// applyRegistrySDDL sets owner + protected DACL from an SDDL string on an opened HKLM key path.
+func applyRegistrySDDL(keyPath, sddl string) error {
 	k, err := registry.OpenKey(registry.LOCAL_MACHINE, keyPath, 0x20000|0x40000|0x80000) // READ_CONTROL | WRITE_DAC | WRITE_OWNER
 	if err != nil {
 		return fmt.Errorf("tamper: open registry key %s: %w", keyPath, err)
 	}
 	defer k.Close()
 
-	// O:SY = Owner is SYSTEM (prevents Admins from changing DACL)
-	// D:P  = Protected DACL (no inheritance from parent)
-	// SYSTEM: KA (KEY_ALL_ACCESS) with CI (Container Inherit)
-	// Administrators: KR (KEY_READ) with CI
-	const sddl = "O:SYD:P(A;CI;KA;;;SY)(A;CI;KR;;;BA)"
 	sd, err := windows.SecurityDescriptorFromString(sddl)
 	if err != nil {
 		return fmt.Errorf("tamper: parse registry SDDL: %w", err)
@@ -289,10 +324,31 @@ func hardenRegistryKeyByPath(keyPath string) error {
 	return nil
 }
 
+// hardenRegistryKeyByPath applies a restrictive DACL on a single registry key
+// AND sets the OWNER to SYSTEM. This is critical because:
+//   - DACL alone is NOT enough: the key OWNER can always change the DACL
+//   - By default, service registry keys are owned by Administrators
+//   - Setting O:SY (Owner=SYSTEM) prevents Administrators from modifying
+//     permissions via regedit, reg.exe, or PowerShell
+func hardenRegistryKeyByPath(keyPath string) error {
+	return applyRegistrySDDL(keyPath, sddlServiceRegistryHardened)
+}
+
 // enableTakeOwnershipPrivilege enables the SeTakeOwnershipPrivilege for the
 // current process token. This allows an Administrator to take ownership of
-// registry keys that are owned by SYSTEM.
+// registry keys and service objects that are owned by SYSTEM.
 func enableTakeOwnershipPrivilege() error {
+	return enablePrivilege("SeTakeOwnershipPrivilege")
+}
+
+// enablePrivilege enables a named privilege (e.g. "SeTakeOwnershipPrivilege",
+// "SeRestorePrivilege") on the current process token. This is a generic helper
+// used by multiple tamper-resistance functions.
+//
+// Key privileges used by the agent:
+//   - SeTakeOwnershipPrivilege: take ownership of objects regardless of DACL
+//   - SeRestorePrivilege: set any valid owner/DACL regardless of current perms
+func enablePrivilege(privilegeName string) error {
 	var token windows.Token
 	err := windows.OpenProcessToken(windows.CurrentProcess(),
 		windows.TOKEN_ADJUST_PRIVILEGES|windows.TOKEN_QUERY, &token)
@@ -301,10 +357,10 @@ func enableTakeOwnershipPrivilege() error {
 	}
 	defer token.Close()
 
-	privName, _ := windows.UTF16PtrFromString("SeTakeOwnershipPrivilege")
+	privName, _ := windows.UTF16PtrFromString(privilegeName)
 	var luid windows.LUID
 	if err := windows.LookupPrivilegeValue(nil, privName, &luid); err != nil {
-		return fmt.Errorf("tamper: lookup SeTakeOwnershipPrivilege: %w", err)
+		return fmt.Errorf("tamper: lookup %s: %w", privilegeName, err)
 	}
 
 	tp := windows.Tokenprivileges{PrivilegeCount: 1}
@@ -423,20 +479,45 @@ func RestoreServiceRegistryKey(serviceName string) error {
 // Layer 4: Agent Configuration Registry Protection
 // =========================================================================
 
-const agentRegistryPath = `SOFTWARE\EDR\Agent`
+const (
+	edrSoftwareRoot   = `SOFTWARE\EDR`
+	agentRegistryPath = `SOFTWARE\EDR\Agent`
+)
 
-// HardenAgentRegistryKey protects the agent's config registry key
-// (HKLM\SOFTWARE\EDR\Agent) so only SYSTEM can read/write.
-// Administrators cannot read, modify, or delete it.
+// HardenAgentRegistryKey protects HKLM\SOFTWARE\EDR and HKLM\SOFTWARE\EDR\Agent.
+// SYSTEM has full control; Administrators may read (for uninstall hash resolution)
+// but cannot change values or permissions without taking ownership.
 func HardenAgentRegistryKey() error {
-	return hardenRegistryKeyByPath(agentRegistryPath)
+	// Ensure keys exist (install may have created only the leaf).
+	k, _, err := registry.CreateKey(registry.LOCAL_MACHINE, edrSoftwareRoot, registry.ALL_ACCESS)
+	if err == nil {
+		_ = k.Close()
+	}
+	k2, _, err2 := registry.CreateKey(registry.LOCAL_MACHINE, agentRegistryPath, registry.ALL_ACCESS)
+	if err2 == nil {
+		_ = k2.Close()
+	}
+	var lastErr error
+	if err := applyRegistrySDDL(edrSoftwareRoot, sddlAgentRegistryHardened); err != nil {
+		lastErr = err
+	}
+	if err := applyRegistrySDDL(agentRegistryPath, sddlAgentRegistryHardened); err != nil {
+		lastErr = err
+	}
+	return lastErr
 }
 
-// RestoreAgentRegistryKey restores default DACL on the agent's config registry
-// key, giving Administrators full control again. Called during re-install and
-// uninstall to allow non-SYSTEM processes to access the key.
+// RestoreAgentRegistryKey restores default DACL on HKLM\SOFTWARE\EDR\Agent and
+// its parent SOFTWARE\EDR so Administrators can clean up during uninstall.
 func RestoreAgentRegistryKey() error {
-	return restoreRegistryKeyByPath(agentRegistryPath)
+	var lastErr error
+	if err := restoreRegistryKeyByPath(agentRegistryPath); err != nil {
+		lastErr = err
+	}
+	if err := restoreRegistryKeyByPath(edrSoftwareRoot); err != nil {
+		lastErr = err
+	}
+	return lastErr
 }
 
 // SaveTokenHashToRegistry stores the uninstall token hash in a protected

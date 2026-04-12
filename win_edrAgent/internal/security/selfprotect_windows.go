@@ -37,10 +37,10 @@ func ProtectProcess(logger *logging.Logger) error {
 
 	// Build a restricted DACL for the process object.
 	// SYSTEM: full control
-	// Administrators: full control
+	// Administrators: only PROCESS_QUERY_LIMITED_INFORMATION + SYNCHRONIZE
 	// Everyone: only PROCESS_QUERY_LIMITED_INFORMATION + SYNCHRONIZE
 	// (This denies PROCESS_TERMINATE, PROCESS_SUSPEND_RESUME, PROCESS_VM_WRITE
-	// to non-admin users.)
+	// to ANY user other than SYSTEM.)
 	sidEveryone, err := windows.CreateWellKnownSid(windows.WinWorldSid)
 	if err != nil {
 		return fmt.Errorf("create Everyone SID: %w", err)
@@ -62,7 +62,7 @@ func ProtectProcess(logger *logging.Logger) error {
 			},
 		},
 		{
-			AccessPermissions: processFullControl,
+			AccessPermissions: processLimited,
 			AccessMode:        windows.GRANT_ACCESS,
 			Inheritance:       0,
 			Trustee: windows.TRUSTEE{

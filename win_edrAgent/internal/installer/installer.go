@@ -29,10 +29,10 @@ const (
 	hostsFile = `C:\Windows\System32\drivers\etc\hosts`
 
 	// ConfigDir is the protected directory for agent configuration.
-	ConfigDir = `C:\ProgramData\EDR\config`
+	ConfigDir = `C:\ProgramData\EDR`
 
 	// DefaultConfigPath is the standard config file path.
-	DefaultConfigPath = `C:\ProgramData\EDR\config\config.yaml`
+	DefaultConfigPath = `C:\ProgramData\EDR\config.yaml`
 
 	// ServiceName matches the name registered in the SCM.
 	ServiceName = "EDRAgent"
@@ -262,8 +262,6 @@ func InstallAndStart(exePath string) error {
 func EnsureDirectories() error {
 	dirs := []string{
 		`C:\ProgramData\EDR`,
-		`C:\ProgramData\EDR\config`,
-		`C:\ProgramData\EDR\certs`,
 		`C:\ProgramData\EDR\logs`,
 		`C:\ProgramData\EDR\queue`,
 		`C:\ProgramData\EDR\quarantine`,

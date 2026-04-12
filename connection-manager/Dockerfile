@@ -34,14 +34,14 @@ FROM alpine:3.19
 # Install CA certificates, timezone data, and openssl (for cert generation fallback)
 RUN apk add --no-cache ca-certificates tzdata
 
-# Create non-root user
+# Create non-root user (for future use — currently running as root for PKI writes)
 RUN adduser -D -u 1000 edr
 
 # Set working directory
 WORKDIR /app
 
-# Create writable certs directory owned by edr user
-RUN mkdir -p /app/certs && chown edr:edr /app/certs
+# Create writable certs directory
+RUN mkdir -p /app/certs
 
 # Copy binary from builder
 COPY --from=builder /app/bin/connection-manager /app/connection-manager
@@ -53,8 +53,10 @@ RUN chmod +x /app/docker-entrypoint.sh
 # Copy config template
 COPY --from=builder /app/config/config.example.yaml /app/config/config.yaml
 
-# Switch to non-root user
-USER edr
+# NOTE: Running as root to ensure the PKI bootstrap (EnsureFullPKI) can
+# always read and write certificate files in the bind-mounted certs directory.
+# The bind mount (./connection-manager/certs:/app/certs) may have host-level
+# permissions that prevent the 'edr' user (uid 1000) from writing.
 
 # Expose ports
 # gRPC port

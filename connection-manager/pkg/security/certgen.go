@@ -473,11 +473,16 @@ func EnsureJWTKeys(privateKeyPath, publicKeyPath string, logger *logrus.Logger) 
 // EnsureFullPKI orchestrates the complete PKI bootstrap sequence:
 //  1. Generate CA cert + key if missing
 //  2. Generate/regenerate server cert if missing or IPs changed
-//  3. Generate JWT signing keys if missing
+//  3. Validate the server cert is actually signed by the current CA
+//  4. Generate JWT signing keys if missing
+//
+// Step 3 is critical: it catches the case where the CA was regenerated
+// (e.g., due to file corruption or container rebuild) but the server cert
+// was kept from a previous CA generation. Without this check, agents
+// would receive a server cert signed by a CA they don't trust.
 //
 // This function guarantees that after it returns successfully, ALL crypto
-// material required by the server is present on disk. It is safe to call
-// on every startup — it only generates what is missing.
+// material required by the server is present on disk AND internally consistent.
 func EnsureFullPKI(
 	caCertPath, caKeyPath string,
 	serverCertPath, serverKeyPath string,
@@ -501,11 +506,74 @@ func EnsureFullPKI(
 		return fmt.Errorf("PKI Bootstrap server cert failed: %w", err)
 	}
 
-	// Step 3: Ensure JWT signing keys
+	// Step 3: Validate server cert trust chain against the current CA.
+	// This catches the critical case where:
+	//   - CA was regenerated (e.g., container rebuild or file corruption)
+	//   - Server cert still exists but was signed by the OLD CA
+	//   - certCoversIPs() returns true (IPs haven't changed)
+	//   - But agents embedding the NEW CA will get x509 verification errors
+	if err := validateServerCertChain(caCertPath, serverCertPath, logger); err != nil {
+		logger.Warnf("PKI Bootstrap: server cert chain validation failed (%v) — forcing regeneration", err)
+		// Delete the invalid server cert to force regeneration
+		_ = os.Remove(serverCertPath)
+		_ = os.Remove(serverKeyPath)
+		if _, err := EnsureServerCert(caCertPath, caKeyPath, serverCertPath, serverKeyPath, logger); err != nil {
+			return fmt.Errorf("PKI Bootstrap server cert regen failed: %w", err)
+		}
+		logger.Info("PKI Bootstrap: server certificate regenerated with correct CA chain")
+	}
+
+	// Step 4: Ensure JWT signing keys
 	if _, err := EnsureJWTKeys(jwtPrivateKeyPath, jwtPublicKeyPath, logger); err != nil {
 		return fmt.Errorf("PKI Bootstrap JWT keys failed: %w", err)
 	}
 
 	logger.Info("PKI Bootstrap: all crypto material verified/generated successfully")
+	return nil
+}
+
+// validateServerCertChain verifies that the server certificate at serverCertPath
+// was actually signed by the CA at caCertPath. This prevents a subtle but critical
+// bug where the CA is regenerated but the server cert is still from the old CA.
+//
+// Without this validation, the system appears functional (all files exist, IPs match)
+// but agents receive a server cert signed by a CA they don't trust → x509 error.
+func validateServerCertChain(caCertPath, serverCertPath string, logger *logrus.Logger) error {
+	caCertPEM, err := os.ReadFile(caCertPath)
+	if err != nil {
+		return fmt.Errorf("read CA cert: %w", err)
+	}
+
+	serverCertPEM, err := os.ReadFile(serverCertPath)
+	if err != nil {
+		return fmt.Errorf("read server cert: %w", err)
+	}
+
+	caPool := x509.NewCertPool()
+	if !caPool.AppendCertsFromPEM(caCertPEM) {
+		return fmt.Errorf("failed to parse CA certificate PEM")
+	}
+
+	block, _ := pem.Decode(serverCertPEM)
+	if block == nil {
+		return fmt.Errorf("failed to decode server certificate PEM")
+	}
+
+	serverCert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		return fmt.Errorf("failed to parse server certificate: %w", err)
+	}
+
+	// Verify: is this server cert signed by the current CA?
+	opts := x509.VerifyOptions{
+		Roots: caPool,
+		// KeyUsages defaults to ExtKeyUsageServerAuth, which is correct.
+	}
+
+	if _, err := serverCert.Verify(opts); err != nil {
+		return fmt.Errorf("server cert NOT signed by current CA: %w", err)
+	}
+
+	logger.Debug("PKI Bootstrap: server certificate chain validated against CA — trust chain intact")
 	return nil
 }

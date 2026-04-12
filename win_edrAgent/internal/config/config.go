@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/google/uuid"
@@ -279,9 +280,9 @@ func DefaultConfig() *Config {
 			MaxAgeDays: 7,
 		},
 		Certs: CertConfig{
-			CertPath:       "C:\\ProgramData\\EDR\\certs\\client.crt",
-			KeyPath:        "C:\\ProgramData\\EDR\\certs\\private.key",
-			CAPath:         "C:\\ProgramData\\EDR\\certs\\ca-chain.crt",
+			CertPath:       "C:\\ProgramData\\EDR\\client.crt",
+			KeyPath:        "C:\\ProgramData\\EDR\\private.key",
+			CAPath:         "C:\\ProgramData\\EDR\\ca-chain.crt",
 			BootstrapToken: "",
 		},
 	}
@@ -333,6 +334,47 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("agent.max_queue_size_mb must be between 1 and 2000")
 	}
 	return nil
+}
+
+// DataDirectoriesToHarden lists NTFS paths that hold binaries, WAL, logs,
+// quarantine, and encryption keys — used for SYSTEM-only ACLs while the agent runs.
+func (c *Config) DataDirectoriesToHarden() []string {
+	queue := c.Agent.QueueDir
+	if queue == "" {
+		queue = `C:\ProgramData\EDR\queue`
+	}
+	logPath := c.Logging.FilePath
+	if logPath == "" {
+		logPath = `C:\ProgramData\EDR\logs\agent.log`
+	}
+	logDir := filepath.Clean(filepath.Dir(logPath))
+	if logDir == "" || logDir == "." {
+		logDir = `C:\ProgramData\EDR\logs`
+	}
+	const (
+		binDir = `C:\ProgramData\EDR\bin`
+		qDir   = `C:\ProgramData\EDR\quarantine`
+		encDir = `C:\ProgramData\EDR\EncryptKey`
+	)
+	seen := make(map[string]struct{})
+	out := make([]string, 0, 6)
+	add := func(p string) {
+		p = filepath.Clean(p)
+		if p == "." {
+			return
+		}
+		if _, ok := seen[p]; ok {
+			return
+		}
+		seen[p] = struct{}{}
+		out = append(out, p)
+	}
+	add(binDir)
+	add(queue)
+	add(logDir)
+	add(qDir)
+	add(encDir)
+	return out
 }
 
 // Save writes configuration to a YAML file.

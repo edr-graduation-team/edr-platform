@@ -249,6 +249,16 @@ func runInstall(
 	fmt.Println(" EDR Agent — Zero-Touch Installation")
 	fmt.Println("════════════════════════════════════════")
 
+	// ── Pre-flight Check: Ensure agent is not already installed ──────────────
+	if service.ServiceExists() {
+		fmt.Fprintf(os.Stderr, "\n[X] Error: EDR Agent is already installed on this system.\n")
+		fmt.Fprintf(os.Stderr, "    To protect existing configurations and ensure security, automatic re-installation is blocked.\n")
+		fmt.Fprintf(os.Stderr, "    Please remove the agent first using: edr-agent.exe -uninstall -token <secret>\n")
+		logger.Errorf("Install aborted: service already exists")
+		os.Exit(1)
+	}
+
+
 	// ── Resolve parameters: CLI > Embedded > empty ───────────────────────────
 	// Token resolution (zero-touch support):
 	//   1. CLI -token flag (highest priority)
@@ -311,7 +321,7 @@ func runInstall(
 
 	// ── Step 2: Write embedded CA certificate ─────────────────────────────────
 	fmt.Println("[2/7] Provisioning CA certificate...")
-	caPath := `C:\ProgramData\EDR\certs\ca-chain.crt`
+	caPath := `C:\ProgramData\EDR\ca-chain.crt`
 	if enrollment.HasEmbeddedCA() {
 		if err := enrollment.WriteEmbeddedCA(caPath); err != nil {
 			fmt.Fprintf(os.Stderr, "Error writing embedded CA: %v\n", err)
@@ -391,13 +401,11 @@ func runInstall(
 	fmt.Println("[6/7] Registering Windows Service (EDRAgent)...")
 	if err := service.Install(EmbeddedTokenHash); err != nil {
 		if isAlreadyExistsErr(err) {
-			fmt.Println("      → Service exists; re-registering...")
-			_ = service.ForceUninstall(EmbeddedTokenHash)
-			if err2 := service.Install(EmbeddedTokenHash); err2 != nil {
-				fmt.Fprintf(os.Stderr, "Error installing service: %v\n", err2)
-				logger.Errorf("Service install failed: %v", err2)
-				os.Exit(1)
-			}
+			fmt.Fprintf(os.Stderr, "\n[X] Error: EDR Agent is already installed on this system.\n")
+			fmt.Fprintf(os.Stderr, "    To protect existing configurations and ensure security, automatic re-installation is blocked.\n")
+			fmt.Fprintf(os.Stderr, "    Please remove the agent first using: edr-agent.exe -uninstall -token <secret>\n")
+			logger.Errorf("Install aborted: service already exists")
+			os.Exit(1)
 		} else {
 			fmt.Fprintf(os.Stderr, "Error installing service: %v\n", err)
 			logger.Errorf("Service install failed: %v", err)
@@ -409,6 +417,11 @@ func runInstall(
 
 	// ── Step 7: Start service ────────────────────────────────────────────────
 	fmt.Println("[7/7] Starting EDRAgent service...")
+	
+	// Legacy directory cleanup (best-effort, ignore errors if locked by permissions)
+	os.RemoveAll(`C:\ProgramData\EDR\certs`)
+	os.RemoveAll(`C:\ProgramData\EDR\config`)
+	
 	if err := service.StartService(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error starting service: %v\n", err)
 		logger.Errorf("Service start failed: %v", err)

@@ -9,6 +9,7 @@ package security
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -154,4 +155,213 @@ func setNamedSecurityInfoW(
 		uintptr(unsafe.Pointer(sacl)),
 	)
 	return uint32(r)
+}
+
+func enableTakeOwnershipPrivilegeLocal() error {
+	var token windows.Token
+	err := windows.OpenProcessToken(windows.CurrentProcess(),
+		windows.TOKEN_ADJUST_PRIVILEGES|windows.TOKEN_QUERY, &token)
+	if err != nil {
+		return err
+	}
+	defer token.Close()
+	privName, _ := windows.UTF16PtrFromString("SeTakeOwnershipPrivilege")
+	var luid windows.LUID
+	if err := windows.LookupPrivilegeValue(nil, privName, &luid); err != nil {
+		return err
+	}
+	tp := windows.Tokenprivileges{PrivilegeCount: 1}
+	tp.Privileges[0].Luid = luid
+	tp.Privileges[0].Attributes = windows.SE_PRIVILEGE_ENABLED
+	return windows.AdjustTokenPrivileges(token, false, &tp, 0, nil, nil)
+}
+
+func setSystemOwnedExclusiveDACL(path string) error {
+	const inheritFlags = windows.OBJECT_INHERIT_ACE | windows.CONTAINER_INHERIT_ACE
+	aces := []windows.EXPLICIT_ACCESS{{
+		AccessPermissions: windows.GENERIC_ALL,
+		AccessMode:        windows.GRANT_ACCESS,
+		Inheritance:       inheritFlags,
+		Trustee: windows.TRUSTEE{
+			TrusteeForm:  windows.TRUSTEE_IS_SID,
+			TrusteeType:  windows.TRUSTEE_IS_WELL_KNOWN_GROUP,
+			TrusteeValue: windows.TrusteeValueFromSID(sidSystem),
+		},
+	}}
+	newDACL, err := windows.ACLFromEntries(aces, nil)
+	if err != nil {
+		return fmt.Errorf("ACLFromEntries: %w", err)
+	}
+	pathPtr, err := windows.UTF16PtrFromString(path)
+	if err != nil {
+		return fmt.Errorf("UTF16PtrFromString: %w", err)
+	}
+	const secInfo = windows.OWNER_SECURITY_INFORMATION | windows.DACL_SECURITY_INFORMATION | windows.PROTECTED_DACL_SECURITY_INFORMATION
+	ret := setNamedSecurityInfoW(pathPtr, windows.SE_FILE_OBJECT, secInfo, sidSystem, nil, newDACL, nil)
+	if ret != 0 {
+		return fmt.Errorf("SetNamedSecurityInfo owner+dacl: error %d", ret)
+	}
+	return nil
+}
+
+// setSystemOwnedExclusiveFile applies the same SYSTEM-only model to a single file (no inheritance ACEs).
+func setSystemOwnedExclusiveFile(path string) error {
+	aces := []windows.EXPLICIT_ACCESS{{
+		AccessPermissions: windows.GENERIC_ALL,
+		AccessMode:        windows.GRANT_ACCESS,
+		Inheritance:       0,
+		Trustee: windows.TRUSTEE{
+			TrusteeForm:  windows.TRUSTEE_IS_SID,
+			TrusteeType:  windows.TRUSTEE_IS_WELL_KNOWN_GROUP,
+			TrusteeValue: windows.TrusteeValueFromSID(sidSystem),
+		},
+	}}
+	newDACL, err := windows.ACLFromEntries(aces, nil)
+	if err != nil {
+		return fmt.Errorf("ACLFromEntries: %w", err)
+	}
+	pathPtr, err := windows.UTF16PtrFromString(path)
+	if err != nil {
+		return fmt.Errorf("UTF16PtrFromString: %w", err)
+	}
+	const secInfo = windows.OWNER_SECURITY_INFORMATION | windows.DACL_SECURITY_INFORMATION | windows.PROTECTED_DACL_SECURITY_INFORMATION
+	ret := setNamedSecurityInfoW(pathPtr, windows.SE_FILE_OBJECT, secInfo, sidSystem, nil, newDACL, nil)
+	if ret != 0 {
+		return fmt.Errorf("SetNamedSecurityInfo file: error %d", ret)
+	}
+	return nil
+}
+
+// HardenAgentDirectoriesExclusive sets OWNER=SYSTEM and a DACL that grants only
+// SYSTEM full control (inheriting to subfolders). Administrators cannot change
+// ACLs or modify contents until RestoreAgentDirectoriesACL during authorized
+// uninstall. C:\ProgramData\EDR itself is not in the list so uninstall.dat
+// can still be created by an elevated admin.
+func HardenAgentDirectoriesExclusive(dirs []string, logger *logging.Logger) error {
+	var first error
+	for _, dir := range dirs {
+		dir = filepath.Clean(dir)
+		if err := os.MkdirAll(dir, 0700); err != nil {
+			err = fmt.Errorf("security: create dir %s: %w", dir, err)
+			if logger != nil {
+				logger.Warnf("[Security] %v", err)
+			}
+			if first == nil {
+				first = err
+			}
+			continue
+		}
+		if err := setSystemOwnedExclusiveDACL(dir); err != nil {
+			wrapped := fmt.Errorf("security: exclusive ACL %s: %w", dir, err)
+			if logger != nil {
+				logger.Warnf("[Security] %v", wrapped)
+			}
+			if first == nil {
+				first = wrapped
+			}
+			continue
+		}
+		if filepath.Base(dir) == "bin" {
+			exe := filepath.Join(dir, "edr-agent.exe")
+			if st, err := os.Stat(exe); err == nil && !st.IsDir() {
+				if err := setSystemOwnedExclusiveFile(exe); err != nil && logger != nil {
+					logger.Warnf("[Security] exclusive ACL on binary: %v", err)
+				}
+			}
+		}
+		if logger != nil {
+			logger.Infof("[Security] Directory locked (SYSTEM-only): %s", dir)
+		}
+	}
+	return first
+}
+
+// RestoreAgentDirectoriesACL restores Administrators + SYSTEM full control and
+// owner Administrators on each directory (and typical uninstall layout).
+func RestoreAgentDirectoriesACL(dirs []string) error {
+	_ = enableTakeOwnershipPrivilegeLocal()
+	var last error
+	for _, dir := range dirs {
+		dir = filepath.Clean(dir)
+		st, err := os.Stat(dir)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			last = err
+			continue
+		}
+		if !st.IsDir() {
+			continue
+		}
+		pathPtr, err := windows.UTF16PtrFromString(dir)
+		if err != nil {
+			last = err
+			continue
+		}
+		ret := setNamedSecurityInfoW(pathPtr, windows.SE_FILE_OBJECT,
+			windows.OWNER_SECURITY_INFORMATION, sidAdministrators, nil, nil, nil)
+		if ret != 0 {
+			last = fmt.Errorf("SetNamedSecurityInfo owner on %s: error %d", dir, ret)
+			continue
+		}
+		if err := setRestrictedDACL(dir); err != nil {
+			last = fmt.Errorf("restore DACL %s: %w", dir, err)
+			continue
+		}
+		if filepath.Base(dir) == "bin" {
+			exe := filepath.Join(dir, "edr-agent.exe")
+			if st2, err := os.Stat(exe); err == nil && !st2.IsDir() {
+				_ = enableTakeOwnershipPrivilegeLocal()
+				exePtr, _ := windows.UTF16PtrFromString(exe)
+				ret := setNamedSecurityInfoW(exePtr, windows.SE_FILE_OBJECT,
+					windows.OWNER_SECURITY_INFORMATION, sidAdministrators, nil, nil, nil)
+				if ret == 0 {
+					_ = setRestrictedDACLOnFile(exe)
+				}
+			}
+		}
+	}
+	return last
+}
+
+// setRestrictedDACLOnFile applies SYSTEM+Administrators full control to a file (no inheritance flags).
+func setRestrictedDACLOnFile(path string) error {
+	const fullControl = windows.GENERIC_ALL
+	aces := []windows.EXPLICIT_ACCESS{
+		{
+			AccessPermissions: fullControl,
+			AccessMode:        windows.GRANT_ACCESS,
+			Inheritance:       0,
+			Trustee: windows.TRUSTEE{
+				TrusteeForm:  windows.TRUSTEE_IS_SID,
+				TrusteeType:  windows.TRUSTEE_IS_WELL_KNOWN_GROUP,
+				TrusteeValue: windows.TrusteeValueFromSID(sidSystem),
+			},
+		},
+		{
+			AccessPermissions: fullControl,
+			AccessMode:        windows.GRANT_ACCESS,
+			Inheritance:       0,
+			Trustee: windows.TRUSTEE{
+				TrusteeForm:  windows.TRUSTEE_IS_SID,
+				TrusteeType:  windows.TRUSTEE_IS_WELL_KNOWN_GROUP,
+				TrusteeValue: windows.TrusteeValueFromSID(sidAdministrators),
+			},
+		},
+	}
+	newDACL, err := windows.ACLFromEntries(aces, nil)
+	if err != nil {
+		return err
+	}
+	pathPtr, err := windows.UTF16PtrFromString(path)
+	if err != nil {
+		return err
+	}
+	const secInfo = windows.DACL_SECURITY_INFORMATION | windows.PROTECTED_DACL_SECURITY_INFORMATION
+	ret := setNamedSecurityInfoW(pathPtr, windows.SE_FILE_OBJECT, secInfo, nil, nil, newDACL, nil)
+	if ret != 0 {
+		return fmt.Errorf("SetNamedSecurityInfo: error %d", ret)
+	}
+	return nil
 }

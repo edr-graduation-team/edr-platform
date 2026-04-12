@@ -9,12 +9,13 @@ import (
 	"os"
 	"time"
 
+	"github.com/edr-platform/win-agent/internal/protection"
 	"github.com/edr-platform/win-agent/internal/security"
 )
 
 // initSecurity runs all security hardening steps:
 //  1. NTFS ACL lockdown on all EDR data directories
-//  2. Process self-protection (DACL hardening)
+//  2. Process self-protection (SYSTEM-only DACL — same as service.Execute)
 //  3. Encryption key initialisation
 //  4. Data retention cleaner (48 h)
 //  5. File integrity watchdog
@@ -23,26 +24,25 @@ import (
 // a security hardening step fails (e.g. running outside SYSTEM context
 // during development).
 func (a *Agent) initSecurity() {
-	// ── 1. Harden directories ───────────────────────────────────────────────
-	// NOTE: certs/ and config/ are no longer hardened because cert data and
-	// config.yaml have been migrated to the protected Registry. Only
-	// directories with active data remain.
-	dirs := []string{
-		`C:\ProgramData\EDR\queue`,
-		`C:\ProgramData\EDR\logs`,
-		`C:\ProgramData\EDR\quarantine`,
-	}
-	if err := security.HardenDirectories(dirs, a.logger); err != nil {
+	// ── 1. Harden directories (SYSTEM-only; matches service.Execute layer 5) ─
+	// NOTE: certs/ and config/ are not on disk after enrollment; paths come
+	// from config (queue_dir, log file parent, bin, quarantine, EncryptKey).
+	if err := security.HardenAgentDirectoriesExclusive(a.cfg.DataDirectoriesToHarden(), a.logger); err != nil {
 		a.logger.Warnf("[Security] Directory hardening failed (agent continues): %v", err)
 	}
 
 	// ── 2. Process self-protection ──────────────────────────────────────────
-	if err := security.ProtectProcess(a.logger); err != nil {
+	// Use protection.ProtectProcess (not security.ProtectProcess) so the service
+	// path and agent.Start share one DACL: SYSTEM full control only; avoids
+	// initSecurity overwriting the stricter descriptor applied in service.Execute.
+	if err := protection.ProtectProcess(); err != nil {
 		a.logger.Warnf("[Security] Process protection failed (agent continues): %v", err)
+	} else {
+		a.logger.Info("[Security] Process DACL hardened — SYSTEM-only (aligned with service tamper layer)")
 	}
 
 	// ── 3. Encryption key ───────────────────────────────────────────────────
-	keyPath := `C:\ProgramData\EDR\config\.agent.key`
+	keyPath := `C:\ProgramData\EDR\EncryptKey\.agent.key`
 	enc, err := security.NewEncryptor(keyPath, a.logger)
 	if err != nil {
 		a.logger.Warnf("[Security] Encryption init failed (data-at-rest NOT encrypted): %v", err)

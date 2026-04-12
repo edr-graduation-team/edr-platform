@@ -100,10 +100,10 @@ logging:
 
 certs:
   # Client certificate path
-  cert_path: "C:\\ProgramData\\EDR\\certs\\client.crt"
+  cert_path: "C:\\ProgramData\\EDR\\client.crt"
   # Private key path
-  key_path: "C:\\ProgramData\\EDR\\certs\\private.key"
+  key_path: "C:\\ProgramData\\EDR\\private.key"
   # CA certificate chain path
-  ca_path: "C:\\ProgramData\\EDR\\certs\\ca-chain.crt"
+  ca_path: "C:\\ProgramData\\EDR\\ca-chain.crt"
   # Bootstrap token (for initial registration)
   bootstrap_token: ""

@@ -90,6 +90,11 @@ func (h *EventHandler) SetFallbackStore(store *EventFallbackStore) {
 	h.fallbackStore = store
 }
 
+// GetFallbackStore returns the configured PostgreSQL fallback store (may be nil).
+func (h *EventHandler) GetFallbackStore() *EventFallbackStore {
+	return h.fallbackStore
+}
+
 // StreamEvents handles bidirectional streaming for event ingestion.
 // On stream open:  validates agent in DB, registers in AgentRegistry, updates PostgreSQL to 'online'.
 // On stream close: deregisters agent, updates PostgreSQL to 'offline'.

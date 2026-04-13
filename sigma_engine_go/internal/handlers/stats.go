@@ -16,6 +16,8 @@ type PerformanceMetricsProvider interface {
 	GetAverageLatencyMs() float64
 	GetEventsProcessed() uint64
 	GetProcessingErrors() uint64
+	GetAlertsDropped() uint64
+	GetAlertFallbackUsed() uint64
 	GetAverageDatabaseQueryMs() float64
 	GetAverageRuleMatchingMs() float64
 }
@@ -127,6 +129,8 @@ type PerformanceStatsResponse struct {
 	AvgEventLatencyMs  float64 `json:"avg_event_latency_ms"`
 	AvgRuleMatchingMs  float64 `json:"avg_rule_matching_ms"`
 	AvgDatabaseQueryMs float64 `json:"avg_database_query_ms"`
+	AlertsDropped      uint64  `json:"alerts_dropped"`
+	AlertFallbackUsed  uint64  `json:"alert_fallback_used"`
 	ActiveConnections  int     `json:"active_connections"`
 	WebSocketClients   int     `json:"websocket_clients"`
 	KafkaConsumerLag   int64   `json:"kafka_consumer_lag"`
@@ -151,6 +155,8 @@ func (h *StatsHandler) PerformanceStats(w http.ResponseWriter, r *http.Request) 
 			AvgEventLatencyMs:  h.perfMetrics.GetAverageLatencyMs(),
 			AvgRuleMatchingMs:  h.perfMetrics.GetAverageRuleMatchingMs(),
 			AvgDatabaseQueryMs: h.perfMetrics.GetAverageDatabaseQueryMs(),
+			AlertsDropped:      h.perfMetrics.GetAlertsDropped(),
+			AlertFallbackUsed:  h.perfMetrics.GetAlertFallbackUsed(),
 			ActiveConnections:  0,
 			WebSocketClients:   0,
 			KafkaConsumerLag:   0,

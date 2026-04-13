@@ -3,6 +3,7 @@ package database
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -59,6 +60,11 @@ type AlertWriter struct {
 	repo    AlertRepository
 	config  AlertWriterConfig
 	metrics *AlertWriterMetrics
+	// onAlertPersisted is an optional callback fired after a NEW alert is
+	// successfully inserted into storage. It is used to fan out real-time
+	// notifications (e.g. WebSocket broadcast) without coupling writer logic
+	// to transport concerns.
+	onAlertPersisted func(*Alert)
 
 	alertChan chan *domain.Alert
 	doneChan  chan struct{}
@@ -176,8 +182,20 @@ func (w *AlertWriter) writeWithDedup(ctx context.Context, domainAlert *domain.Al
 	}
 
 	// Create new alert
-	_, err = w.repo.Create(ctx, dbAlert)
+	created, err := w.repo.Create(ctx, dbAlert)
+	if err != nil {
+		return err
+	}
+	if w.onAlertPersisted != nil && created != nil {
+		w.onAlertPersisted(created)
+	}
 	return err
+}
+
+// SetOnAlertPersisted registers an optional callback invoked for newly created
+// alerts (not deduplicated updates).
+func (w *AlertWriter) SetOnAlertPersisted(fn func(*Alert)) {
+	w.onAlertPersisted = fn
 }
 
 // convertToDBAlert converts a domain Alert to database Alert.
@@ -243,7 +261,7 @@ func (w *AlertWriter) convertToDBAlert(da *domain.Alert) *Alert {
 // Write queues an alert for writing.
 func (w *AlertWriter) Write(alert *domain.Alert) error {
 	if !w.running.Load() {
-		return nil
+		return fmt.Errorf("alert writer is not running")
 	}
 
 	select {
@@ -251,7 +269,7 @@ func (w *AlertWriter) Write(alert *domain.Alert) error {
 		return nil
 	default:
 		atomic.AddUint64(&w.metrics.AlertsDropped, 1)
-		return nil
+		return fmt.Errorf("alert writer queue full")
 	}
 }
 

@@ -35,6 +35,7 @@ type Handlers struct {
 	userRepo            repository.UserRepository            // user CRUD
 	roleRepo            repository.RoleRepository            // RBAC role/permission management
 	grpcAddress         string                               // C2 gRPC address (host:port) injected into isolate params
+	fallbackStore       *handlers.EventFallbackStore         // DB fallback store reliability stats
 }
 
 // NewHandlers creates a new handlers instance.
@@ -96,6 +97,11 @@ func (h *Handlers) SetUserRepo(repo repository.UserRepository) {
 // SetRoleRepo sets the RoleRepository for RBAC role/permission management.
 func (h *Handlers) SetRoleRepo(repo repository.RoleRepository) {
 	h.roleRepo = repo
+}
+
+// SetFallbackStore sets the EventFallbackStore for reliability health.
+func (h *Handlers) SetFallbackStore(store *handlers.EventFallbackStore) {
+	h.fallbackStore = store
 }
 
 // UserClaims represents authenticated user info.

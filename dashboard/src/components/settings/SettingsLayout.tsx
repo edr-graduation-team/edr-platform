@@ -1,11 +1,12 @@
 import { SETTINGS_NAV } from './types';
-import { User, Settings, Users, Shield, ChevronRight } from 'lucide-react';
+import { User, Settings, Users, Shield, ChevronRight, Activity } from 'lucide-react';
 
 const ICONS: Record<string, React.ElementType> = {
     User,
     Settings,
     Users,
     Shield,
+    Activity,
 };
 
 export default function SettingsLayout({

@@ -303,19 +303,21 @@ func main() {
 	// Create EventHandler — the core telemetry pipeline.
 	// Depends on: Redis (dedup, agent-status), RateLimiter, Kafka (primary), Metrics.
 	evtHandler := handlers.NewEventHandler(logger, redisClient, rateLimiter, kafkaProducer, edrMetrics)
+	var fallbackStore *handlers.EventFallbackStore
 
 	// Wire up the PostgreSQL fallback store for data durability.
 	// When Kafka is unavailable, events are persisted to PostgreSQL so they
 	// can be replayed later. This completes the 3-tier delivery guarantee:
 	// Kafka primary → Kafka DLQ → PostgreSQL fallback.
 	if dbPool != nil {
-		fallback := handlers.NewEventFallbackStore(dbPool.Pool(), logger)
+		fallback := handlers.NewEventFallbackStore(dbPool.Pool(), edrMetrics, logger)
 		if fallback != nil {
 			// Auto-create the fallback table if it doesn't exist.
 			// This is safe to call on every startup (CREATE IF NOT EXISTS).
 			if err := fallback.EnsureTable(ctx); err != nil {
 				logger.Warnf("Failed to create fallback table (DB fallback disabled): %v", err)
 			} else {
+				fallbackStore = fallback
 				evtHandler.SetFallbackStore(fallback)
 				defer fallback.Close() // drain async writer workers on shutdown
 				logger.Info("Event DB fallback store enabled (async workers started)")
@@ -354,6 +356,9 @@ func main() {
 	// Prometheus metrics on same server (lifecycle managed with REST API).
 	restAPIServer.Echo().GET(cfg.Monitoring.MetricsPath, echo.WrapHandler(promhttp.Handler()))
 	apiHandlers := api.NewHandlers(logger, jwtManager, redisClient, rateLimiter, agentSvc, authSvc, cfg.Server.CACertPath, enrollmentTokenRepo)
+	// Wire fallback store stats into REST API reliability endpoint.
+	// Safe even if nil (endpoint returns enabled=false + reason).
+	apiHandlers.SetFallbackStore(fallbackStore)
 
 	// Wire the gRPC server's AgentRegistry into REST API handlers for C2 command routing.
 	// Without this, POST /agents/:id/commands returns 503 (registry == nil).

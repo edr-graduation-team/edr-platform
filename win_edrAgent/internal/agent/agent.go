@@ -41,10 +41,11 @@ type Agent struct {
 	diskQueue *queue.DiskQueue
 
 	// State tracking
-	running     atomic.Bool
-	startTime   time.Time
-	eventsTotal atomic.Uint64
-	eventsSent  atomic.Uint64
+	running       atomic.Bool
+	startTime     time.Time
+	eventsTotal   atomic.Uint64
+	eventsSent    atomic.Uint64
+	eventsDropped atomic.Uint64
 
 	// Lifecycle
 	ctx    context.Context
@@ -151,7 +152,7 @@ func (a *Agent) Start(ctx context.Context) error {
 		func() uint64 { return a.eventsTotal.Load() },
 		func() uint64 { return a.eventsSent.Load() },
 		func() int { return a.diskQueue.FileCount() },
-		nil, // events dropped — no filter/rate-limiter integrated yet
+		func() uint64 { return a.eventsDropped.Load() },
 	)
 
 	// Register config update handler — when the server pushes a new config
@@ -463,12 +464,24 @@ func (a *Agent) SubmitEvent(evt *event.Event) {
 		return
 	}
 
+	// Reliability-first enqueue strategy:
+	// 1) Fast path non-blocking enqueue.
+	// 2) If buffer is full, apply short backpressure (250ms) to absorb bursts.
+	// 3) Drop only if still saturated after timeout.
 	select {
 	case a.eventChan <- evt:
 		a.eventsTotal.Add(1)
 	default:
-		// Buffer full, drop oldest (log at debug level to avoid spam)
-		a.logger.Debug("Event buffer full, dropping event")
+		timer := time.NewTimer(250 * time.Millisecond)
+		defer timer.Stop()
+		select {
+		case a.eventChan <- evt:
+			a.eventsTotal.Add(1)
+		case <-timer.C:
+			a.eventsDropped.Add(1)
+			// Buffer full after bounded backpressure window.
+			a.logger.Warn("Event buffer full for 250ms, dropping event")
+		}
 	}
 }
 
@@ -794,27 +807,29 @@ func (a *Agent) GetStats() Stats {
 	runtime.ReadMemStats(&memStats)
 
 	return Stats{
-		AgentID:     a.cfg.Agent.ID,
-		Hostname:    a.cfg.Agent.Hostname,
-		Version:     "1.0.0", // TODO: Get from build
-		Uptime:      time.Since(a.startTime),
-		EventsTotal: a.eventsTotal.Load(),
-		EventsSent:  a.eventsSent.Load(),
-		QueueDepth:  len(a.eventChan),
-		MemoryMB:    memStats.Alloc / 1024 / 1024,
-		Goroutines:  runtime.NumGoroutine(),
+		AgentID:       a.cfg.Agent.ID,
+		Hostname:      a.cfg.Agent.Hostname,
+		Version:       "1.0.0", // TODO: Get from build
+		Uptime:        time.Since(a.startTime),
+		EventsTotal:   a.eventsTotal.Load(),
+		EventsSent:    a.eventsSent.Load(),
+		EventsDropped: a.eventsDropped.Load(),
+		QueueDepth:    len(a.eventChan),
+		MemoryMB:      memStats.Alloc / 1024 / 1024,
+		Goroutines:    runtime.NumGoroutine(),
 	}
 }
 
 // Stats holds agent statistics.
 type Stats struct {
-	AgentID     string
-	Hostname    string
-	Version     string
-	Uptime      time.Duration
-	EventsTotal uint64
-	EventsSent  uint64
-	QueueDepth  int
-	MemoryMB    uint64
-	Goroutines  int
+	AgentID       string
+	Hostname      string
+	Version       string
+	Uptime        time.Duration
+	EventsTotal   uint64
+	EventsSent    uint64
+	EventsDropped uint64
+	QueueDepth    int
+	MemoryMB      uint64
+	Goroutines    int
 }

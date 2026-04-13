@@ -6,12 +6,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/sirupsen/logrus"
 
 	"github.com/edr-platform/connection-manager/pkg/kafka"
+	"github.com/edr-platform/connection-manager/pkg/metrics"
 )
 
 // =========================================================================
@@ -49,9 +51,17 @@ type fallbackItem struct {
 //	CREATE INDEX idx_fallback_unreplayed ON event_batches_fallback (replayed) WHERE NOT replayed;
 type EventFallbackStore struct {
 	pool    *pgxpool.Pool
+	metrics *metrics.Metrics
 	logger  *logrus.Logger
 	writeCh chan fallbackItem
 	wg      sync.WaitGroup
+
+	enqueuedAsync        atomic.Uint64
+	channelFull          atomic.Uint64
+	syncWriteUsed        atomic.Uint64
+	syncWriteFailedDrops atomic.Uint64
+	dbWriteFailed        atomic.Uint64
+	marshalFailed        atomic.Uint64
 }
 
 const (
@@ -67,12 +77,13 @@ const (
 // NewEventFallbackStore creates a new async fallback store.
 // Returns nil if pool is nil (DB not configured), allowing callers to
 // simply nil-check before use. Starts background workers immediately.
-func NewEventFallbackStore(pool *pgxpool.Pool, logger *logrus.Logger) *EventFallbackStore {
+func NewEventFallbackStore(pool *pgxpool.Pool, m *metrics.Metrics, logger *logrus.Logger) *EventFallbackStore {
 	if pool == nil {
 		return nil
 	}
 	s := &EventFallbackStore{
 		pool:    pool,
+		metrics: m,
 		logger:  logger,
 		writeCh: make(chan fallbackItem, fallbackChanSize),
 	}
@@ -97,14 +108,39 @@ func (s *EventFallbackStore) Store(_ context.Context, batchID, agentID string, p
 	}
 	select {
 	case s.writeCh <- item:
+		s.enqueuedAsync.Add(1)
 		return nil
 	default:
+		// Reliability fallback: attempt synchronous write with bounded timeout
+		// before declaring data loss.
+		s.channelFull.Add(1)
+		if s.metrics != nil {
+			s.metrics.RecordError("fallback_channel_full")
+		}
+		syncCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := s.persistItemSync(syncCtx, item); err != nil {
+			s.syncWriteFailedDrops.Add(1)
+			if s.metrics != nil {
+				s.metrics.RecordError("fallback_sync_write_failed")
+			}
+			s.logger.WithError(err).WithFields(logrus.Fields{
+				"batch_id": batchID,
+				"agent_id": agentID,
+				"size":     len(payload),
+			}).Error("Fallback channel full and sync write failed — event batch DROPPED")
+			return fmt.Errorf("fallback channel full and sync write failed: %w", err)
+		}
+		s.syncWriteUsed.Add(1)
 		s.logger.WithFields(logrus.Fields{
 			"batch_id": batchID,
 			"agent_id": agentID,
 			"size":     len(payload),
-		}).Error("Fallback write channel full — event batch DROPPED (server under extreme load)")
-		return fmt.Errorf("fallback channel full")
+		}).Warn("Fallback channel full — batch persisted via synchronous write")
+		if s.metrics != nil {
+			s.metrics.RecordError("fallback_sync_write_used")
+		}
+		return nil
 	}
 }
 
@@ -121,6 +157,10 @@ func (s *EventFallbackStore) writerWorker(id int) {
 func (s *EventFallbackStore) persistItem(item fallbackItem) {
 	metadataJSON, err := json.Marshal(item.metadata)
 	if err != nil {
+		s.marshalFailed.Add(1)
+		if s.metrics != nil {
+			s.metrics.RecordError("fallback_marshal_failed")
+		}
 		s.logger.WithError(err).Error("Fallback: failed to marshal metadata")
 		return
 	}
@@ -136,6 +176,10 @@ func (s *EventFallbackStore) persistItem(item fallbackItem) {
 
 	_, err = s.pool.Exec(ctx, query, item.batchID, item.agentID, item.payload, metadataJSON, time.Now().UTC())
 	if err != nil {
+		s.dbWriteFailed.Add(1)
+		if s.metrics != nil {
+			s.metrics.RecordError("fallback_db_write_failed")
+		}
 		s.logger.WithError(err).WithFields(logrus.Fields{
 			"batch_id": item.batchID,
 			"agent_id": item.agentID,
@@ -148,6 +192,57 @@ func (s *EventFallbackStore) persistItem(item fallbackItem) {
 		"agent_id": item.agentID,
 		"size":     len(item.payload),
 	}).Warn("Event batch saved to DB fallback (Kafka unavailable)")
+}
+
+// persistItemSync performs a bounded synchronous fallback write.
+func (s *EventFallbackStore) persistItemSync(ctx context.Context, item fallbackItem) error {
+	metadataJSON, err := json.Marshal(item.metadata)
+	if err != nil {
+		s.marshalFailed.Add(1)
+		return fmt.Errorf("marshal metadata: %w", err)
+	}
+
+	query := `
+		INSERT INTO event_batches_fallback (batch_id, agent_id, payload, metadata, created_at)
+		VALUES ($1, $2, $3, $4, $5)
+		ON CONFLICT (batch_id) DO NOTHING
+	`
+
+	_, err = s.pool.Exec(ctx, query, item.batchID, item.agentID, item.payload, metadataJSON, time.Now().UTC())
+	if err != nil {
+		s.dbWriteFailed.Add(1)
+		return fmt.Errorf("sync fallback insert: %w", err)
+	}
+	return nil
+}
+
+// EventFallbackStats is a lightweight snapshot for operational monitoring.
+type EventFallbackStats struct {
+	ChannelLen          int    `json:"channel_len"`
+	ChannelCap          int    `json:"channel_cap"`
+	EnqueuedAsync       uint64 `json:"enqueued_async"`
+	ChannelFull         uint64 `json:"channel_full"`
+	SyncWriteUsed       uint64 `json:"sync_write_used"`
+	SyncWriteFailedDrop uint64 `json:"sync_write_failed_drop"`
+	DBWriteFailed       uint64 `json:"db_write_failed"`
+	MarshalFailed       uint64 `json:"marshal_failed"`
+}
+
+// Stats returns a snapshot of fallback store reliability counters.
+func (s *EventFallbackStore) Stats() EventFallbackStats {
+	if s == nil {
+		return EventFallbackStats{}
+	}
+	return EventFallbackStats{
+		ChannelLen:          len(s.writeCh),
+		ChannelCap:          cap(s.writeCh),
+		EnqueuedAsync:       s.enqueuedAsync.Load(),
+		ChannelFull:         s.channelFull.Load(),
+		SyncWriteUsed:       s.syncWriteUsed.Load(),
+		SyncWriteFailedDrop: s.syncWriteFailedDrops.Load(),
+		DBWriteFailed:       s.dbWriteFailed.Load(),
+		MarshalFailed:       s.marshalFailed.Load(),
+	}
 }
 
 // Close stops all writer workers and waits for them to drain.
@@ -273,10 +368,10 @@ func (w *FallbackReplayWorker) replayBatch(ctx context.Context) {
 		if err := json.Unmarshal(payload, &events); err != nil {
 			// Payload isn't a JSON array — publish as-is
 			headers := map[string]string{
-				"batch_id":        batchID,
-				"agent_id":        agentID,
-				"replay":          "true",
-				"replay_raw":      "true",
+				"batch_id":   batchID,
+				"agent_id":   agentID,
+				"replay":     "true",
+				"replay_raw": "true",
 			}
 			if pubErr := w.producer.SendEventBatch(ctx, agentID, payload, headers); pubErr != nil {
 				w.logger.WithError(pubErr).WithField("batch_id", batchID).Warn("Fallback replay: Kafka publish failed (raw)")

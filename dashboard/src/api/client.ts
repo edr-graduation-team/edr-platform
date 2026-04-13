@@ -517,6 +517,39 @@ export const agentsApi = {
 };
 
 // ============================================================================
+// Connection Manager Reliability APIs
+// ============================================================================
+
+export interface FallbackStoreStats {
+    channel_len: number;
+    channel_cap: number;
+    enqueued_async: number;
+    channel_full: number;
+    sync_write_used: number;
+    sync_write_failed_drop: number;
+    db_write_failed: number;
+    marshal_failed: number;
+}
+
+export interface FallbackStoreHealth {
+    enabled: boolean;
+    reason?: string;
+    stats?: FallbackStoreStats;
+}
+
+export interface ReliabilityHealthResponse {
+    fallback_store: FallbackStoreHealth;
+    meta?: { request_id?: string; timestamp?: string };
+}
+
+export const reliabilityApi = {
+    health: async (): Promise<ReliabilityHealthResponse> => {
+        const response = await connectionApi.get<ReliabilityHealthResponse>('/api/v1/reliability');
+        return response.data;
+    },
+};
+
+// ============================================================================
 // Audit Logs API
 // ============================================================================
 

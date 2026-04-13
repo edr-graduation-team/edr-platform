@@ -18,6 +18,7 @@ import (
 	"github.com/edr-platform/sigma-engine/internal/infrastructure/cache"
 	"github.com/edr-platform/sigma-engine/internal/infrastructure/database"
 	"github.com/edr-platform/sigma-engine/internal/infrastructure/logger"
+	metricsPkg "github.com/edr-platform/sigma-engine/internal/metrics"
 )
 
 // EventLoopConfig configures the integrated event loop.
@@ -42,11 +43,15 @@ func DefaultEventLoopConfig() EventLoopConfig {
 
 // EventLoopMetrics tracks event loop statistics.
 type EventLoopMetrics struct {
-	EventsReceived   uint64
-	EventsProcessed  uint64
-	AlertsGenerated  uint64
-	AlertsPublished  uint64
-	AlertsSuppressed uint64
+	EventsReceived        uint64
+	EventsProcessed       uint64
+	AlertsGenerated       uint64
+	AlertsPublished       uint64
+	AlertsSuppressed      uint64
+	AlertFallbackUsed     uint64
+	AlertsDropped         uint64
+	AlertPublishFailures  uint64
+	AlertDBQueueFailures  uint64
 	ProcessingErrors      uint64
 	AverageLatencyMs      float64
 	AverageRuleMatchingMs float64
@@ -59,11 +64,15 @@ func (m *EventLoopMetrics) Snapshot() EventLoopMetrics {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return EventLoopMetrics{
-		EventsReceived:   atomic.LoadUint64(&m.EventsReceived),
-		EventsProcessed:  atomic.LoadUint64(&m.EventsProcessed),
-		AlertsGenerated:  atomic.LoadUint64(&m.AlertsGenerated),
-		AlertsPublished:  atomic.LoadUint64(&m.AlertsPublished),
-		AlertsSuppressed: atomic.LoadUint64(&m.AlertsSuppressed),
+		EventsReceived:        atomic.LoadUint64(&m.EventsReceived),
+		EventsProcessed:       atomic.LoadUint64(&m.EventsProcessed),
+		AlertsGenerated:       atomic.LoadUint64(&m.AlertsGenerated),
+		AlertsPublished:       atomic.LoadUint64(&m.AlertsPublished),
+		AlertsSuppressed:      atomic.LoadUint64(&m.AlertsSuppressed),
+		AlertFallbackUsed:     atomic.LoadUint64(&m.AlertFallbackUsed),
+		AlertsDropped:         atomic.LoadUint64(&m.AlertsDropped),
+		AlertPublishFailures:  atomic.LoadUint64(&m.AlertPublishFailures),
+		AlertDBQueueFailures:  atomic.LoadUint64(&m.AlertDBQueueFailures),
 		ProcessingErrors:      atomic.LoadUint64(&m.ProcessingErrors),
 		AverageLatencyMs:      m.AverageLatencyMs,
 		AverageRuleMatchingMs: m.AverageRuleMatchingMs,
@@ -410,8 +419,29 @@ func (el *EventLoop) processOneEvent(event *domain.LogEvent) {
 				select {
 				case el.alertChan <- baseAlert:
 				case <-time.After(5 * time.Second):
-					atomic.AddUint64(&el.metrics.ProcessingErrors, 1)
-					logger.Errorf("Alert channel full for 5s — ALERT DROPPED: rule=%s agent=%s", baseAlert.RuleID, agentStr)
+					// Backpressure fallback path:
+					// Try direct best-effort publish/write so alerts are not lost when the
+					// alert channel is saturated.
+					fallbackOK := false
+					if err := el.producer.Publish(baseAlert); err == nil {
+						atomic.AddUint64(&el.metrics.AlertsPublished, 1)
+						fallbackOK = true
+					}
+					if el.alertWriter != nil {
+						if err := el.alertWriter.Write(baseAlert); err == nil {
+							fallbackOK = true
+						}
+					}
+					if !fallbackOK {
+						atomic.AddUint64(&el.metrics.ProcessingErrors, 1)
+						atomic.AddUint64(&el.metrics.AlertsDropped, 1)
+						metricsPkg.DefaultMetrics.RecordError("alert_drop_channel_saturated")
+						logger.Errorf("Alert channel full for 5s — ALERT DROPPED: rule=%s agent=%s", baseAlert.RuleID, agentStr)
+					} else {
+						atomic.AddUint64(&el.metrics.AlertFallbackUsed, 1)
+						metricsPkg.DefaultMetrics.RecordError("alert_fallback_delivery_used")
+						logger.Warnf("Alert channel saturated; used fallback delivery path: rule=%s agent=%s", baseAlert.RuleID, agentStr)
+					}
 				}
 			}
 		}
@@ -442,6 +472,8 @@ func (el *EventLoop) alertPublisher(ctx context.Context) {
 		if err := el.producer.Publish(alert); err != nil {
 			logger.Warnf("Failed to publish alert to Kafka: %v", err)
 			atomic.AddUint64(&el.metrics.ProcessingErrors, 1)
+			atomic.AddUint64(&el.metrics.AlertPublishFailures, 1)
+			metricsPkg.DefaultMetrics.RecordError("alert_publish_failed")
 		} else {
 			atomic.AddUint64(&el.metrics.AlertsPublished, 1)
 		}
@@ -450,6 +482,8 @@ func (el *EventLoop) alertPublisher(ctx context.Context) {
 		if el.alertWriter != nil {
 			if err := el.alertWriter.Write(alert); err != nil {
 				logger.Warnf("Failed to queue alert for DB write: %v", err)
+				atomic.AddUint64(&el.metrics.AlertDBQueueFailures, 1)
+				metricsPkg.DefaultMetrics.RecordError("alert_db_queue_failed")
 			}
 		}
 	}
@@ -672,6 +706,16 @@ func (el *EventLoop) GetEventsProcessed() uint64 {
 	return atomic.LoadUint64(&el.metrics.EventsProcessed)
 }
 
+// GetAlertsDropped returns alerts dropped after fallback attempts fail.
+func (el *EventLoop) GetAlertsDropped() uint64 {
+	return atomic.LoadUint64(&el.metrics.AlertsDropped)
+}
+
+// GetAlertFallbackUsed returns alerts delivered via fallback path.
+func (el *EventLoop) GetAlertFallbackUsed() uint64 {
+	return atomic.LoadUint64(&el.metrics.AlertFallbackUsed)
+}
+
 // =============================================================================
 // Lineage Cache Hydration (Context-Aware Detection — Sprint 1)
 //
@@ -846,5 +890,3 @@ func min(a, b int) int {
 	}
 	return b
 }
-
-

@@ -1,4 +1,4 @@
-export type SettingsTab = 'profile' | 'system' | 'users' | 'roles';
+export type SettingsTab = 'profile' | 'system' | 'reliability' | 'users' | 'roles';
 
 export interface SettingsNavItem {
     id: SettingsTab;
@@ -11,6 +11,7 @@ export interface SettingsNavItem {
 export const SETTINGS_NAV: SettingsNavItem[] = [
     { id: 'profile', label: 'Profile', icon: 'User', description: 'Personal info & preferences' },
     { id: 'system', label: 'System', icon: 'Settings', description: 'Platform configuration' },
+    { id: 'reliability', label: 'Reliability Health', icon: 'Activity', description: 'Drops, backpressure & fallback usage' },
     { id: 'users', label: 'Users', icon: 'Users', description: 'User management', requiredRole: ['admin', 'security'] },
     { id: 'roles', label: 'Roles & Permissions', icon: 'Shield', description: 'Access control', requiredRole: ['admin', 'security'] },
 ];

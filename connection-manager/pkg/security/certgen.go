@@ -16,9 +16,24 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/sirupsen/logrus"
+)
+
+const (
+	// certExpiryRegenerationWindow defines how early we proactively rotate
+	// server certificates before expiry to avoid abrupt outages.
+	certExpiryRegenerationWindow = 7 * 24 * time.Hour
+	// defaultCertClockSkewTolerance allows small clock drift between hosts without
+	// forcing unnecessary certificate regeneration.
+	defaultCertClockSkewTolerance = 15 * time.Minute
+	// maxCertClockSkewTolerance caps runtime overrides to keep verification strict.
+	maxCertClockSkewTolerance = 30 * time.Minute
+	// certClockSkewToleranceEnv overrides clock-skew tolerance at runtime.
+	// Example values: "5m", "10m", "15m".
+	certClockSkewToleranceEnv = "EDR_CERT_CLOCK_SKEW_TOLERANCE"
 )
 
 // EnsureServerCert checks whether the server certificate at serverCertPath
@@ -130,8 +145,31 @@ func certCoversIPs(certPath string, requiredIPs []net.IP, logger *logrus.Logger)
 		return false
 	}
 
-	// Check expiry (regenerate if expiring within 7 days)
-	if time.Until(cert.NotAfter) < 7*24*time.Hour {
+	now := time.Now()
+	clockSkewTolerance := getCertClockSkewTolerance(logger)
+
+	// Reject certificates that are not valid yet beyond tolerated clock skew.
+	// This prevents persistent enrollment failures after a bad issuance time.
+	if now.Add(clockSkewTolerance).Before(cert.NotBefore) {
+		logger.WithFields(logrus.Fields{
+			"cert_not_before": cert.NotBefore.UTC(),
+			"now_utc":         now.UTC(),
+			"tolerance":       clockSkewTolerance.String(),
+		}).Warn("Auto-Cert Bootstrapper: server certificate NotBefore is in the future — will regenerate")
+		return false
+	}
+
+	// Reject expired certificates immediately.
+	if now.After(cert.NotAfter) {
+		logger.WithFields(logrus.Fields{
+			"cert_not_after": cert.NotAfter.UTC(),
+			"now_utc":        now.UTC(),
+		}).Warn("Auto-Cert Bootstrapper: server certificate expired — will regenerate")
+		return false
+	}
+
+	// Check expiry window (regenerate if expiring soon).
+	if time.Until(cert.NotAfter) < certExpiryRegenerationWindow {
 		logger.WithField("expires", cert.NotAfter).Warn("Auto-Cert Bootstrapper: server certificate expiring soon — will regenerate")
 		return false
 	}
@@ -154,6 +192,39 @@ func certCoversIPs(certPath string, requiredIPs []net.IP, logger *logrus.Logger)
 	}
 
 	return true
+}
+
+func getCertClockSkewTolerance(logger *logrus.Logger) time.Duration {
+	raw := strings.TrimSpace(os.Getenv(certClockSkewToleranceEnv))
+	if raw == "" {
+		return defaultCertClockSkewTolerance
+	}
+
+	d, err := time.ParseDuration(raw)
+	if err != nil || d < 0 {
+		if logger != nil {
+			logger.WithFields(logrus.Fields{
+				"env":     certClockSkewToleranceEnv,
+				"value":   raw,
+				"default": defaultCertClockSkewTolerance.String(),
+			}).Warn("Auto-Cert Bootstrapper: invalid clock skew tolerance override — using default")
+		}
+		return defaultCertClockSkewTolerance
+	}
+
+	if d > maxCertClockSkewTolerance {
+		if logger != nil {
+			logger.WithFields(logrus.Fields{
+				"env":     certClockSkewToleranceEnv,
+				"value":   raw,
+				"max":     maxCertClockSkewTolerance.String(),
+				"applied": maxCertClockSkewTolerance.String(),
+			}).Warn("Auto-Cert Bootstrapper: clock skew tolerance override exceeds max — clamped")
+		}
+		return maxCertClockSkewTolerance
+	}
+
+	return d
 }
 
 // loadCA reads the CA certificate and private key from disk.

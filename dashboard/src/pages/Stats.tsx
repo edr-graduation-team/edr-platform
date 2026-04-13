@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
+import { useNavigate } from 'react-router-dom';
 import { useState, useMemo } from 'react';
 import {
     PieChart, Pie, Cell,
@@ -80,6 +81,7 @@ function AlertStatusOverview({ data }: { data: Record<string, number> }) {
 }
 
 export default function Stats() {
+    const navigate = useNavigate();
     const canExport = authApi.canExportStats();
     const [dateRange, setDateRange] = useState('7d');
     const [customFrom, setCustomFrom] = useState('');
@@ -503,7 +505,21 @@ export default function Stats() {
 
             {/* Performance Metrics */}
             <div className="card border border-slate-200 dark:border-slate-700/60 shadow-sm dark:shadow-slate-900/20 bg-white dark:bg-slate-800 rounded-xl">
-                <h3 className="text-lg font-bold mb-4 text-slate-800 dark:text-white">Performance Metrics</h3>
+                <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-lg font-bold text-slate-800 dark:text-white">Performance & Reliability</h3>
+                    <div className="flex items-center gap-3">
+                        <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                            Sigma Engine
+                        </span>
+                        <button
+                            onClick={() => navigate('/settings?tab=reliability')}
+                            className="text-[11px] font-semibold px-2.5 py-1 rounded-md border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-900/40 transition-colors"
+                        >
+                            View Ingestion Reliability
+                        </button>
+                    </div>
+                </div>
+
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                     <div className="flex flex-col items-center justify-center p-6 bg-slate-50 dark:bg-slate-900/50 rounded-xl border border-slate-100 dark:border-slate-700/60 transition-all hover:shadow-md hover:border-blue-500/30">
                         <p className="text-sm font-medium text-slate-500 dark:text-slate-400 mb-1">Avg Latency</p>
@@ -520,6 +536,26 @@ export default function Stats() {
                     <div className="flex flex-col items-center justify-center p-6 bg-slate-50 dark:bg-slate-900/50 rounded-xl border border-slate-100 dark:border-slate-700/60 transition-all hover:shadow-md hover:border-rose-500/30">
                         <p className="text-sm font-medium text-slate-500 dark:text-slate-400 mb-1">Error Rate</p>
                         <p className="text-2xl font-bold text-slate-900 dark:text-white">{((perfStats?.error_rate || 0) * 100).toFixed(3)}<span className="text-sm font-medium text-slate-400 ml-1">%</span></p>
+                    </div>
+
+                    <div className="flex flex-col items-center justify-center p-6 bg-slate-50 dark:bg-slate-900/50 rounded-xl border border-slate-100 dark:border-slate-700/60 transition-all hover:shadow-md hover:border-amber-500/30">
+                        <p className="text-sm font-medium text-slate-500 dark:text-slate-400 mb-1">Alert Fallback Used</p>
+                        <p className="text-2xl font-bold text-slate-900 dark:text-white font-mono">
+                            {perfStats?.alert_fallback_used ?? 0}
+                        </p>
+                        <p className="text-[11px] text-slate-400 mt-1 text-center">
+                            Fallback delivery when internal channel saturated
+                        </p>
+                    </div>
+
+                    <div className="flex flex-col items-center justify-center p-6 bg-slate-50 dark:bg-slate-900/50 rounded-xl border border-slate-100 dark:border-slate-700/60 transition-all hover:shadow-md hover:border-red-500/30">
+                        <p className="text-sm font-medium text-slate-500 dark:text-slate-400 mb-1">Alerts Dropped</p>
+                        <p className="text-2xl font-bold text-slate-900 dark:text-white font-mono">
+                            {perfStats?.alerts_dropped ?? 0}
+                        </p>
+                        <p className="text-[11px] text-slate-400 mt-1 text-center">
+                            Non‑zero indicates potential alert data loss
+                        </p>
                     </div>
                 </div>
             </div>

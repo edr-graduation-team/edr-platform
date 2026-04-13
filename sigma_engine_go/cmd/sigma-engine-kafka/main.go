@@ -291,6 +291,13 @@ func main() {
 		if alertRepo != nil {
 			writerConfig := database.DefaultAlertWriterConfig()
 			alertWriter = database.NewAlertWriter(alertRepo, writerConfig)
+			// Wire real-time WebSocket fan-out directly to persisted alerts so the
+			// dashboard live stream reflects newly generated alerts.
+			if apiServer != nil && apiServer.WebSocketServer() != nil {
+				alertWriter.SetOnAlertPersisted(func(a *database.Alert) {
+					apiServer.WebSocketServer().BroadcastAlert(a)
+				})
+			}
 			if err := alertWriter.Start(ctx); err != nil {
 				logger.Warnf("Failed to start alert writer: %v", err)
 			} else {

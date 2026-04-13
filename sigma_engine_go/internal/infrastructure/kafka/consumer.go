@@ -11,6 +11,7 @@ import (
 
 	"github.com/edr-platform/sigma-engine/internal/domain"
 	"github.com/edr-platform/sigma-engine/internal/infrastructure/logger"
+	metricsPkg "github.com/edr-platform/sigma-engine/internal/metrics"
 	"github.com/segmentio/kafka-go"
 )
 
@@ -204,6 +205,7 @@ func (c *EventConsumer) consumeLoop(ctx context.Context, readerID int) {
 			case <-time.After(500 * time.Millisecond):
 				logger.Warn("Event channel full, dropping message (500ms timeout)")
 				atomic.AddUint64(&c.metrics.ProcessingErrors, 1)
+				metricsPkg.DefaultMetrics.RecordError("consumer_event_channel_full_drop")
 			case <-ctx.Done():
 				return
 			}

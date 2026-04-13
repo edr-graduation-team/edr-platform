@@ -144,6 +144,9 @@ func (s *Server) RegisterRoutes(handlers *Handlers) {
 	events.GET("/:id", handlers.GetEvent, handlers.RequirePermission("alerts", "read"))
 	events.POST("/export", handlers.ExportEvents, handlers.RequirePermission("alerts", "read"))
 
+	// ── Reliability health (operational) ──────────────────────────────────
+	protected.GET("/reliability", handlers.GetReliabilityHealth, handlers.RequirePermission("settings", "read"))
+
 	// ── Policy endpoints ─────────────────────────────────────────────────
 	policies := protected.Group("/policies")
 	policies.GET("", handlers.ListPolicies, handlers.RequirePermission("settings", "read"))

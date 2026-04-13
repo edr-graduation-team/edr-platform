@@ -13,8 +13,38 @@ import (
 
 	"github.com/edr-platform/connection-manager/internal/repository"
 	"github.com/edr-platform/connection-manager/internal/service"
+	"github.com/edr-platform/connection-manager/pkg/handlers"
 	"github.com/edr-platform/connection-manager/pkg/models"
 )
+
+// GetReliabilityHealth returns operational reliability counters for the data plane.
+// GET /api/v1/reliability
+func (h *Handlers) GetReliabilityHealth(c echo.Context) error {
+	type fallbackPayload struct {
+		Enabled bool                         `json:"enabled"`
+		Reason  string                       `json:"reason,omitempty"`
+		Stats   *handlers.EventFallbackStats `json:"stats,omitempty"`
+	}
+
+	var fb fallbackPayload
+	if h.fallbackStore == nil {
+		fb = fallbackPayload{
+			Enabled: false,
+			Reason:  "DB fallback store not configured (PostgreSQL unavailable or fallback disabled at startup)",
+		}
+	} else {
+		stats := h.fallbackStore.Stats()
+		fb = fallbackPayload{
+			Enabled: true,
+			Stats:   &stats,
+		}
+	}
+
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"fallback_store": fb,
+		"meta":           responseMeta(c),
+	})
+}
 
 // ============================================================================
 // AUDIT HELPER
@@ -129,8 +159,6 @@ func (h *Handlers) GetEndpointRisk(c echo.Context) error {
 		"meta":  responseMeta(c),
 	})
 }
-
-
 
 // GetAlert returns a single alert.
 func (h *Handlers) GetAlert(c echo.Context) error {

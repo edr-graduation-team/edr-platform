@@ -5,6 +5,7 @@ package kafka
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -172,7 +173,9 @@ func (c *EventConsumer) consumeLoop(ctx context.Context, readerID int) {
 				if ctx.Err() != nil {
 					return // Context cancelled
 				}
-				if err == context.DeadlineExceeded {
+				// Read timeout is expected during low/idle traffic polling.
+				// kafka-go may wrap this as "fetching message: context deadline exceeded".
+				if err == context.DeadlineExceeded || strings.Contains(err.Error(), "context deadline exceeded") {
 					continue // No messages, retry
 				}
 				logger.Warnf("Error reading Kafka message: %v", err)

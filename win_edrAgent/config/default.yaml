@@ -47,11 +47,16 @@ collectors:
   imageload_enabled: true
   # Enable network monitoring
   network_enabled: true
+  # Enable DNS query monitoring (ETW DNS-Client provider)
+  dns_enabled: true
+  # Enable named pipe telemetry (via kernel FileIO stream)
+  pipe_enabled: true
+  # Enable process access telemetry (ETW Kernel-Audit-API-Calls)
+  process_access_enabled: true
 
 filtering:
   # Processes to exclude from monitoring
   exclude_processes:
-    - "svchost.exe"
     - "csrss.exe"
     - "services.exe"
     - "smss.exe"

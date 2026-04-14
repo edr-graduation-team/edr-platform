@@ -64,6 +64,11 @@ func (c *ETWCollector) handleFileIo(pid uint32, opcode uint8, filePath string) {
 	if procName == "" {
 		procName = "unknown"
 	}
+	// Drop the agent's own file I/O (queue/log writes) to avoid self-generated
+	// noise and false-positive drift in downstream Sigma matching.
+	if isSelfOrChildProcess(strings.ToLower(procName), "") {
+		return
+	}
 
 	name := filepath.Base(filePath)
 	dir := filepath.Dir(filePath)
@@ -149,6 +154,10 @@ func isNoisyFilePath(lower string) bool {
 		`\windows\fonts`,
 		// Windows Search index
 		`\programdata\microsoft\search`,
+		// Agent internals (self-generated I/O, no attacker signal)
+		`\programdata\edr\queue`,
+		`\programdata\edr\logs`,
+		`\programdata\edr\quarantine`,
 	}
 	for _, d := range noisyDirs {
 		if strings.Contains(lower, d) {

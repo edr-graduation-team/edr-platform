@@ -158,20 +158,29 @@ func (a *Agent) Start(ctx context.Context) error {
 	// Register config update handler — when the server pushes a new config
 	// via the heartbeat response, save it to the protected Registry.
 	a.heartbeat.SetOnConfigUpdate(func(newConfig []byte) {
-		var updatedCfg config.Config
-		if err := config.UnmarshalJSON(newConfig, &updatedCfg); err != nil {
+		// Merge server-provided config into a clone of the live config so that
+		// omitted fields (especially bool toggles) keep their current values.
+		// Without this, partial payloads can zero collectors flags and disable
+		// telemetry after restart.
+		a.mu.RLock()
+		baseCfg := a.cfg.Clone()
+		a.mu.RUnlock()
+
+		if err := config.UnmarshalJSON(newConfig, baseCfg); err != nil {
 			a.logger.Errorf("[ConfigSync] Invalid config from server: %v", err)
 			return
 		}
-		if err := updatedCfg.Validate(); err != nil {
+		if err := baseCfg.Validate(); err != nil {
 			a.logger.Errorf("[ConfigSync] Server config failed validation: %v", err)
 			return
 		}
 		// Preserve local-only fields that the server should not override
-		updatedCfg.Certs = a.cfg.Certs
-		updatedCfg.Agent.ID = a.cfg.Agent.ID
+		a.mu.RLock()
+		baseCfg.Certs = a.cfg.Certs
+		baseCfg.Agent.ID = a.cfg.Agent.ID
+		a.mu.RUnlock()
 
-		if err := updatedCfg.SaveToRegistry(); err != nil {
+		if err := baseCfg.SaveToRegistry(); err != nil {
 			a.logger.Errorf("[ConfigSync] Failed to save server config to Registry: %v", err)
 			return
 		}

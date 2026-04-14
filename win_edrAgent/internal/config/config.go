@@ -409,6 +409,14 @@ func (c *Config) Clone() *Config {
 	clone.Filtering.ExcludeRegistry = append([]string{}, c.Filtering.ExcludeRegistry...)
 	clone.Filtering.ExcludePaths = append([]string{}, c.Filtering.ExcludePaths...)
 	clone.Filtering.IncludePaths = append([]string{}, c.Filtering.IncludePaths...)
+	clone.Filtering.ExcludeEventIDs = append([]int{}, c.Filtering.ExcludeEventIDs...)
+	clone.Filtering.TrustedHashes = append([]string{}, c.Filtering.TrustedHashes...)
+	if c.Filtering.RateLimit.PerEventType != nil {
+		clone.Filtering.RateLimit.PerEventType = make(map[string]int, len(c.Filtering.RateLimit.PerEventType))
+		for k, v := range c.Filtering.RateLimit.PerEventType {
+			clone.Filtering.RateLimit.PerEventType[k] = v
+		}
+	}
 	return &clone
 }
 

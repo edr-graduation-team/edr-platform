@@ -135,6 +135,34 @@ func (ri *RuleIndexer) GetRules(product, category, service string) []*domain.Sig
 	return ri.allRules
 }
 
+// GetRulesStrict returns only rules that match the event logsource category.
+// Unlike GetRules, it does NOT fall back to product-wide or all-rules sets.
+// This prevents cross-category evaluation (e.g. image_load events tested against
+// process_creation/file rules) which can distort matching and confidence.
+func (ri *RuleIndexer) GetRulesStrict(product, category, service string) []*domain.SigmaRule {
+	start := time.Now()
+
+	ri.mu.RLock()
+	defer ri.mu.RUnlock()
+
+	// Try exact match first
+	key := fmt.Sprintf("%s:%s:%s", product, category, service)
+	if rules, ok := ri.index[key]; ok {
+		ri.updateLookupStats(time.Since(start))
+		return rules
+	}
+
+	// Try category match (product:category:*)
+	catKey := fmt.Sprintf("%s:%s", product, category)
+	if rules, ok := ri.categoryIndex[catKey]; ok {
+		ri.updateLookupStats(time.Since(start))
+		return rules
+	}
+
+	ri.updateLookupStats(time.Since(start))
+	return []*domain.SigmaRule{}
+}
+
 // GetRulesByCategory returns all rules for a specific category.
 func (ri *RuleIndexer) GetRulesByCategory(category string) []*domain.SigmaRule {
 	ri.mu.RLock()

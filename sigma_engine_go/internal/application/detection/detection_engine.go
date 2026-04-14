@@ -368,7 +368,7 @@ func (e *SigmaDetectionEngine) evaluateRuleForAggregation(
 // getCandidateRules returns rules matching the event's logsource.
 // Uses O(1) index lookup for performance.
 func (e *SigmaDetectionEngine) getCandidateRules(event *domain.LogEvent) []*domain.SigmaRule {
-	return e.ruleIndex.GetRules(
+	return e.ruleIndex.GetRulesStrict(
 		event.Product,
 		string(event.Category),
 		event.Service,

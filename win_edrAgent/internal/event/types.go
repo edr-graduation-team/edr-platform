@@ -19,9 +19,10 @@ const (
 	EventTypeAuth      EventType = "auth"
 	EventTypeDriver    EventType = "driver"
 	EventTypeImageLoad EventType = "image_load"
-	EventTypePipe      EventType = "pipe"
-	EventTypeWMI       EventType = "wmi"
-	EventTypeClipboard EventType = "clipboard"
+	EventTypePipe          EventType = "pipe"
+	EventTypeProcessAccess EventType = "process_access"
+	EventTypeWMI           EventType = "wmi"
+	EventTypeClipboard     EventType = "clipboard"
 )
 
 // Severity represents event severity level.
@@ -210,6 +211,24 @@ type PipeEvent struct {
 	PipeName    string `json:"pipe_name"`
 	PID         int64  `json:"pid"`
 	ProcessName string `json:"process_name"`
+	ProcessPath string `json:"process_path,omitempty"`
+}
+
+// ProcessAccessEvent represents a handle-open-to-sensitive-process event.
+// Detects credential dumping (Mimikatz T1003.001), process injection (T1055),
+// and other cross-process manipulation attempts.
+type ProcessAccessEvent struct {
+	Action            string `json:"action"`              // "open_process"
+	SourcePID         int64  `json:"source_pid"`
+	SourceProcessName string `json:"source_process_name"`
+	SourceProcessPath string `json:"source_process_path,omitempty"`
+	TargetPID         int64  `json:"target_pid"`
+	TargetProcessName string `json:"target_process_name"`
+	TargetProcessPath string `json:"target_process_path,omitempty"`
+	AccessMask        string `json:"access_mask"`        // hex string e.g. "0x1F0FFF"
+	AccessMaskInt     uint32 `json:"access_mask_int"`
+	UserSID           string `json:"user_sid,omitempty"`
+	UserName          string `json:"user_name,omitempty"`
 }
 
 // WMIEvent represents a WMI operation event.

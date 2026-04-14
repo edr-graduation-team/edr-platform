@@ -275,7 +275,16 @@ func (e *LogEvent) inferCategory() EventCategory {
 		case "image_load":
 			return EventCategoryImageLoad
 		case "pipe":
+			// Distinguish pipe_created vs pipe_connected from action field
+			if act, aok := e.GetField("action"); aok {
+				actStr := strings.ToLower(fmt.Sprintf("%v", act))
+				if strings.Contains(actStr, "connect") {
+					return EventCategoryPipeConnected
+				}
+			}
 			return EventCategoryPipeCreated
+		case "process_access":
+			return EventCategoryProcessAccess
 		case "wmi":
 			return EventCategoryWMIEvent
 		case "clipboard":

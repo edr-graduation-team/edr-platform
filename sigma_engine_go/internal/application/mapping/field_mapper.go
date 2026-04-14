@@ -99,6 +99,18 @@ func (fm *FieldMapper) initializeMappings() {
 		{"ImageLoaded", "dll.path", []string{"dll.name"}, FieldTypeString, false},
 		{"PipeName", "file.pipe.name", []string{}, FieldTypeString, false},
 
+		// Process Access fields (Sysmon EventID 10 equivalent)
+		{"SourceImage", "process.source.executable", []string{"source_process_path"}, FieldTypeString, false},
+		{"TargetImage", "process.target.executable", []string{"target_process_path"}, FieldTypeString, false},
+		{"GrantedAccess", "process.access.mask", []string{"access_mask"}, FieldTypeString, false},
+		{"SourceProcessId", "process.source.pid", []string{"source_pid"}, FieldTypeInt, false},
+		{"TargetProcessId", "process.target.pid", []string{"target_pid"}, FieldTypeInt, false},
+		{"CallTrace", "process.access.call_trace", []string{}, FieldTypeString, false},
+
+		// Extended DNS fields
+		{"QueryType", "dns.question.type", []string{"query_type"}, FieldTypeString, false},
+		{"QueryStatus", "dns.response_code", []string{"query_status"}, FieldTypeString, false},
+
 		// Registry fields
 		{"TargetObject", "registry.path", []string{"registry.key", "ObjectName", "RegistryKey"}, FieldTypeString, true},
 		{"Details", "registry.value", []string{"registry.data.strings"}, FieldTypeString, false},
@@ -171,9 +183,22 @@ func (fm *FieldMapper) initializeAgentMappings() {
 		// Registry fields
 		"TargetObject": "data.target_object",
 		"Details":      "data.details",
+		"EventType":    "data.EventType",
 
 		// Pipe fields
 		"PipeName": "data.pipe_name",
+
+		// Process Access fields (Sigma process_access / Sysmon EventID 10)
+		"SourceImage":     "data.source_process_path",
+		"TargetImage":     "data.target_process_path",
+		"GrantedAccess":   "data.access_mask",
+		"SourceProcessId": "data.source_pid",
+		"TargetProcessId": "data.target_pid",
+		"CallTrace":       "data.call_trace",
+
+		// Extended DNS fields
+		"QueryType":   "data.query_type",
+		"QueryStatus": "data.QueryStatus",
 
 		// Driver/Image load fields
 		"ImagePath":  "data.image_path",
@@ -237,14 +262,44 @@ func (fm *FieldMapper) initializeAgentMappings() {
 	// This is critical for snapshot-mode events that may have 'name' but not 'executable'
 	fm.sigmaToAgentFallback["Image"] = []string{"data.executable", "data.name"}
 	fm.sigmaToAgentFallback["image"] = []string{"data.executable", "data.name"}
-	fm.sigmaToAgentFallback["CommandLine"] = []string{"data.command_line", "data.executable", "data.name"}
-	fm.sigmaToAgentFallback["commandline"] = []string{"data.command_line", "data.executable", "data.name"}
+	// CommandLine must be resolved from real command-line fields only.
+	// Falling back to executable/module names causes incorrect matches.
+	fm.sigmaToAgentFallback["CommandLine"] = []string{"data.command_line", "data.CommandLine"}
+	fm.sigmaToAgentFallback["commandline"] = []string{"data.command_line", "data.CommandLine"}
 	fm.sigmaToAgentFallback["ParentImage"] = []string{"data.parent_executable", "data.parent_name"}
 	fm.sigmaToAgentFallback["parentimage"] = []string{"data.parent_executable", "data.parent_name"}
-	fm.sigmaToAgentFallback["ParentCommandLine"] = []string{"data.parent_command_line", "data.parent_executable", "data.parent_name"}
-	fm.sigmaToAgentFallback["parentcommandline"] = []string{"data.parent_command_line", "data.parent_executable", "data.parent_name"}
+	fm.sigmaToAgentFallback["ParentCommandLine"] = []string{"data.parent_command_line", "data.ParentCommandLine"}
+	fm.sigmaToAgentFallback["parentcommandline"] = []string{"data.parent_command_line", "data.ParentCommandLine"}
 	fm.sigmaToAgentFallback["User"] = []string{"data.user_name", "data.user", "data.user_sid"}
 	fm.sigmaToAgentFallback["user"] = []string{"data.user_name", "data.user", "data.user_sid"}
+
+	// Registry fallbacks
+	fm.sigmaToAgentFallback["TargetObject"] = []string{"data.TargetObject", "data.target_object", "data.key_path"}
+	fm.sigmaToAgentFallback["targetobject"] = []string{"data.TargetObject", "data.target_object", "data.key_path"}
+	fm.sigmaToAgentFallback["Details"] = []string{"data.Details", "data.details", "data.value_data"}
+	fm.sigmaToAgentFallback["details"] = []string{"data.Details", "data.details", "data.value_data"}
+
+	// DNS fallbacks
+	fm.sigmaToAgentFallback["QueryName"] = []string{"data.QueryName", "data.query_name"}
+	fm.sigmaToAgentFallback["queryname"] = []string{"data.QueryName", "data.query_name"}
+
+	// Process Access fallbacks
+	fm.sigmaToAgentFallback["SourceImage"] = []string{"data.SourceImage", "data.source_process_path"}
+	fm.sigmaToAgentFallback["sourceimage"] = []string{"data.SourceImage", "data.source_process_path"}
+	fm.sigmaToAgentFallback["TargetImage"] = []string{"data.TargetImage", "data.target_process_path"}
+	fm.sigmaToAgentFallback["targetimage"] = []string{"data.TargetImage", "data.target_process_path"}
+	fm.sigmaToAgentFallback["GrantedAccess"] = []string{"data.GrantedAccess", "data.access_mask"}
+	fm.sigmaToAgentFallback["grantedaccess"] = []string{"data.GrantedAccess", "data.access_mask"}
+
+	// Pipe fallbacks
+	fm.sigmaToAgentFallback["PipeName"] = []string{"data.PipeName", "data.pipe_name"}
+	fm.sigmaToAgentFallback["pipename"] = []string{"data.PipeName", "data.pipe_name"}
+
+	// Network fallbacks (new collector emits both Sigma and agent-style names)
+	fm.sigmaToAgentFallback["DestinationIp"] = []string{"data.DestinationIp", "data.destination_ip"}
+	fm.sigmaToAgentFallback["destinationip"] = []string{"data.DestinationIp", "data.destination_ip"}
+	fm.sigmaToAgentFallback["SourceIp"] = []string{"data.SourceIp", "data.source_ip"}
+	fm.sigmaToAgentFallback["sourceip"] = []string{"data.SourceIp", "data.source_ip"}
 }
 
 // ECSToSigma maps an ECS field name to Sigma field name.

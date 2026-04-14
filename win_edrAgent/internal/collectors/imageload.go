@@ -9,6 +9,12 @@
 // MITRE coverage: T1055 (Process Injection), T1574 (Hijack Execution
 // Flow / DLL Side-Loading), T1129 (Shared Modules).
 //
+// OPTIMIZATION (Phase 2 W-8): SHA256 hashing is now asynchronous.
+// Events are emitted IMMEDIATELY without waiting for the hash.
+// A background worker pool computes hashes and enriches events
+// after the fact. This prevents blocking the ETW callback goroutine
+// for files up to 50MB.
+//
 //go:build windows
 // +build windows
 
@@ -19,14 +25,122 @@ import (
 	"encoding/hex"
 	"os"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"unsafe"
 
 	"github.com/edr-platform/win-agent/internal/event"
+	"github.com/edr-platform/win-agent/internal/logging"
 )
+
+// =====================================================================
+// Async Hash Worker Pool
+// =====================================================================
+
+// hashRequest represents a file that needs its SHA256 computed.
+type hashRequest struct {
+	filePath string
+	evt      *event.Event // Event to enrich with the hash
+}
+
+// hashWorkerPool manages background hash computation workers.
+type hashWorkerPool struct {
+	queue   chan hashRequest
+	wg      sync.WaitGroup
+	running atomic.Bool
+	logger  *logging.Logger
+
+	// Metrics
+	completed atomic.Uint64
+	skipped   atomic.Uint64
+}
+
+// newHashWorkerPool creates a pool of hash workers.
+// workerCount controls parallelism (2 is optimal — matches typical SSD I/O depth).
+// queueSize controls backpressure (when full, hashing is skipped).
+func newHashWorkerPool(workerCount, queueSize int, logger *logging.Logger) *hashWorkerPool {
+	p := &hashWorkerPool{
+		queue:  make(chan hashRequest, queueSize),
+		logger: logger,
+	}
+	p.running.Store(true)
+
+	for i := 0; i < workerCount; i++ {
+		p.wg.Add(1)
+		go p.worker()
+	}
+
+	if logger != nil {
+		logger.Infof("[IMAGELOAD] Hash worker pool started: workers=%d queue=%d", workerCount, queueSize)
+	}
+	return p
+}
+
+// submit enqueues a hash request. Returns false if the queue is full (hash skipped).
+func (p *hashWorkerPool) submit(req hashRequest) bool {
+	select {
+	case p.queue <- req:
+		return true
+	default:
+		p.skipped.Add(1)
+		return false
+	}
+}
+
+// stop shuts down the worker pool gracefully.
+func (p *hashWorkerPool) stop() {
+	p.running.Store(false)
+	close(p.queue)
+	p.wg.Wait()
+}
+
+// worker processes hash requests from the queue.
+func (p *hashWorkerPool) worker() {
+	defer p.wg.Done()
+	for req := range p.queue {
+		if !p.running.Load() {
+			return
+		}
+		hash := computeFileHash(req.filePath)
+		if hash != "" {
+			// Enrich the event with the computed hash.
+			// This is safe because the event has already been sent to the pipeline
+			// and this field is only used for Sigma rule matching and later enrichment.
+			req.evt.Data["hash_sha256"] = hash
+			// Also set in Sigma-compatible format
+			req.evt.Data["Hashes"] = "SHA256=" + hash
+		}
+		p.completed.Add(1)
+	}
+}
+
+// =====================================================================
+// Global hash pool (initialized by ETW collector)
+// =====================================================================
+
+var (
+	globalHashPool     *hashWorkerPool
+	globalHashPoolOnce sync.Once
+)
+
+// initHashPool initializes the global hash worker pool (once).
+func initHashPool(logger *logging.Logger) {
+	globalHashPoolOnce.Do(func() {
+		// 2 workers, 256 queue depth — keeps I/O impact low
+		globalHashPool = newHashWorkerPool(2, 256, logger)
+	})
+}
+
+// =====================================================================
+// Image Load Handler
+// =====================================================================
 
 // handleImageLoad processes a single image/DLL load event from the kernel
 // ETW callback. This fires in real-time the instant a module is mapped —
 // there is zero polling window for malware to exploit.
+//
+// OPTIMIZATION: Hashing is NON-BLOCKING. The event is sent immediately
+// with hash_sha256="" and a background worker enriches it asynchronously.
 func (c *ETWCollector) handleImageLoad(pid uint32, imagePath string) {
 	lower := strings.ToLower(imagePath)
 
@@ -52,21 +166,23 @@ func (c *ETWCollector) handleImageLoad(pid uint32, imagePath string) {
 		procName = "unknown"
 	}
 
-	// Compute SHA256 hash (best-effort, skip large files).
-	hashSHA256 := computeFileHash(imagePath)
-
 	// Lightweight Authenticode check.
 	isSigned := isFileSigned(imagePath)
 
+	// Create event IMMEDIATELY — no blocking on hash computation.
 	evt := event.NewEvent(event.EventTypeImageLoad, event.SeverityMedium, map[string]interface{}{
 		"action":       "loaded",
 		"path":         imagePath,
 		"name":         modName,
-		"hash_sha256":  hashSHA256,
+		"hash_sha256":  "", // Will be enriched asynchronously by hash worker
 		"pid":          pid,
 		"process_name": procName,
 		"process_path": procPath,
 		"is_signed":    isSigned,
+		// Sigma-compatible fields
+		"ImageLoaded": imagePath,
+		"Image":       procPath,
+		"Signed":      isSigned,
 	})
 
 	// Apply configurable filter.
@@ -76,6 +192,16 @@ func (c *ETWCollector) handleImageLoad(pid uint32, imagePath string) {
 
 	c.send(evt)
 	c.imageLoadEvents.Add(1)
+
+	// Submit hash computation to background worker pool.
+	// The event is already in the pipeline — the worker will enrich it
+	// asynchronously. If the queue is full, hashing is simply skipped
+	// (the event still has all other fields for detection).
+	initHashPool(c.logger)
+	globalHashPool.submit(hashRequest{
+		filePath: imagePath,
+		evt:      evt,
+	})
 }
 
 // isNoisyModule filters out very common OS modules that load in every process.

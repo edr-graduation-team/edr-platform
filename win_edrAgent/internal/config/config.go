@@ -62,6 +62,11 @@ type CollectorConfig struct {
 	FileEnabled      bool          `yaml:"file_enabled"`
 	ImageLoadEnabled bool          `yaml:"imageload_enabled"`
 	NetworkEnabled   bool          `yaml:"network_enabled"`
+
+	// Phase 1 — New telemetry collectors (fill detection blind spots)
+	DNSEnabled           bool `yaml:"dns_enabled"`            // ETW Microsoft-Windows-DNS-Client (enables 50+ Sigma dns_query rules)
+	PipeEnabled          bool `yaml:"pipe_enabled"`           // Kernel FileIo pipe events (Cobalt Strike beacon pipe detection)
+	ProcessAccessEnabled bool `yaml:"process_access_enabled"` // LSASS/credential dump detection (Mimikatz T1003.001)
 }
 
 // FilteringConfig defines event filtering rules.
@@ -170,6 +175,11 @@ func DefaultConfig() *Config {
 			FileEnabled:      true,
 			ImageLoadEnabled: true,
 			NetworkEnabled:   true,
+
+			// Phase 1 — New collectors (enabled by default for full coverage)
+			DNSEnabled:           true,
+			PipeEnabled:          true,
+			ProcessAccessEnabled: true,
 		},
 		Filtering: FilteringConfig{
 			ExcludeProcesses: []string{

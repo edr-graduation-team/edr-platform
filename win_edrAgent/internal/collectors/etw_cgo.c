@@ -1,5 +1,5 @@
 // TDH-only ETW kernel event parser.
-// Handles PROCESS, IMAGE LOAD, and FILE I/O events.
+// Handles PROCESS, IMAGE LOAD, FILE I/O, DNS, PIPE, and PROCESS ACCESS events.
 //
 // CRITICAL: ALL field extraction uses Microsoft's TDH (Trace Data Helper)
 // API to dynamically resolve property offsets by name. NO manual byte
@@ -17,6 +17,11 @@ extern void goProcessEvent(ParsedProcessEvent* evt);
 extern void goImageLoadEvent(ParsedImageLoadEvent* evt);
 extern void goFileIoEvent(ParsedFileIoEvent* evt);
 
+// Phase 1 Go callbacks (defined in dns.go, pipe.go, process_access.go)
+extern void goDnsEvent(ParsedDnsEvent* evt);
+extern void goPipeEvent(ParsedPipeEvent* evt);
+extern void goProcessAccessEvent(ParsedProcessAccessEvent* evt);
+
 // =====================================================================
 // Well-known Kernel Trace Provider GUIDs
 // =====================================================================
@@ -32,6 +37,18 @@ static const GUID ImageLoadProviderGuid =
 // {90CBDC39-4A3E-11D1-84F4-0000F80464E3} — File I/O events
 static const GUID FileIoProviderGuid =
     {0x90CBDC39, 0x4A3E, 0x11D1, {0x84,0xF4,0x00,0x00,0xF8,0x04,0x64,0xE3}};
+
+// =====================================================================
+// Phase 1: User-Mode Provider GUIDs
+// =====================================================================
+
+// {1C95126E-7EEA-49A9-A3FE-A378B03DDB4D} — Microsoft-Windows-DNS-Client
+static const GUID DnsClientProviderGuid =
+    {0x1C95126E, 0x7EEA, 0x49A9, {0xA3,0xFE,0xA3,0x78,0xB0,0x3D,0xDB,0x4D}};
+
+// {E02A841C-75A3-4FA7-AFC8-AE09CF9B7F23} — Microsoft-Windows-Kernel-Audit-API-Calls
+static const GUID KernelAuditApiProviderGuid =
+    {0xE02A841C, 0x75A3, 0x4FA7, {0xAF,0xC8,0xAE,0x09,0xCF,0x9B,0x7F,0x23}};
 
 // =====================================================================
 // TDH Property Helpers — all field extraction goes through these
@@ -107,39 +124,21 @@ static int tdhGetPointer(PEVENT_RECORD rec, LPCWSTR name, ULONGLONG* out) {
 
 // =====================================================================
 // Parse Process Event — TDH ONLY, no manual offsets
-//
-// TDH properties for kernel Process events:
-//   ProcessId      (ULONG)
-//   ParentId       (ULONG)
-//   ImageFileName  (ANSI String)
-//   CommandLine    (Unicode String)
 // =====================================================================
 
 static void parseProcessEvent(PEVENT_RECORD rec, ParsedProcessEvent* out) {
-    // PID and PPID via TDH — NOT from hardcoded byte offsets.
     tdhGetULONG(rec, L"ProcessId",  &out->processId);
     tdhGetULONG(rec, L"ParentId",   &out->parentId);
-
-    // Image name and command line via TDH.
     tdhGetAnsi  (rec, L"ImageFileName", out->imageFileName, sizeof(out->imageFileName));
     tdhGetUnicode(rec, L"CommandLine",  out->commandLine,   sizeof(out->commandLine));
 }
 
 // =====================================================================
-// Parse Image Load Event — TDH ONLY, no manual offsets
-//
-// TDH properties for kernel Image Load events:
-//   FileName    (Unicode String)
-//   ImageBase   (Pointer — 4 or 8 bytes depending on architecture)
-//   ImageSize   (Pointer — 4 or 8 bytes depending on architecture)
-// PID/TID come from EventHeader (set by the caller before this function).
+// Parse Image Load Event — TDH ONLY
 // =====================================================================
 
 static void parseImageLoadEvent(PEVENT_RECORD rec, ParsedImageLoadEvent* out) {
-    // Image path via TDH.
     tdhGetUnicode(rec, L"FileName", out->imagePath, sizeof(out->imagePath));
-
-    // ImageBase and ImageSize via TDH — handles 32/64-bit transparently.
     tdhGetPointer(rec, L"ImageBase", &out->imageBase);
     ULONGLONG imgSz = 0;
     if (tdhGetPointer(rec, L"ImageSize", &imgSz) == 0) {
@@ -149,19 +148,46 @@ static void parseImageLoadEvent(PEVENT_RECORD rec, ParsedImageLoadEvent* out) {
 
 // =====================================================================
 // Parse File I/O Event — TDH ONLY
-//
-// TDH properties for kernel File I/O events:
-//   OpenPath  (Unicode String — used by Create opcode 64)
-//   FileName  (Unicode String — used by other opcodes)
-// PID/TID come from EventHeader (set by the caller before this function).
 // =====================================================================
 
 static void parseFileIoEvent(PEVENT_RECORD rec, ParsedFileIoEvent* out) {
-    // Try OpenPath first (Create events use this field name)
     if (tdhGetUnicode(rec, L"OpenPath", out->filePath, sizeof(out->filePath)) != 0) {
-        // Fallback to FileName (used by Write, Delete, Rename)
         tdhGetUnicode(rec, L"FileName", out->filePath, sizeof(out->filePath));
     }
+}
+
+// =====================================================================
+// Phase 1: Parse DNS Event — TDH ONLY
+//
+// Microsoft-Windows-DNS-Client provider, EventID 3006 (QueryCompleted):
+//   QueryName       (Unicode String) — domain name
+//   QueryType       (ULONG)          — DNS record type
+//   QueryStatus     (ULONG)          — DNS response status
+//   QueryResults    (Unicode String) — semicolon-separated answers
+// PID/TID come from EventHeader.
+// =====================================================================
+
+static void parseDnsEvent(PEVENT_RECORD rec, ParsedDnsEvent* out) {
+    tdhGetUnicode(rec, L"QueryName",    out->queryName,    sizeof(out->queryName));
+    tdhGetULONG  (rec, L"QueryType",    &out->queryType);
+    tdhGetULONG  (rec, L"QueryStatus",  &out->queryStatus);
+    tdhGetUnicode(rec, L"QueryResults", out->queryResults, sizeof(out->queryResults));
+}
+
+// =====================================================================
+// Phase 1: Parse Process Access Event — TDH ONLY
+//
+// Microsoft-Windows-Kernel-Audit-API-Calls, EventID 1 (OpenProcess):
+//   TargetProcessId  (ULONG) — PID of the process being opened
+//   DesiredAccess     (ULONG) — Requested access mask
+//   ReturnCode        (ULONG) — NTSTATUS (0 = success)
+// CallerPID comes from EventHeader.ProcessId.
+// =====================================================================
+
+static void parseProcessAccessEvent(PEVENT_RECORD rec, ParsedProcessAccessEvent* out) {
+    tdhGetULONG(rec, L"TargetProcessId", &out->targetPid);
+    tdhGetULONG(rec, L"DesiredAccess",   &out->desiredAccess);
+    tdhGetULONG(rec, L"ReturnCode",      &out->returnCode);
 }
 
 // =====================================================================
@@ -173,12 +199,30 @@ static int guidsEqual(const GUID* a, const GUID* b) {
 }
 
 // =====================================================================
+// Named pipe detection helper
+// Checks if a FileIo path is a named pipe by looking for the kernel
+// device prefix used for named pipe operations.
+// =====================================================================
+
+static int isNamedPipePath(const WCHAR* path) {
+    // Check for kernel device path: \Device\NamedPipe\ 
+    if (wcsncmp(path, L"\\Device\\NamedPipe\\", 18) == 0) return 1;
+    // Check for user-mode path: \\.\pipe\ 
+    if (wcsncmp(path, L"\\\\.\\pipe\\", 9) == 0) return 1;
+    return 0;
+}
+
+// =====================================================================
 // Event Callback — routes events by provider GUID
+// Handles kernel events (Process, ImageLoad, FileIO/Pipe) in the
+// kernel session callback, and user-mode events (DNS, ProcessAccess)
+// in the user-mode session callback.
 // =====================================================================
 
 static void WINAPI stdcallEventCallback(PEVENT_RECORD eventRecord) {
     const GUID* provider = &eventRecord->EventHeader.ProviderId;
     BYTE opcode = eventRecord->EventHeader.EventDescriptor.Opcode;
+    USHORT eventId = eventRecord->EventHeader.EventDescriptor.Id;
 
     // ---- PROCESS events (Start=1, End=2) ----
     if (guidsEqual(provider, &ProcessProviderGuid)) {
@@ -229,13 +273,74 @@ static void WINAPI stdcallEventCallback(PEVENT_RECORD eventRecord) {
         if (evt.processId <= 4) return;
         if (evt.filePath[0] == 0) return;  // No path — skip
 
+        // Phase 1: Check if this is a named pipe operation.
+        // Pipes use the same kernel FileIo provider but with paths under
+        // \Device\NamedPipe\. We intercept them here and route to the
+        // pipe handler instead of the file handler.
+        if (isNamedPipePath(evt.filePath)) {
+            ParsedPipeEvent pEvt;
+            memset(&pEvt, 0, sizeof(pEvt));
+            pEvt.processId = evt.processId;
+            pEvt.threadId  = evt.threadId;
+            pEvt.opcode    = evt.opcode;
+            // Copy pipe name (strip the \Device\NamedPipe\ prefix)
+            const WCHAR* pipeName = evt.filePath;
+            if (wcsncmp(pipeName, L"\\Device\\NamedPipe\\", 18) == 0)
+                pipeName += 18;
+            else if (wcsncmp(pipeName, L"\\\\.\\pipe\\", 9) == 0)
+                pipeName += 9;
+            wcsncpy(pEvt.pipeName, pipeName, 511);
+            pEvt.pipeName[511] = 0;
+            goPipeEvent(&pEvt);
+            return;
+        }
+
         goFileIoEvent(&evt);
+        return;
+    }
+
+    // ---- DNS events (Microsoft-Windows-DNS-Client, EventID 3006) ----
+    if (guidsEqual(provider, &DnsClientProviderGuid)) {
+        // EventID 3006 = DNS query completed (has both query and results)
+        if (eventId != 3006) return;
+
+        ParsedDnsEvent evt;
+        memset(&evt, 0, sizeof(evt));
+        evt.processId = eventRecord->EventHeader.ProcessId;
+        evt.threadId  = eventRecord->EventHeader.ThreadId;
+
+        parseDnsEvent(eventRecord, &evt);
+
+        if (evt.processId <= 4) return;
+        if (evt.queryName[0] == 0) return;  // No query name — skip
+
+        goDnsEvent(&evt);
+        return;
+    }
+
+    // ---- PROCESS ACCESS events (Kernel-Audit-API-Calls, EventID 1 = OpenProcess) ----
+    if (guidsEqual(provider, &KernelAuditApiProviderGuid)) {
+        // EventID 1 = OpenProcess call
+        if (eventId != 1) return;
+
+        ParsedProcessAccessEvent evt;
+        memset(&evt, 0, sizeof(evt));
+        evt.callerPid = eventRecord->EventHeader.ProcessId;
+
+        parseProcessAccessEvent(eventRecord, &evt);
+
+        if (evt.callerPid <= 4) return;
+        if (evt.targetPid <= 4) return;
+        // Only log successful access attempts
+        if (evt.returnCode != 0) return;
+
+        goProcessAccessEvent(&evt);
         return;
     }
 }
 
 // =====================================================================
-// Session Management
+// Session Management — Kernel Trace
 // =====================================================================
 
 static TRACEHANDLE g_sessionHandle = 0;
@@ -318,3 +423,86 @@ int KillNamedSession(const wchar_t* name) {
     ULONG st = ControlTraceW(0,name,(PEVENT_TRACE_PROPERTIES)b,EVENT_TRACE_CONTROL_STOP);
     return (st==ERROR_SUCCESS||st==ERROR_MORE_DATA)?0:(int)st;
 }
+
+// =====================================================================
+// Session Management — User-Mode ETW Providers (DNS, ProcessAccess)
+//
+// User-mode providers use EnableTraceEx2 to enable a specific provider
+// GUID on a real-time session, unlike kernel traces which use EnableFlags.
+// =====================================================================
+
+int StartUserModeSession(
+    const wchar_t* sessionName,
+    const GUID*    providerGuid,
+    UCHAR          level,
+    ULONGLONG      matchAnyKeyword)
+{
+    int nameLen = (int)(wcslen(sessionName)+1) * (int)sizeof(wchar_t);
+    int bufSize = (int)sizeof(EVENT_TRACE_PROPERTIES) + nameLen + 1024;
+    BYTE propBuf[4096];
+    if (bufSize > (int)sizeof(propBuf)) bufSize = (int)sizeof(propBuf);
+
+    KillNamedSession(sessionName);
+    Sleep(200);
+
+    memset(propBuf, 0, sizeof(propBuf));
+    PEVENT_TRACE_PROPERTIES p = (PEVENT_TRACE_PROPERTIES)propBuf;
+    p->Wnode.BufferSize    = (ULONG)bufSize;
+    p->Wnode.ClientContext = 1;
+    p->Wnode.Flags         = WNODE_FLAG_TRACED_GUID;
+    p->LogFileMode         = EVENT_TRACE_REAL_TIME_MODE;
+    p->BufferSize          = 64;
+    p->LoggerNameOffset    = (ULONG)sizeof(EVENT_TRACE_PROPERTIES);
+    p->LogFileNameOffset   = 0;
+
+    TRACEHANDLE hSession = 0;
+    ULONG st = StartTraceW(&hSession, sessionName, p);
+    if (st == ERROR_ALREADY_EXISTS) {
+        KillNamedSession(sessionName);
+        Sleep(200);
+        memset(propBuf, 0, sizeof(propBuf));
+        p->Wnode.BufferSize = (ULONG)bufSize;
+        p->Wnode.ClientContext = 1;
+        p->Wnode.Flags = WNODE_FLAG_TRACED_GUID;
+        p->LogFileMode = EVENT_TRACE_REAL_TIME_MODE;
+        p->BufferSize = 64;
+        p->LoggerNameOffset = (ULONG)sizeof(EVENT_TRACE_PROPERTIES);
+        st = StartTraceW(&hSession, sessionName, p);
+    }
+    if (st != ERROR_SUCCESS) return (int)st;
+
+    // Enable the provider on this session using EnableTraceEx2
+    st = EnableTraceEx2(
+        hSession,
+        providerGuid,
+        EVENT_CONTROL_CODE_ENABLE_PROVIDER,
+        level,
+        matchAnyKeyword,
+        0,     // MatchAllKeyword
+        0,     // Timeout (0 = async)
+        NULL   // EnableParameters
+    );
+    if (st != ERROR_SUCCESS) {
+        // Clean up session on failure
+        ControlTraceW(hSession, NULL, p, EVENT_TRACE_CONTROL_STOP);
+        return (int)st;
+    }
+
+    return 0;
+}
+
+int ProcessUserModeEvents(const wchar_t* sessionName, void* ctx) {
+    EVENT_TRACE_LOGFILEW t;
+    memset(&t, 0, sizeof(t));
+    t.LoggerName          = (LPWSTR)sessionName;
+    t.Context             = ctx;
+    t.ProcessTraceMode    = PROCESS_TRACE_MODE_REAL_TIME | PROCESS_TRACE_MODE_EVENT_RECORD;
+    t.EventRecordCallback = stdcallEventCallback;
+
+    TRACEHANDLE h = OpenTraceW(&t);
+    if (h == INVALID_PROCESSTRACE_HANDLE) return (int)GetLastError();
+    ULONG st = ProcessTrace(&h, 1, NULL, NULL);
+    CloseTrace(h);
+    return (st == ERROR_SUCCESS || st == ERROR_CANCELLED) ? 0 : (int)st;
+}
+

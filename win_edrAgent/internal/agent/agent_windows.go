@@ -56,6 +56,18 @@ func startPlatformCollectors(ctx context.Context, cfg *config.Config, eventChan 
 				logger.Info("ETW collector started")
 			}
 		}()
+
+		// Phase 1: Named Pipe monitoring (piggybacks on kernel ETW FileIo session)
+		// Pipe events are intercepted from the FileIo stream when paths contain
+		// \Device\NamedPipe\. This is a lightweight in-process filter with NO
+		// additional ETW session overhead.
+		if cfg.Collectors.PipeEnabled {
+			pipe := collectors.NewPipeCollector(eventChan, logger)
+			pipe.Enable()
+			logger.Info("Named Pipe collector enabled (via kernel FileIo ETW)")
+		} else {
+			logger.Debug("Named Pipe collector disabled by config")
+		}
 	} else {
 		logger.Debug("ETW collector disabled by config")
 	}
@@ -118,8 +130,55 @@ func startPlatformCollectors(ctx context.Context, cfg *config.Config, eventChan 
 		logger.Debug("WMI collector disabled by config")
 	}
 
+	// =====================================================================
+	// Phase 1: New User-Mode ETW Collectors (DNS, Process Access)
+	// These run in SEPARATE ETW sessions from the kernel trace because
+	// they are manifest-based providers, not kernel trace flags.
+	// =====================================================================
+
+	// DNS collector (Microsoft-Windows-DNS-Client via ETW)
+	// Enables 50+ Sigma dns_query rules for C2/DGA/tunneling detection.
+	if cfg.Collectors.DNSEnabled {
+		dns := collectors.NewDNSCollector(eventChan, logger)
+		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					logger.Errorf("DNS collector panicked and was safely recovered: %v", r)
+				}
+			}()
+			if err := dns.Start(ctx); err != nil {
+				logger.Warnf("DNS collector failed to start: %v", err)
+			} else {
+				logger.Info("DNS collector started")
+			}
+		}()
+	} else {
+		logger.Debug("DNS collector disabled by config")
+	}
+
+	// Process Access collector (Microsoft-Windows-Kernel-Audit-API-Calls via ETW)
+	// Detects credential dumping (Mimikatz), process injection, and handle abuse.
+	if cfg.Collectors.ProcessAccessEnabled {
+		procAccess := collectors.NewProcessAccessCollector(eventChan, logger)
+		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					logger.Errorf("ProcessAccess collector panicked and was safely recovered: %v", r)
+				}
+			}()
+			if err := procAccess.Start(ctx); err != nil {
+				logger.Warnf("ProcessAccess collector failed to start: %v", err)
+			} else {
+				logger.Info("ProcessAccess collector started")
+			}
+		}()
+	} else {
+		logger.Debug("ProcessAccess collector disabled by config")
+	}
+
 	// NOTE: File monitoring and Image Load detection are now handled by
 	// the ETW collector above (EVENT_TRACE_FLAG_FILE_IO_INIT and
 	// EVENT_TRACE_FLAG_IMAGE_LOAD). They fire real-time from the kernel
 	// with exact PID attribution — no separate polling collectors needed.
 }
+

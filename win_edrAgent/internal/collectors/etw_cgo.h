@@ -63,7 +63,40 @@ typedef struct {
     WCHAR filePath[1024];       // Full Unicode path of the target file
 } ParsedFileIoEvent;
 
-// Session management
+// =======================================================================
+// Phase 1: New event structs for DNS, Pipe, and Process Access
+// =======================================================================
+
+// DNS query completed event (Microsoft-Windows-DNS-Client, EventID 3006).
+// Provides the domain queried, result, and originating process.
+typedef struct {
+    DWORD processId;
+    DWORD threadId;
+    DWORD queryStatus;          // DNS response code (0=NOERROR, 3=NXDOMAIN, etc.)
+    DWORD queryType;            // DNS record type (1=A, 28=AAAA, 5=CNAME, 15=MX, 16=TXT)
+    WCHAR queryName[512];       // Domain name queried
+    WCHAR queryResults[2048];   // Semicolon-separated answer records
+} ParsedDnsEvent;
+
+// Named pipe event (detected from kernel FileIo when path contains \\Device\\NamedPipe\\).
+typedef struct {
+    DWORD processId;
+    DWORD threadId;
+    BYTE  opcode;               // 64=PipeCreate, 0=PipeConnect
+    BYTE  _pad[3];
+    WCHAR pipeName[512];        // Pipe name (e.g., "\\.\pipe\evil")
+} ParsedPipeEvent;
+
+// Process access event (Microsoft-Windows-Kernel-Audit-API-Calls, EventID 1=OpenProcess).
+// Detects when one process opens a handle to another with sensitive access rights.
+typedef struct {
+    DWORD callerPid;            // Source process ID (the one calling OpenProcess)
+    DWORD targetPid;            // Target process ID (LSASS, csrss, etc.)
+    DWORD desiredAccess;        // Access mask requested (e.g., 0x1F0FFF = PROCESS_ALL_ACCESS)
+    DWORD returnCode;           // NTSTATUS return code (0 = success)
+} ParsedProcessAccessEvent;
+
+// Session management — kernel trace (Process + ImageLoad + FileIO)
 int StartKernelProcessSession(
     const wchar_t* sessionName,
     const GUID*    providerGuid,
@@ -74,4 +107,14 @@ int ProcessKernelEvents(const wchar_t* sessionName, void* goContextKey);
 void StopKernelSession(const GUID* providerGuid);
 int KillNamedSession(const wchar_t* sessionName);
 
+// Session management — user-mode ETW providers (DNS, ProcessAccess)
+int StartUserModeSession(
+    const wchar_t* sessionName,
+    const GUID*    providerGuid,
+    UCHAR          level,
+    ULONGLONG      matchAnyKeyword);
+
+int ProcessUserModeEvents(const wchar_t* sessionName, void* goContextKey);
+
 #endif // ETW_CGO_H
+

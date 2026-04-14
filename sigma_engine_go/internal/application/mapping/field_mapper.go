@@ -260,8 +260,10 @@ func (fm *FieldMapper) initializeAgentMappings() {
 
 	// Fallback chains: when primary agent path is empty/nil, try these secondaries
 	// This is critical for snapshot-mode events that may have 'name' but not 'executable'
-	fm.sigmaToAgentFallback["Image"] = []string{"data.executable", "data.name"}
-	fm.sigmaToAgentFallback["image"] = []string{"data.executable", "data.name"}
+	// Image should represent process image path/name, not arbitrary file/module names.
+	// For file/network/dns collectors, process_path is the closest equivalent.
+	fm.sigmaToAgentFallback["Image"] = []string{"data.executable", "data.process_path", "data.image_path", "data.process_name"}
+	fm.sigmaToAgentFallback["image"] = []string{"data.executable", "data.process_path", "data.image_path", "data.process_name"}
 	// CommandLine must be resolved from real command-line fields only.
 	// Falling back to executable/module names causes incorrect matches.
 	fm.sigmaToAgentFallback["CommandLine"] = []string{"data.command_line", "data.CommandLine"}
@@ -300,6 +302,10 @@ func (fm *FieldMapper) initializeAgentMappings() {
 	fm.sigmaToAgentFallback["destinationip"] = []string{"data.DestinationIp", "data.destination_ip"}
 	fm.sigmaToAgentFallback["SourceIp"] = []string{"data.SourceIp", "data.source_ip"}
 	fm.sigmaToAgentFallback["sourceip"] = []string{"data.SourceIp", "data.source_ip"}
+
+	// File collector fallbacks
+	fm.sigmaToAgentFallback["TargetFilename"] = []string{"data.target_filename", "data.path", "data.name"}
+	fm.sigmaToAgentFallback["targetfilename"] = []string{"data.target_filename", "data.path", "data.name"}
 }
 
 // ECSToSigma maps an ECS field name to Sigma field name.

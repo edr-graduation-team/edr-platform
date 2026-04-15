@@ -145,7 +145,9 @@ func (s *Server) RegisterRoutes(handlers *Handlers) {
 	events.POST("/export", handlers.ExportEvents, handlers.RequirePermission("alerts", "read"))
 
 	// ── Reliability health (operational) ──────────────────────────────────
-	protected.GET("/reliability", handlers.GetReliabilityHealth, handlers.RequirePermission("settings", "read"))
+	// Authenticated endpoint (no extra RBAC gate) to avoid false-negative
+	// "backend unreachable" UI states when role permission catalogs drift.
+	protected.GET("/reliability", handlers.GetReliabilityHealth)
 
 	// ── Policy endpoints ─────────────────────────────────────────────────
 	policies := protected.Group("/policies")

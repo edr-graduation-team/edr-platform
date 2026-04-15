@@ -62,6 +62,9 @@ export default function ReliabilityHealth() {
     });
     const errorHint = (() => {
         if (!error || !axios.isAxiosError(error)) return null;
+        if (error.response?.status === 401) {
+            return 'Authentication failed for reliability endpoint (401). Please log in again.';
+        }
         if (error.response?.status === 403) {
             return 'Access denied for reliability endpoint (403).';
         }

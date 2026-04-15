@@ -558,9 +558,13 @@ export const reliabilityApi = {
         } catch (primaryErr) {
             // Fallback for environments where VITE_CONNECTION_MANAGER_URL points to an
             // unreachable host from browser, while same-origin /api proxy is available.
+            const token = localStorage.getItem('auth_token');
             const response = await axios.get<ReliabilityHealthResponse>('/api/v1/reliability', {
                 timeout: 10000,
-                headers: { 'Content-Type': 'application/json' },
+                headers: {
+                    'Content-Type': 'application/json',
+                    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+                },
             });
             return parsePayload(response.data);
         }

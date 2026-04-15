@@ -55,6 +55,11 @@ function MetricCard({
 }
 
 export default function ReliabilityHealth() {
+    const { data, isLoading, isFetching, refetch, error, dataUpdatedAt } = useQuery({
+        queryKey: ['reliabilityHealth'],
+        queryFn: reliabilityApi.health,
+        refetchInterval: 5000,
+    });
     const errorHint = (() => {
         if (!error || !axios.isAxiosError(error)) return null;
         if (error.response?.status === 403) {
@@ -68,11 +73,6 @@ export default function ReliabilityHealth() {
         }
         return null;
     })();
-    const { data, isLoading, isFetching, refetch, error, dataUpdatedAt } = useQuery({
-        queryKey: ['reliabilityHealth'],
-        queryFn: reliabilityApi.health,
-        refetchInterval: 5000,
-    });
 
     const fb = data?.fallback_store;
     const hasFB = !!fb?.enabled && !!fb?.stats && typeof fb.stats.channel_cap === 'number';

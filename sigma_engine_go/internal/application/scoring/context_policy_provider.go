@@ -41,6 +41,7 @@ func (NoopContextPolicyProvider) Resolve(_ context.Context, _, _, _ string) (Con
 }
 
 type policyRecord struct {
+	ID                      int64
 	ScopeType               string
 	ScopeValue              string
 	Enabled                 bool
@@ -80,6 +81,9 @@ func (p *PostgresContextPolicyProvider) Resolve(ctx context.Context, agentID, us
 	userLower := strings.ToLower(strings.TrimSpace(userName))
 	agentID = strings.TrimSpace(agentID)
 
+	// Apply policies in deterministic precedence order:
+	// global -> agent -> user (ordered in SQL), then stable by policy id.
+	// This ensures reproducible scoring even with factor clamping.
 	for _, r := range rows {
 		if !r.Enabled {
 			continue
@@ -104,6 +108,8 @@ func (p *PostgresContextPolicyProvider) Resolve(ctx context.Context, agentID, us
 		}
 	}
 
+	trustedNetworks = uniqueStrings(trustedNetworks)
+
 	if sourceIP != "" {
 		if isIPInTrustedNetworks(sourceIP, trustedNetworks) {
 			factors.NetworkAnomalyFactor = clampFloat(factors.NetworkAnomalyFactor*0.9, 0.5, 2.0)
@@ -126,11 +132,19 @@ func (p *PostgresContextPolicyProvider) getPolicies(ctx context.Context) ([]poli
 	p.mu.RUnlock()
 
 	rows, err := p.pool.Query(ctx, `
-		SELECT scope_type, scope_value, enabled,
+		SELECT id, scope_type, scope_value, enabled,
 		       user_role_weight, device_criticality_weight, network_anomaly_factor,
 		       trusted_networks
 		FROM context_policies
-		WHERE enabled = TRUE`)
+		WHERE enabled = TRUE
+		ORDER BY
+			CASE scope_type
+				WHEN 'global' THEN 0
+				WHEN 'agent' THEN 1
+				WHEN 'user' THEN 2
+				ELSE 3
+			END ASC,
+			id ASC`)
 	if err != nil {
 		return nil, fmt.Errorf("context policy query failed: %w", err)
 	}
@@ -141,7 +155,7 @@ func (p *PostgresContextPolicyProvider) getPolicies(ctx context.Context) ([]poli
 		var r policyRecord
 		var trustedJSON []byte
 		if err := rows.Scan(
-			&r.ScopeType, &r.ScopeValue, &r.Enabled,
+			&r.ID, &r.ScopeType, &r.ScopeValue, &r.Enabled,
 			&r.UserRoleWeight, &r.DeviceCriticalityWeight, &r.NetworkAnomalyFactor,
 			&trustedJSON,
 		); err != nil {
@@ -185,4 +199,24 @@ func clampFloat(v, min, max float64) float64 {
 		return max
 	}
 	return v
+}
+
+func uniqueStrings(in []string) []string {
+	if len(in) == 0 {
+		return in
+	}
+	seen := make(map[string]struct{}, len(in))
+	out := make([]string, 0, len(in))
+	for _, s := range in {
+		k := strings.TrimSpace(strings.ToLower(s))
+		if k == "" {
+			continue
+		}
+		if _, ok := seen[k]; ok {
+			continue
+		}
+		seen[k] = struct{}{}
+		out = append(out, s)
+	}
+	return out
 }

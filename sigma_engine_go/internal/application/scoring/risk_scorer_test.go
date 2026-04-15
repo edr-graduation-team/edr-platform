@@ -591,6 +591,45 @@ func TestRiskScorer_ContextFactors_AppearInSnapshot(t *testing.T) {
 	assert.InDelta(t, out.Snapshot.ScoreBreakdown.ContextMultiplier, out.Snapshot.ContextMultiplier, 0.001)
 }
 
+func TestRiskScorer_ContextQualityFactor_ReducesScoreOnMissingFields(t *testing.T) {
+	scorer, _ := makeDefaultScorerWithNoCache()
+	scorer.SetContextPolicyProvider(fixedContextProvider{
+		factors: scoring.ContextFactors{
+			UserRoleWeight:          1.0,
+			DeviceCriticalityWeight: 1.0,
+			NetworkAnomalyFactor:    1.0,
+		},
+	})
+	ctx := context.Background()
+
+	mr := makeMatchResult(t, domain.SeverityHigh)
+	outHighQuality, err := scorer.Score(ctx, scoring.ScoringInput{
+		MatchResult: mr,
+		Event: &domain.LogEvent{RawData: map[string]interface{}{
+			"context_quality_score": 100.0,
+		}},
+		AgentID: "quality-agent",
+	})
+	require.NoError(t, err)
+
+	outLowQuality, err := scorer.Score(ctx, scoring.ScoringInput{
+		MatchResult: mr,
+		Event: &domain.LogEvent{RawData: map[string]interface{}{
+			"context_quality_score": 30.0,
+			"missing_context_fields": []interface{}{
+				"user_name", "ip_address",
+			},
+		}},
+		AgentID: "quality-agent",
+	})
+	require.NoError(t, err)
+
+	assert.InDelta(t, 1.0, outHighQuality.Snapshot.QualityFactor, 0.001)
+	assert.InDelta(t, 0.90, outLowQuality.Snapshot.QualityFactor, 0.001)
+	assert.LessOrEqual(t, outLowQuality.RiskScore, outHighQuality.RiskScore)
+	require.NotEmpty(t, outLowQuality.Snapshot.Warnings)
+}
+
 // =============================================================================
 // Helpers
 // =============================================================================

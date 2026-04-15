@@ -98,6 +98,8 @@ export interface ScoreBreakdown {
     device_criticality_weight?: number;
     network_anomaly_factor?: number;
     context_multiplier?: number;
+    context_quality_score?: number;
+    quality_factor?: number;
     context_adjusted_score?: number;
     raw_score: number;
     final_score: number;
@@ -132,6 +134,9 @@ export interface ContextSnapshot {
     device_criticality_weight?: number;
     network_anomaly_factor?: number;
     context_multiplier?: number;
+    context_quality_score?: number;
+    quality_factor?: number;
+    missing_context_fields?: string[];
     warnings?: string[];
 }
 

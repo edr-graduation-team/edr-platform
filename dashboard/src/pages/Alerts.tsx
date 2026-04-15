@@ -585,6 +585,14 @@ function AlertDetailModal({
                                             : ''}
                                     </p>
                                 )}
+                                {typeof breakdown?.quality_factor === 'number' && (
+                                    <p className="text-xs text-gray-500">
+                                        Context quality factor: {breakdown.quality_factor.toFixed(2)}
+                                        {typeof breakdown.context_quality_score === 'number'
+                                            ? ` (quality ${breakdown.context_quality_score.toFixed(0)}%)`
+                                            : ''}
+                                    </p>
+                                )}
                                 {breakdown?.ueba_signal && breakdown.ueba_signal !== 'none' && (
                                     <div className="mt-1">
                                         <UEBASignalBadge signal={breakdown.ueba_signal} />

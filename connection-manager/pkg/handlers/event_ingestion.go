@@ -10,6 +10,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/golang/snappy"
@@ -621,6 +623,10 @@ func (h *EventHandler) processBatch(ctx context.Context, agentID string, batch *
 	// Events that fail validation are logged and dropped; valid events continue.
 	validEvents := make([]map[string]interface{}, 0, len(events))
 	for i, ev := range events {
+		// Normalize critical context fields using best-effort fallbacks so
+		// missing top-level fields can still be recovered from nested payloads.
+		enrichEventContextFields(ev)
+
 		if err := validateEventSchema(ev); err != nil {
 			logger.WithError(err).WithFields(logrus.Fields{
 				"event_index": i,
@@ -631,6 +637,37 @@ func (h *EventHandler) processBatch(ctx context.Context, agentID string, batch *
 			}
 			continue
 		}
+
+		quality, missing := evaluateEventContextQuality(ev)
+		ev["context_quality_score"] = quality
+		if len(missing) > 0 {
+			ev["missing_context_fields"] = missing
+		}
+
+		// Optional strict mode for production hardening:
+		// EDR_EVENT_CONTEXT_MODE=strict will drop events that miss required
+		// context fields after fallback enrichment.
+		if isStrictContextMode() && len(missing) > 0 {
+			logger.WithFields(logrus.Fields{
+				"event_index": i,
+				"batch_id":    batch.BatchId,
+				"missing":     strings.Join(missing, ","),
+			}).Warn("Event dropped by strict context mode")
+			if h.metrics != nil {
+				h.metrics.RecordError("context_quality_strict_drop")
+			}
+			continue
+		}
+
+		if len(missing) > 0 {
+			logger.WithFields(logrus.Fields{
+				"event_index": i,
+				"batch_id":    batch.BatchId,
+				"missing":     strings.Join(missing, ","),
+				"quality":     quality,
+			}).Debug("Event accepted with partial context (soft mode)")
+		}
+
 		validEvents = append(validEvents, ev)
 	}
 	if len(validEvents) == 0 {
@@ -788,6 +825,124 @@ func validateEventSchema(ev map[string]interface{}) error {
 	}
 
 	return nil
+}
+
+// enrichEventContextFields populates normalized top-level fields from known
+// nested paths so scoring components can still use them when agents provide
+// slightly different payload shapes.
+func enrichEventContextFields(ev map[string]interface{}) {
+	if ev == nil {
+		return
+	}
+
+	// agent_id may be nested in source.* for some emitters.
+	if getString(ev, "agent_id") == "" {
+		if v := getString(ev, "source.agent_id"); v != "" {
+			ev["agent_id"] = v
+		}
+	}
+
+	// user_name may arrive in nested data fields.
+	if getString(ev, "user_name") == "" {
+		if v := getString(ev, "data.user_name"); v != "" {
+			ev["user_name"] = v
+		}
+	}
+
+	// Source IP can arrive in various keys.
+	if getString(ev, "ip_address") == "" {
+		for _, key := range []string{"source.ip_address", "data.ip_address", "source_ip"} {
+			if v := getString(ev, key); v != "" {
+				ev["ip_address"] = v
+				break
+			}
+		}
+	}
+
+	// Normalize common process fields expected by downstream scoring logic.
+	normalizeFromData(ev, "pid")
+	normalizeFromData(ev, "ppid")
+	normalizeFromData(ev, "name")
+	normalizeFromData(ev, "executable")
+	normalizeFromData(ev, "command_line")
+	normalizeFromData(ev, "user_sid")
+	normalizeFromData(ev, "integrity_level")
+	normalizeFromData(ev, "signature_status")
+	normalizeFromData(ev, "is_elevated")
+}
+
+func normalizeFromData(ev map[string]interface{}, field string) {
+	if _, exists := ev[field]; exists {
+		return
+	}
+	if data, ok := ev["data"].(map[string]interface{}); ok {
+		if v, ok := data[field]; ok {
+			ev[field] = v
+		}
+	}
+}
+
+// evaluateEventContextQuality returns a score [0..100] and missing field list
+// for the minimum context-aware dataset used by policy matching and scoring.
+func evaluateEventContextQuality(ev map[string]interface{}) (float64, []string) {
+	required := []string{
+		"agent_id",
+		"user_name",
+		"ip_address",
+		"pid",
+		"name",
+		"command_line",
+	}
+	missing := make([]string, 0, len(required))
+	present := 0
+	for _, f := range required {
+		if hasUsableValue(ev, f) {
+			present++
+			continue
+		}
+		missing = append(missing, f)
+	}
+	score := (float64(present) / float64(len(required))) * 100.0
+	return score, missing
+}
+
+func hasUsableValue(ev map[string]interface{}, key string) bool {
+	v, ok := ev[key]
+	if !ok || v == nil {
+		return false
+	}
+	switch t := v.(type) {
+	case string:
+		return strings.TrimSpace(t) != ""
+	default:
+		return true
+	}
+}
+
+func getString(ev map[string]interface{}, path string) string {
+	parts := strings.Split(path, ".")
+	var cur interface{} = ev
+	for _, p := range parts {
+		m, ok := cur.(map[string]interface{})
+		if !ok {
+			return ""
+		}
+		n, ok := m[p]
+		if !ok {
+			return ""
+		}
+		cur = n
+	}
+	s, ok := cur.(string)
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(s)
+}
+
+func isStrictContextMode() bool {
+	mode := strings.TrimSpace(strings.ToLower(os.Getenv("EDR_EVENT_CONTEXT_MODE")))
+	return mode == "strict"
 }
 
 // ============================================================================

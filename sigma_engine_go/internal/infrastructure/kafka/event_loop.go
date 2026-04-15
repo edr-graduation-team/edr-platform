@@ -36,7 +36,7 @@ func DefaultEventLoopConfig() EventLoopConfig {
 		Workers:         4,
 		EventBuffer:     1000,
 		AlertBuffer:     500,
-		StatsInterval:   30 * time.Second,
+		StatsInterval:   10 * time.Second,
 		ShutdownTimeout: 30 * time.Second,
 	}
 }

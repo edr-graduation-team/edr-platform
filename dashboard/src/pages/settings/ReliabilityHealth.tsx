@@ -54,10 +54,10 @@ function MetricCard({
 }
 
 export default function ReliabilityHealth() {
-    const { data, isLoading, isFetching, refetch, error } = useQuery({
+    const { data, isLoading, isFetching, refetch, error, dataUpdatedAt } = useQuery({
         queryKey: ['reliabilityHealth'],
         queryFn: reliabilityApi.health,
-        refetchInterval: 10000,
+        refetchInterval: 5000,
     });
 
     const fb = data?.fallback_store;
@@ -71,8 +71,8 @@ export default function ReliabilityHealth() {
     const channelFull = hasFB ? stats!.channel_full : 0;
     const dbWriteFailed = hasFB ? stats!.db_write_failed : 0;
 
-    const headlineTone: 'good' | 'warn' | 'bad' =
-        drops > 0 ? 'bad' : channelFull > 0 || dbWriteFailed > 0 ? 'warn' : 'good';
+    const headlineTone: 'good' | 'warn' | 'bad' | 'neutral' =
+        !hasFB ? 'neutral' : drops > 0 ? 'bad' : channelFull > 0 || dbWriteFailed > 0 ? 'warn' : 'good';
 
     return (
         <div className="space-y-5">
@@ -101,7 +101,9 @@ export default function ReliabilityHealth() {
                     ? 'bg-emerald-50 border-emerald-200 text-emerald-800 dark:bg-emerald-500/10 dark:border-emerald-500/20 dark:text-emerald-300'
                     : headlineTone === 'bad'
                         ? 'bg-red-50 border-red-200 text-red-800 dark:bg-red-500/10 dark:border-red-500/20 dark:text-red-300'
-                        : 'bg-amber-50 border-amber-200 text-amber-800 dark:bg-amber-500/10 dark:border-amber-500/20 dark:text-amber-300'
+                        : headlineTone === 'warn'
+                            ? 'bg-amber-50 border-amber-200 text-amber-800 dark:bg-amber-500/10 dark:border-amber-500/20 dark:text-amber-300'
+                            : 'bg-slate-100 border-slate-300 text-slate-700 dark:bg-slate-800/60 dark:border-slate-700 dark:text-slate-300'
             }`}>
                 <div className="flex items-start gap-3">
                     <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5" />
@@ -111,7 +113,9 @@ export default function ReliabilityHealth() {
                                 ? 'Healthy'
                                 : headlineTone === 'bad'
                                     ? 'Data loss risk detected'
-                                    : 'Degraded — fallback pressure observed'}
+                                    : headlineTone === 'warn'
+                                        ? 'Degraded — fallback pressure observed'
+                                        : 'Telemetry unavailable'}
                         </div>
                         <div className="mt-1 opacity-90">
                             {hasFB
@@ -190,6 +194,9 @@ export default function ReliabilityHealth() {
                 </>
             )}
 
+            <div className="text-[12px] text-gray-500 dark:text-gray-400">
+                Last update: {dataUpdatedAt ? new Date(dataUpdatedAt).toLocaleTimeString() : '—'} · Counters are cumulative since service start.
+            </div>
             <div className="text-[12px] text-gray-500 dark:text-gray-400">
                 Tip: spikes in <span className="font-semibold">Channel Full</span> usually indicate Kafka outages or ingestion bursts. Any non-zero{' '}
                 <span className="font-semibold">Drops</span> should be investigated immediately.

@@ -169,10 +169,25 @@ func (r *PostgresBaselineRepository) Upsert(ctx context.Context, in AggregationI
 					0.000001
 				))::numeric, 4
 			),
-			observation_days = LEAST(process_baselines.observation_days + 1, 14),
+			observation_days = LEAST(
+				process_baselines.observation_days +
+				CASE
+					WHEN DATE(COALESCE(process_baselines.last_observed_at, TO_TIMESTAMP(0))) < DATE($9)
+					THEN 1
+					ELSE 0
+				END,
+				14
+			),
 			-- Confidence: 1 - exp(-days/7), capped to 0.99
 			confidence_score = ROUND(
-				LEAST(1.0 - EXP(-(process_baselines.observation_days + 1.0) / 7.0), 0.99)::numeric, 2
+				LEAST(1.0 - EXP(-(
+					process_baselines.observation_days +
+					CASE
+						WHEN DATE(COALESCE(process_baselines.last_observed_at, TO_TIMESTAMP(0))) < DATE($9)
+						THEN 1.0
+						ELSE 0.0
+					END
+				) / 7.0), 0.99)::numeric, 2
 			),
 			typical_signature_status  = COALESCE(NULLIF($5, ''), process_baselines.typical_signature_status),
 			typical_integrity_level   = COALESCE(NULLIF($6, ''), process_baselines.typical_integrity_level),
@@ -234,9 +249,24 @@ func (r *PostgresBaselineRepository) Upsert(ctx context.Context, in AggregationI
 					0.000001
 				))::numeric, 4
 			),
-			observation_days = LEAST(process_baselines.observation_days + 1, 14),
+			observation_days = LEAST(
+				process_baselines.observation_days +
+				CASE
+					WHEN DATE(COALESCE(process_baselines.last_observed_at, TO_TIMESTAMP(0))) < DATE($9)
+					THEN 1
+					ELSE 0
+				END,
+				14
+			),
 			confidence_score = ROUND(
-				LEAST(1.0 - EXP(-(process_baselines.observation_days + 1.0) / 7.0), 0.99)::numeric, 2
+				LEAST(1.0 - EXP(-(
+					process_baselines.observation_days +
+					CASE
+						WHEN DATE(COALESCE(process_baselines.last_observed_at, TO_TIMESTAMP(0))) < DATE($9)
+						THEN 1.0
+						ELSE 0.0
+					END
+				) / 7.0), 0.99)::numeric, 2
 			),
 			typical_signature_status  = COALESCE(NULLIF($5, ''), process_baselines.typical_signature_status),
 			typical_integrity_level   = COALESCE(NULLIF($6, ''), process_baselines.typical_integrity_level),

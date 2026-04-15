@@ -92,11 +92,13 @@ export default function Stats() {
     const { data: alertStats, isLoading: alertsLoading } = useQuery({
         queryKey: ['alertStats'],
         queryFn: statsApi.alerts,
+        refetchInterval: 10000,
     });
 
     const { data: ruleStats, isLoading: rulesLoading } = useQuery({
         queryKey: ['ruleStats'],
         queryFn: statsApi.rules,
+        refetchInterval: 30000,
     });
 
     const { data: perfStats } = useQuery({
@@ -121,8 +123,9 @@ export default function Stats() {
     };
 
     const { data: timelineData } = useQuery({
-        queryKey: ['statsTimeline', dateRange],
+        queryKey: ['statsTimeline', dateRange, customFrom, customTo],
         queryFn: () => statsApi.timeline(getDateRange()),
+        refetchInterval: 15000,
     });
 
     // Transform severity data for pie chart
@@ -336,7 +339,7 @@ export default function Stats() {
                             <TrendingUp className="w-5 h-5 text-purple-600" />
                         </div>
                         <div>
-                            <p className="text-sm text-gray-500">Detection Rate</p>
+                            <p className="text-sm text-gray-500">Avg Risk (normalized)</p>
                             <p className="text-2xl font-bold">{((alertStats?.avg_confidence || 0) * 100).toFixed(1)}%</p>
                         </div>
                     </div>

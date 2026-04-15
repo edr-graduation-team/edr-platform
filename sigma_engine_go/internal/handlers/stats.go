@@ -3,6 +3,7 @@ package handlers
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/edr-platform/sigma-engine/internal/infrastructure/database"
 	"github.com/edr-platform/sigma-engine/internal/infrastructure/logger"
@@ -135,6 +136,8 @@ type PerformanceStatsResponse struct {
 	WebSocketClients   int     `json:"websocket_clients"`
 	KafkaConsumerLag   int64   `json:"kafka_consumer_lag"`
 	ErrorRate          float64 `json:"error_rate"`
+	GeneratedAt        string  `json:"generated_at"`
+	StatsWindow        string  `json:"stats_window"`
 }
 
 // PerformanceStats handles GET /api/v1/sigma/stats/performance
@@ -161,9 +164,15 @@ func (h *StatsHandler) PerformanceStats(w http.ResponseWriter, r *http.Request) 
 			WebSocketClients:   0,
 			KafkaConsumerLag:   0,
 			ErrorRate:          errorRate,
+			GeneratedAt:        time.Now().UTC().Format(time.RFC3339),
+			StatsWindow:        "realtime-cumulative-metrics",
 		}
 	}
 	// If no metrics provider, all fields default to zero
+	if response.GeneratedAt == "" {
+		response.GeneratedAt = time.Now().UTC().Format(time.RFC3339)
+		response.StatsWindow = "realtime-cumulative-metrics"
+	}
 
 	writeJSON(w, http.StatusOK, response)
 }

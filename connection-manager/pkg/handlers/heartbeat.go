@@ -19,7 +19,7 @@ import (
 
 // HeartbeatHandler handles agent heartbeat RPCs.
 // It persists agent health data to TWO stores:
-//   - Redis: Real-time status for dashboards (5-min TTL, ephemeral)
+//   - Redis: Real-time status for dashboards (10-min TTL, ephemeral)
 //   - PostgreSQL: Source of truth for agent state and metrics history
 //
 // The Redis write happens first (faster, for live dashboards), then the
@@ -121,6 +121,7 @@ func (h *HeartbeatHandler) Heartbeat(ctx context.Context, req *edrv1.HeartbeatRe
 				AgentVersion:    req.AgentVersion,
 				IPAddresses:     req.IpAddresses,
 				CpuCount:        int(req.DiskTotalMb), // CPU count sent via DiskTotalMb field
+				HealthScore:     healthScore,
 			}
 
 			// UpdateStatus writes status + last_seen + optional metrics in one call.
@@ -153,13 +154,13 @@ func mapAgentStatus(status edrv1.AgentStatus) string {
 	case edrv1.AgentStatus_AGENT_STATUS_DEGRADED:
 		return "degraded"
 	case edrv1.AgentStatus_AGENT_STATUS_CRITICAL:
-		return "critical"
+		return "degraded"
 	case edrv1.AgentStatus_AGENT_STATUS_UPDATING:
-		return "updating"
+		return "degraded"
 	case edrv1.AgentStatus_AGENT_STATUS_ISOLATED:
-		return "isolated"
+		return "suspended"
 	default:
-		return "unknown"
+		return "degraded"
 	}
 }
 

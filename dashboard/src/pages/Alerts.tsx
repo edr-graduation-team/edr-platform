@@ -1,11 +1,11 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
     Search, Check, Eye, X, ChevronLeft, ChevronRight,
     AlertTriangle, Clock, CheckCircle, XCircle, Shield, ArrowUpDown,
     GitBranch, Activity, TrendingUp, Cpu, Zap, Info, ChevronDown, ChevronUp
 } from 'lucide-react';
-import { alertsApi, authApi, type Alert, type ContextSnapshot, type ScoreBreakdown, type AncestorEntry } from '../api/client';
+import { alertsApi, authApi, createAlertStream, type Alert, type ContextSnapshot, type ScoreBreakdown, type AncestorEntry } from '../api/client';
 import {
     Modal, MultiSelect, DateRangePicker, type DateRange, type MultiSelectOption,
     useToast, SkeletonTable
@@ -883,6 +883,9 @@ type SortField = 'timestamp' | 'severity' | 'risk_score';
 export default function Alerts() {
     const queryClient = useQueryClient();
     const { showToast } = useToast();
+    const seenAlertIdsRef = useRef<Set<string>>(new Set());
+    const pendingStreamIdsRef = useRef<Set<string>>(new Set());
+    const streamSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const [selectedAlert, setSelectedAlert] = useState<Alert | null>(null);
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
     const [page, setPage] = useState(1);
@@ -917,12 +920,61 @@ export default function Alerts() {
             sort: sortBy,
             order: sortOrder,
         }),
-        refetchInterval: 5000,
+        // DB is the source of truth. Keep lightweight fallback polling while
+        // WebSocket stream provides low-latency invalidation triggers.
+        refetchInterval: 30000,
     });
 
     const alerts = data?.alerts || [];
     const total = data?.total || 0;
     const totalPages = Math.ceil(total / pageSize);
+
+    // Track IDs already rendered from DB so stream-triggered refreshes never
+    // cause duplicate rendering semantics on the client.
+    useEffect(() => {
+        for (const alert of alerts) {
+            seenAlertIdsRef.current.add(alert.id);
+        }
+    }, [alerts]);
+
+    // Realtime path: stream is only a signal that new DB-persisted alerts exist.
+    // We never use stream payload as source-of-truth rows in the table.
+    useEffect(() => {
+        const triggerDebouncedSync = () => {
+            if (streamSyncTimerRef.current) {
+                clearTimeout(streamSyncTimerRef.current);
+            }
+            streamSyncTimerRef.current = setTimeout(() => {
+                const newCount = pendingStreamIdsRef.current.size;
+                pendingStreamIdsRef.current.clear();
+
+                queryClient.invalidateQueries({ queryKey: ['alerts'] });
+                queryClient.invalidateQueries({ queryKey: ['alertStats'] });
+
+                if (newCount > 0) {
+                    showToast(`Received ${newCount} new alert${newCount > 1 ? 's' : ''}`, 'success');
+                }
+            }, 1000);
+        };
+
+        const stream = createAlertStream((alert) => {
+            if (!alert?.id || seenAlertIdsRef.current.has(alert.id)) {
+                return;
+            }
+            seenAlertIdsRef.current.add(alert.id);
+            pendingStreamIdsRef.current.add(alert.id);
+            triggerDebouncedSync();
+        });
+
+        return () => {
+            stream.close();
+            if (streamSyncTimerRef.current) {
+                clearTimeout(streamSyncTimerRef.current);
+                streamSyncTimerRef.current = null;
+            }
+            pendingStreamIdsRef.current.clear();
+        };
+    }, [queryClient, showToast]);
 
     // Filter locally for multi-select and search - REMOVED for strict backend filtering
 

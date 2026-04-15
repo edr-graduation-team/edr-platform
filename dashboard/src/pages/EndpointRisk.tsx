@@ -284,18 +284,54 @@ export default function EndpointRisk() {
         queryFn: () => agentsApi.list({ limit: 500 }),
     });
 
-    // Merge risk data with agent metadata
+    // Merge risk data with agent metadata and collapse by logical endpoint key.
+    // Source-of-truth remains backend aggregation; this is a UI safety dedupe layer.
     const merged: MergedEndpoint[] = useMemo(() => {
         const summaries = riskData?.data ?? [];
         const agentMap = new Map<string, Agent>();
         agentsData?.data?.forEach(a => agentMap.set(a.id, a));
+        const mergedByLogicalKey = new Map<string, MergedEndpoint>();
 
-        return summaries.map(s => ({
-            ...s,
-            hostname: agentMap.get(s.agent_id)?.hostname,
-            os_type: agentMap.get(s.agent_id)?.os_type,
-            agent_status: agentMap.get(s.agent_id)?.status,
-        }));
+        for (const s of summaries) {
+            const agent = agentMap.get(s.agent_id);
+            const hostname = agent?.hostname;
+            const logicalKey = hostname?.trim().toLowerCase() || s.agent_id;
+            const candidate: MergedEndpoint = {
+                ...s,
+                hostname,
+                os_type: agent?.os_type,
+                agent_status: agent?.status,
+            };
+
+            const existing = mergedByLogicalKey.get(logicalKey);
+            if (!existing) {
+                mergedByLogicalKey.set(logicalKey, candidate);
+                continue;
+            }
+
+            mergedByLogicalKey.set(logicalKey, {
+                ...existing,
+                // Keep a stable ID for actions/navigation while merging metrics.
+                agent_id: existing.agent_id,
+                hostname: existing.hostname || candidate.hostname,
+                os_type: existing.os_type || candidate.os_type,
+                agent_status: existing.agent_status || candidate.agent_status,
+                total_alerts: existing.total_alerts + candidate.total_alerts,
+                peak_risk_score: Math.max(existing.peak_risk_score, candidate.peak_risk_score),
+                avg_risk_score: Math.max(existing.avg_risk_score, candidate.avg_risk_score),
+                critical_count: existing.critical_count + candidate.critical_count,
+                high_count: existing.high_count + candidate.high_count,
+                open_count: existing.open_count + candidate.open_count,
+                last_alert_at: new Date(existing.last_alert_at) > new Date(candidate.last_alert_at)
+                    ? existing.last_alert_at
+                    : candidate.last_alert_at,
+            });
+        }
+
+        return Array.from(mergedByLogicalKey.values()).sort((a, b) =>
+            b.peak_risk_score - a.peak_risk_score ||
+            b.critical_count - a.critical_count
+        );
     }, [riskData, agentsData]);
 
     // Filter

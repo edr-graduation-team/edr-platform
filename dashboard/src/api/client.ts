@@ -544,12 +544,26 @@ export interface ReliabilityHealthResponse {
 
 export const reliabilityApi = {
     health: async (): Promise<ReliabilityHealthResponse> => {
-        const response = await connectionApi.get<ReliabilityHealthResponse>('/api/v1/reliability');
-        const payload = response.data as ReliabilityHealthResponse;
-        if (!payload || typeof payload !== 'object' || !('fallback_store' in payload)) {
-            throw new Error('Invalid reliability payload shape (possible proxy misroute)');
+        const parsePayload = (data: unknown): ReliabilityHealthResponse => {
+            const payload = data as ReliabilityHealthResponse;
+            if (!payload || typeof payload !== 'object' || !('fallback_store' in payload)) {
+                throw new Error('Invalid reliability payload shape (possible proxy misroute)');
+            }
+            return payload;
+        };
+
+        try {
+            const response = await connectionApi.get<ReliabilityHealthResponse>('/api/v1/reliability');
+            return parsePayload(response.data);
+        } catch (primaryErr) {
+            // Fallback for environments where VITE_CONNECTION_MANAGER_URL points to an
+            // unreachable host from browser, while same-origin /api proxy is available.
+            const response = await axios.get<ReliabilityHealthResponse>('/api/v1/reliability', {
+                timeout: 10000,
+                headers: { 'Content-Type': 'application/json' },
+            });
+            return parsePayload(response.data);
         }
-        return payload;
     },
 };
 

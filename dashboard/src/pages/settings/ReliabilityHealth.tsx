@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { Activity, AlertTriangle, Database, HardDrive, RefreshCw } from 'lucide-react';
 import { reliabilityApi } from '../../api/client';
+import axios from 'axios';
 
 function MetricCard({
     title,
@@ -54,6 +55,19 @@ function MetricCard({
 }
 
 export default function ReliabilityHealth() {
+    const errorHint = (() => {
+        if (!error || !axios.isAxiosError(error)) return null;
+        if (error.response?.status === 403) {
+            return 'Access denied for reliability endpoint (403).';
+        }
+        if (error.response?.status === 404) {
+            return 'Reliability endpoint not routed (404). Check dashboard proxy.';
+        }
+        if (error.code === 'ECONNABORTED') {
+            return 'Reliability request timed out.';
+        }
+        return null;
+    })();
     const { data, isLoading, isFetching, refetch, error, dataUpdatedAt } = useQuery({
         queryKey: ['reliabilityHealth'],
         queryFn: reliabilityApi.health,
@@ -133,7 +147,8 @@ export default function ReliabilityHealth() {
                 </div>
             ) : error ? (
                 <div className="rounded-xl border border-red-200 bg-red-50 text-red-800 dark:bg-red-500/10 dark:border-red-500/20 dark:text-red-300 p-4 text-sm">
-                    Failed to load reliability health. Ensure you have `settings:read` and the backend is reachable.
+                    Failed to load reliability health. Ensure your session is valid and the backend is reachable.
+                    {errorHint ? <div className="mt-2 opacity-90">{errorHint}</div> : null}
                 </div>
             ) : (
                 <>

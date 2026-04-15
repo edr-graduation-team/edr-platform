@@ -575,6 +575,16 @@ function AlertDetailModal({
                                         FP Risk: {(alert.false_positive_risk * 100).toFixed(0)}% probability this is a false positive
                                     </p>
                                 )}
+                                {typeof breakdown?.context_multiplier === 'number' && (
+                                    <p className="text-xs text-gray-500">
+                                        Context multiplier: {breakdown.context_multiplier.toFixed(2)}
+                                        {typeof breakdown.user_role_weight === 'number' &&
+                                            typeof breakdown.device_criticality_weight === 'number' &&
+                                            typeof breakdown.network_anomaly_factor === 'number'
+                                            ? ` (user ${breakdown.user_role_weight.toFixed(2)} × device ${breakdown.device_criticality_weight.toFixed(2)} × network ${breakdown.network_anomaly_factor.toFixed(2)})`
+                                            : ''}
+                                    </p>
+                                )}
                                 {breakdown?.ueba_signal && breakdown.ueba_signal !== 'none' && (
                                     <div className="mt-1">
                                         <UEBASignalBadge signal={breakdown.ueba_signal} />

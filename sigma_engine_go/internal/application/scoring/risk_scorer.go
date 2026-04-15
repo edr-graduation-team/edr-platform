@@ -86,6 +86,7 @@ type DefaultRiskScorer struct {
 	burstTracker     BurstTracker
 	matrix           *SuspicionMatrix
 	baselineProvider baselines.BaselineProvider
+	contextProvider  ContextPolicyProvider
 }
 
 // NewDefaultRiskScorer constructs the production risk scorer.
@@ -100,7 +101,17 @@ func NewDefaultRiskScorer(
 		burstTracker:     burstTracker,
 		matrix:           NewSuspicionMatrix(),
 		baselineProvider: baselineProvider,
+		contextProvider:  NoopContextPolicyProvider{},
 	}
+}
+
+// SetContextPolicyProvider injects hybrid context-policy inputs (user/device/network).
+func (rs *DefaultRiskScorer) SetContextPolicyProvider(provider ContextPolicyProvider) {
+	if provider == nil {
+		rs.contextProvider = NoopContextPolicyProvider{}
+		return
+	}
+	rs.contextProvider = provider
 }
 
 // Score computes the risk score for a matched event.
@@ -190,22 +201,40 @@ func (rs *DefaultRiskScorer) Score(ctx context.Context, input ScoringInput) (*Sc
 	// single signal alone would warrant escalation.
 	interactionBonus := computeInteractionBonus(lineageBonus, privilegeBonus, uebaBonus, burstBonus)
 
+	// ── Step 5.7: Hybrid Context Policy Factors (user/device/network) ───────
+	userName := extractString(input.Event.RawData, "user_name")
+	sourceIP := extractString(input.Event.RawData, "ip_address")
+	if sourceIP == "" {
+		sourceIP = extractString(input.Event.RawData, "source.ip_address")
+	}
+	contextFactors, contextErr := rs.contextProvider.Resolve(ctx, input.AgentID, userName, sourceIP)
+	if contextErr != nil {
+		contextErr = fmt.Errorf("context policy provider: %w", contextErr)
+		contextFactors = DefaultContextFactors()
+	}
+
 	// ── Step 6: Final Score ───────────────────────────────────────────────────
 	raw := baseScore + lineageBonus + privilegeBonus + burstBonus + uebaBonus + interactionBonus - fpDiscount - uebaDiscount
-	finalScore := clamp(raw, 0, 100)
+	contextAdjusted := int(math.Round(float64(raw) * contextFactors.Multiplier()))
+	finalScore := clamp(contextAdjusted, 0, 100)
 
 	breakdown := ScoreBreakdown{
-		BaseScore:        baseScore,
-		LineageBonus:     lineageBonus,
-		PrivilegeBonus:   privilegeBonus,
-		BurstBonus:       burstBonus,
-		FPDiscount:       fpDiscount,
-		UEBABonus:        uebaBonus,
-		UEBADiscount:     uebaDiscount,
-		UEBASignal:       uebaSignal,
-		InteractionBonus: interactionBonus,
-		RawScore:         raw,
-		FinalScore:       finalScore,
+		BaseScore:               baseScore,
+		LineageBonus:            lineageBonus,
+		PrivilegeBonus:          privilegeBonus,
+		BurstBonus:              burstBonus,
+		FPDiscount:              fpDiscount,
+		UEBABonus:               uebaBonus,
+		UEBADiscount:            uebaDiscount,
+		UEBASignal:              uebaSignal,
+		InteractionBonus:        interactionBonus,
+		UserRoleWeight:          contextFactors.UserRoleWeight,
+		DeviceCriticalityWeight: contextFactors.DeviceCriticalityWeight,
+		NetworkAnomalyFactor:    contextFactors.NetworkAnomalyFactor,
+		ContextMultiplier:       contextFactors.Multiplier(),
+		ContextAdjustedScore:    contextAdjusted,
+		RawScore:                raw,
+		FinalScore:              finalScore,
 	}
 
 	// ── Step 7: Build Context Snapshot ───────────────────────────────────────
@@ -221,6 +250,14 @@ func (rs *DefaultRiskScorer) Score(ctx context.Context, input ScoringInput) (*Sc
 	if uebaErr != nil {
 		snapshot.Warnings = append(snapshot.Warnings, uebaErr.Error())
 	}
+	if contextErr != nil {
+		snapshot.Warnings = append(snapshot.Warnings, contextErr.Error())
+	}
+
+	snapshot.UserRoleWeight = contextFactors.UserRoleWeight
+	snapshot.DeviceCriticalityWeight = contextFactors.DeviceCriticalityWeight
+	snapshot.NetworkAnomalyFactor = contextFactors.NetworkAnomalyFactor
+	snapshot.ContextMultiplier = contextFactors.Multiplier()
 
 	return &ScoringOutput{
 		RiskScore:         finalScore,
@@ -678,7 +715,6 @@ func resolveField(data map[string]interface{}, key string) interface{} {
 	}
 	return nil
 }
-
 
 // =============================================================================
 // ContextSnapshot Builder

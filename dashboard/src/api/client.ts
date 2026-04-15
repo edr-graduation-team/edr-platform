@@ -94,6 +94,11 @@ export interface ScoreBreakdown {
     ueba_discount: number;
     ueba_signal: 'anomaly' | 'normal' | 'none' | string;
     interaction_bonus: number; // Cross-dimensional signal convergence bonus
+    user_role_weight?: number;
+    device_criticality_weight?: number;
+    network_anomaly_factor?: number;
+    context_multiplier?: number;
+    context_adjusted_score?: number;
     raw_score: number;
     final_score: number;
 }
@@ -123,6 +128,10 @@ export interface ContextSnapshot {
     rule_category?: string;
     match_count: number;
     score_breakdown: ScoreBreakdown;
+    user_role_weight?: number;
+    device_criticality_weight?: number;
+    network_anomaly_factor?: number;
+    context_multiplier?: number;
     warnings?: string[];
 }
 
@@ -541,6 +550,39 @@ export interface ReliabilityHealthResponse {
     fallback_store: FallbackStoreHealth;
     meta?: { request_id?: string; timestamp?: string };
 }
+
+export interface ContextPolicy {
+    id: number;
+    name: string;
+    scope_type: 'global' | 'agent' | 'user';
+    scope_value: string;
+    enabled: boolean;
+    user_role_weight: number;
+    device_criticality_weight: number;
+    network_anomaly_factor: number;
+    trusted_networks: string[];
+    notes?: string;
+    created_at?: string;
+    updated_at?: string;
+}
+
+export const contextPoliciesApi = {
+    list: async () => {
+        const response = await connectionApi.get<{ data: ContextPolicy[]; total: number }>('/api/v1/context-policies');
+        return response.data;
+    },
+    create: async (payload: Omit<ContextPolicy, 'id' | 'created_at' | 'updated_at'>) => {
+        const response = await connectionApi.post<{ data: ContextPolicy }>('/api/v1/context-policies', payload);
+        return response.data.data;
+    },
+    update: async (id: number, payload: Omit<ContextPolicy, 'id' | 'created_at' | 'updated_at'>) => {
+        const response = await connectionApi.patch<{ data: ContextPolicy }>(`/api/v1/context-policies/${id}`, payload);
+        return response.data.data;
+    },
+    remove: async (id: number) => {
+        await connectionApi.delete(`/api/v1/context-policies/${id}`);
+    },
+};
 
 export const reliabilityApi = {
     health: async (): Promise<ReliabilityHealthResponse> => {

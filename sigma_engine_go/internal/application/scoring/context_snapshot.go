@@ -59,6 +59,12 @@ type ContextSnapshot struct {
 	// Essential for academic justification and SOC analyst trust.
 	ScoreBreakdown ScoreBreakdown `json:"score_breakdown"`
 
+	// ── Context-Aware Policy Factors (Hybrid model) ──────────────────────────
+	UserRoleWeight          float64 `json:"user_role_weight,omitempty"`
+	DeviceCriticalityWeight float64 `json:"device_criticality_weight,omitempty"`
+	NetworkAnomalyFactor    float64 `json:"network_anomaly_factor,omitempty"`
+	ContextMultiplier       float64 `json:"context_multiplier,omitempty"`
+
 	// Warnings contains non-fatal scoring errors (e.g., lineage cache miss).
 	// Presence of warnings indicates the score was computed with partial context.
 	Warnings []string `json:"warnings,omitempty"`
@@ -83,15 +89,20 @@ type AncestorEntry struct {
 // risk_score = clamp(BaseScore + LineageBonus + PrivilegeBonus + BurstBonus
 //	           + UEBABonus + InteractionBonus - FPDiscount - UEBADiscount, 0, 100)
 type ScoreBreakdown struct {
-	BaseScore        int    `json:"base_score"`        // from Sigma severity + multi-match
-	LineageBonus     int    `json:"lineage_bonus"`     // from suspicious parent-child pair
-	PrivilegeBonus   int    `json:"privilege_bonus"`   // from SYSTEM/elevated/unsigned
-	BurstBonus       int    `json:"burst_bonus"`       // from temporal repeat firing
-	FPDiscount       int    `json:"fp_discount"`       // subtracted for trusted signature
-	UEBABonus        int    `json:"ueba_bonus"`        // +15 when process is anomalous
-	UEBADiscount     int    `json:"ueba_discount"`     // +10 subtracted when process is normal
-	UEBASignal       string `json:"ueba_signal"`       // "anomaly", "normal", or "none"
-	InteractionBonus int    `json:"interaction_bonus"` // +10/+15 when multiple high signals co-occur
-	RawScore         int    `json:"raw_score"`         // before clamp
-	FinalScore       int    `json:"final_score"`       // after clamp(0,100)
+	BaseScore               int     `json:"base_score"`        // from Sigma severity + multi-match
+	LineageBonus            int     `json:"lineage_bonus"`     // from suspicious parent-child pair
+	PrivilegeBonus          int     `json:"privilege_bonus"`   // from SYSTEM/elevated/unsigned
+	BurstBonus              int     `json:"burst_bonus"`       // from temporal repeat firing
+	FPDiscount              int     `json:"fp_discount"`       // subtracted for trusted signature
+	UEBABonus               int     `json:"ueba_bonus"`        // +15 when process is anomalous
+	UEBADiscount            int     `json:"ueba_discount"`     // +10 subtracted when process is normal
+	UEBASignal              string  `json:"ueba_signal"`       // "anomaly", "normal", or "none"
+	InteractionBonus        int     `json:"interaction_bonus"` // +10/+15 when multiple high signals co-occur
+	UserRoleWeight          float64 `json:"user_role_weight,omitempty"`
+	DeviceCriticalityWeight float64 `json:"device_criticality_weight,omitempty"`
+	NetworkAnomalyFactor    float64 `json:"network_anomaly_factor,omitempty"`
+	ContextMultiplier       float64 `json:"context_multiplier,omitempty"`
+	ContextAdjustedScore    int     `json:"context_adjusted_score,omitempty"` // after multiplier, before clamp
+	RawScore                int     `json:"raw_score"`                        // before clamp
+	FinalScore              int     `json:"final_score"`                      // after clamp(0,100)
 }

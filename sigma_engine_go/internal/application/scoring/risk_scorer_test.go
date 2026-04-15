@@ -13,6 +13,14 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+type fixedContextProvider struct {
+	factors scoring.ContextFactors
+}
+
+func (f fixedContextProvider) Resolve(_ context.Context, _, _, _ string) (scoring.ContextFactors, error) {
+	return f.factors, nil
+}
+
 // =============================================================================
 // SuspicionMatrix Tests
 // =============================================================================
@@ -531,11 +539,69 @@ func TestScenario_LegitSysadminPowerShell(t *testing.T) {
 		"Legitimate sysadmin PowerShell should score ≤ 55 (lower risk)")
 }
 
+func TestRiskScorer_ContextFactors_AdjustFinalScore(t *testing.T) {
+	scorer, _ := makeDefaultScorerWithNoCache()
+	scorer.SetContextPolicyProvider(fixedContextProvider{
+		factors: scoring.ContextFactors{
+			UserRoleWeight:          1.2,
+			DeviceCriticalityWeight: 1.3,
+			NetworkAnomalyFactor:    1.1,
+		},
+	})
+	ctx := context.Background()
+
+	mr := makeMatchResult(t, domain.SeverityMedium)
+	out, err := scorer.Score(ctx, scoring.ScoringInput{
+		MatchResult: mr,
+		Event: &domain.LogEvent{RawData: map[string]interface{}{
+			"user_name": "svc-admin",
+		}},
+		AgentID: "ctx-agent",
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, out.Snapshot)
+	assert.Greater(t, out.Snapshot.ScoreBreakdown.ContextMultiplier, 1.0)
+	assert.Equal(t, out.RiskScore, out.Snapshot.ScoreBreakdown.FinalScore)
+	assert.GreaterOrEqual(t, out.Snapshot.ScoreBreakdown.ContextAdjustedScore, out.Snapshot.ScoreBreakdown.RawScore)
+}
+
+func TestRiskScorer_ContextFactors_AppearInSnapshot(t *testing.T) {
+	scorer, _ := makeDefaultScorerWithNoCache()
+	scorer.SetContextPolicyProvider(fixedContextProvider{
+		factors: scoring.ContextFactors{
+			UserRoleWeight:          0.9,
+			DeviceCriticalityWeight: 1.0,
+			NetworkAnomalyFactor:    1.2,
+		},
+	})
+	ctx := context.Background()
+
+	mr := makeMatchResult(t, domain.SeverityHigh)
+	out, err := scorer.Score(ctx, scoring.ScoringInput{
+		MatchResult: mr,
+		Event:       &domain.LogEvent{RawData: map[string]interface{}{}},
+		AgentID:     "ctx-agent-2",
+	})
+
+	require.NoError(t, err)
+	assert.InDelta(t, 0.9, out.Snapshot.UserRoleWeight, 0.001)
+	assert.InDelta(t, 1.0, out.Snapshot.DeviceCriticalityWeight, 0.001)
+	assert.InDelta(t, 1.2, out.Snapshot.NetworkAnomalyFactor, 0.001)
+	assert.InDelta(t, out.Snapshot.ScoreBreakdown.ContextMultiplier, out.Snapshot.ContextMultiplier, 0.001)
+}
+
 // =============================================================================
 // Helpers
 // =============================================================================
 
 func makeScorerWithNoCache() (scoring.RiskScorer, *scoring.InMemoryBurstTracker) {
+	burst := scoring.NewInMemoryBurstTracker(5 * time.Minute)
+	lineage := infracache.NewNoopLineageCache()
+	return scoring.NewDefaultRiskScorer(lineage, burst, baselines.NoopBaselineProvider{}), burst
+}
+
+func makeDefaultScorerWithNoCache() (*scoring.DefaultRiskScorer, *scoring.InMemoryBurstTracker) {
 	burst := scoring.NewInMemoryBurstTracker(5 * time.Minute)
 	lineage := infracache.NewNoopLineageCache()
 	return scoring.NewDefaultRiskScorer(lineage, burst, baselines.NoopBaselineProvider{}), burst

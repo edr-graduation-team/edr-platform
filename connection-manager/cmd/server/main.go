@@ -401,6 +401,7 @@ func main() {
 		pool := dbPool.Pool()
 		apiHandlers.SetUserRepo(repository.NewPostgresUserRepository(pool))
 		apiHandlers.SetRoleRepo(repository.NewPostgresRoleRepository(pool))
+		apiHandlers.SetContextPolicyRepo(repository.NewPostgresContextPolicyRepository(pool))
 		logger.Info("User management and RBAC enabled")
 	}
 

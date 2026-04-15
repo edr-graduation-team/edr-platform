@@ -81,6 +81,7 @@ type AgentMetrics struct {
 	AgentVersion    string
 	IPAddresses     []string
 	CpuCount        int
+	HealthScore     float64
 }
 
 // RegistrationStatusApproved is the status string for approved (cert-issued) registration.
@@ -318,6 +319,7 @@ func (s *agentServiceImpl) UpdateMetrics(ctx context.Context, id uuid.UUID, metr
 		metrics.AgentVersion,
 		metrics.IPAddresses,
 		metrics.CpuCount,
+		metrics.HealthScore,
 	)
 }
 

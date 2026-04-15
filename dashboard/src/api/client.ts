@@ -545,7 +545,11 @@ export interface ReliabilityHealthResponse {
 export const reliabilityApi = {
     health: async (): Promise<ReliabilityHealthResponse> => {
         const response = await connectionApi.get<ReliabilityHealthResponse>('/api/v1/reliability');
-        return response.data;
+        const payload = response.data as ReliabilityHealthResponse;
+        if (!payload || typeof payload !== 'object' || !('fallback_store' in payload)) {
+            throw new Error('Invalid reliability payload shape (possible proxy misroute)');
+        }
+        return payload;
     },
 };
 

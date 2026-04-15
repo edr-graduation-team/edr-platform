@@ -312,14 +312,31 @@ func (r *PostgresAlertRepository) GetStats(ctx context.Context) (*AlertStats, er
 
 	return stats, nil
 }
-// GetEndpointRiskSummary returns a per-agent risk posture summary ordered by peak_risk_score DESC.
-// It queries sigma_alerts (the table the sigma_engine writes to) using a GROUP BY on agent_id,
-// aggregating risk_score values and counting critical/high/open tiers.
-// The dashboard merges this data with agent metadata (hostname, OS type) from /api/v1/agents.
+// GetEndpointRiskSummary returns a per-endpoint risk posture summary ordered by peak_risk_score DESC.
+// It canonicalizes historical alert rows to the current logical endpoint identity to avoid duplicate
+// rows after re-enrollment (where agent UUID rotates but hostname remains the same).
+//
+// Canonicalization strategy:
+//   1) Direct match: sigma_alerts.agent_id == agents.id
+//   2) Re-enrollment bridge: sigma_alerts.agent_id == agents.metadata.previous_agent_id
+//   3) Fallback: keep sigma_alerts.agent_id as-is when no mapping exists
+//
+// This preserves historical attribution while presenting a single logical endpoint row.
 func (r *PostgresAlertRepository) GetEndpointRiskSummary(ctx context.Context) ([]*models.EndpointRiskSummary, error) {
 	query := `
+		WITH mapped AS (
+			SELECT
+				COALESCE(curr.id::text, prev.id::text, sa.agent_id) AS canonical_agent_id,
+				sa.risk_score,
+				sa.status,
+				sa.timestamp
+			FROM sigma_alerts sa
+			LEFT JOIN agents curr ON curr.id::text = sa.agent_id
+			LEFT JOIN agents prev ON prev.metadata->>'previous_agent_id' = sa.agent_id
+			WHERE sa.status NOT IN ('resolved', 'false_positive', 'closed')
+		)
 		SELECT
-			agent_id,
+			canonical_agent_id                                  AS agent_id,
 			COUNT(*)                                            AS total_alerts,
 			MAX(risk_score)                                     AS peak_risk_score,
 			ROUND(AVG(risk_score)::numeric, 1)                  AS avg_risk_score,
@@ -328,9 +345,8 @@ func (r *PostgresAlertRepository) GetEndpointRiskSummary(ctx context.Context) ([
 			                   AND risk_score < 90)             AS high_count,
 			COUNT(*) FILTER (WHERE status = 'open')             AS open_count,
 			MAX(timestamp)                                      AS last_alert_at
-		FROM sigma_alerts
-		WHERE status NOT IN ('resolved', 'false_positive', 'closed')
-		GROUP BY agent_id
+		FROM mapped
+		GROUP BY canonical_agent_id
 		ORDER BY peak_risk_score DESC, critical_count DESC`
 
 	rows, err := r.db.Query(ctx, query)

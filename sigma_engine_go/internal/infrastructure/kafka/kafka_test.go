@@ -36,7 +36,7 @@ func TestDefaultEventLoopConfig(t *testing.T) {
 	assert.Equal(t, 4, cfg.Workers)
 	assert.Equal(t, 1000, cfg.EventBuffer)
 	assert.Equal(t, 500, cfg.AlertBuffer)
-	assert.Equal(t, 30*time.Second, cfg.StatsInterval)
+	assert.Equal(t, 10*time.Second, cfg.StatsInterval)
 }
 
 func TestConsumerMetricsSnapshot(t *testing.T) {

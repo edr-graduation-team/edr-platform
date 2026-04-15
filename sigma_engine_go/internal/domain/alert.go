@@ -130,7 +130,7 @@ func (a *Alert) IsHighConfidence(threshold float64) bool {
 
 // ShouldSuppress returns true if the alert should be suppressed (false positive).
 func (a *Alert) ShouldSuppress() bool {
-	return a.Suppressed || a.FalsePositiveRisk > 0.7
+	return a.Suppressed || a.FalsePositiveRisk >= 0.70
 }
 
 // String returns a human-readable string representation of the alert.

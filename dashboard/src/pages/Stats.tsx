@@ -6,7 +6,7 @@ import {
     Tooltip, ResponsiveContainer
 } from 'recharts';
 import { Download, TrendingUp, Activity, Shield, AlertTriangle, Target, ChevronDown } from 'lucide-react';
-import { statsApi, authApi, type TimelineDataPoint } from '../api/client';
+import { statsApi, authApi, contextPoliciesApi, alertsApi, type TimelineDataPoint } from '../api/client';
 
 const COLORS = ['#ef4444', '#f97316', '#eab308', '#3b82f6', '#22c55e'];
 
@@ -127,6 +127,31 @@ export default function Stats() {
         queryFn: () => statsApi.timeline(getDateRange()),
         refetchInterval: 15000,
     });
+
+    const { data: contextPolicies } = useQuery({
+        queryKey: ['contextPoliciesCount'],
+        queryFn: contextPoliciesApi.list,
+        refetchInterval: 30000,
+    });
+
+    const { data: contextAlertsSample } = useQuery({
+        queryKey: ['contextScoringSample'],
+        queryFn: () => alertsApi.list({ limit: 300, sort: 'timestamp', order: 'desc' }),
+        refetchInterval: 30000,
+    });
+
+    const contextDistribution = useMemo(() => {
+        const alerts = contextAlertsSample?.alerts || [];
+        const buckets = { elevated: 0, neutral: 0, discounted: 0 };
+        for (const a of alerts) {
+            const m = a.score_breakdown?.context_multiplier;
+            if (typeof m !== 'number') continue;
+            if (m > 1.05) buckets.elevated++;
+            else if (m < 0.95) buckets.discounted++;
+            else buckets.neutral++;
+        }
+        return buckets;
+    }, [contextAlertsSample]);
 
     // Transform severity data for pie chart
     const severityData = alertStats?.by_severity
@@ -296,7 +321,7 @@ export default function Stats() {
             </div>
 
             {/* Summary Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+            <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-6">
                 <div className="card border border-slate-200 dark:border-slate-700/60 shadow-sm dark:shadow-slate-900/20 rounded-xl">
                     <div className="flex items-center gap-3">
                         <div className="p-2 bg-red-100 dark:bg-red-900 rounded-lg">
@@ -341,6 +366,32 @@ export default function Stats() {
                         <div>
                             <p className="text-sm text-gray-500">Avg Risk (normalized)</p>
                             <p className="text-2xl font-bold">{((alertStats?.avg_confidence || 0) * 100).toFixed(1)}%</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div className="card border border-slate-200 dark:border-slate-700/60 shadow-sm dark:shadow-slate-900/20 rounded-xl">
+                    <div className="flex items-center gap-3">
+                        <div className="p-2 bg-cyan-100 dark:bg-cyan-900 rounded-lg">
+                            <Target className="w-5 h-5 text-cyan-600" />
+                        </div>
+                        <div>
+                            <p className="text-sm text-gray-500">Active Context Policies</p>
+                            <p className="text-2xl font-bold">{(contextPolicies?.data || []).filter(p => p.enabled).length}</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div className="card border border-slate-200 dark:border-slate-700/60 shadow-sm dark:shadow-slate-900/20 rounded-xl">
+                    <div className="flex items-center gap-3">
+                        <div className="p-2 bg-indigo-100 dark:bg-indigo-900 rounded-lg">
+                            <Shield className="w-5 h-5 text-indigo-600" />
+                        </div>
+                        <div>
+                            <p className="text-sm text-gray-500">Context Scoring (sample)</p>
+                            <p className="text-sm font-bold">
+                                +{contextDistribution.elevated} / ={contextDistribution.neutral} / -{contextDistribution.discounted}
+                            </p>
                         </div>
                     </div>
                 </div>

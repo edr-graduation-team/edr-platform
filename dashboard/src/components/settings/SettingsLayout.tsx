@@ -1,5 +1,5 @@
 import { SETTINGS_NAV } from './types';
-import { User, Settings, Users, Shield, ChevronRight, Activity } from 'lucide-react';
+import { User, Settings, Users, Shield, ChevronRight, Activity, SlidersHorizontal } from 'lucide-react';
 
 const ICONS: Record<string, React.ElementType> = {
     User,
@@ -7,6 +7,7 @@ const ICONS: Record<string, React.ElementType> = {
     Users,
     Shield,
     Activity,
+    SlidersHorizontal,
 };
 
 export default function SettingsLayout({

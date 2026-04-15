@@ -119,6 +119,9 @@ interface MergedEndpoint extends EndpointRiskSummary {
     hostname?: string;
     os_type?: string;
     agent_status?: string;
+    device_criticality?: string;
+    role_risk?: string;
+    network_anomaly?: string;
 }
 
 const EndpointRiskCard = React.memo(function EndpointRiskCard({ ep, rank }: { ep: MergedEndpoint; rank: number }) {
@@ -144,6 +147,21 @@ const EndpointRiskCard = React.memo(function EndpointRiskCard({ ep, rank }: { ep
                     <span className={`px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider rounded border ${tier.bg} ${tier.color}`}>
                         {tier.label}
                     </span>
+                    {ep.device_criticality && ep.device_criticality !== 'normal' && (
+                        <span className="px-1.5 py-0.5 text-[9px] font-semibold rounded-full bg-violet-500/10 text-violet-400 border border-violet-500/20">
+                            device:{ep.device_criticality}
+                        </span>
+                    )}
+                    {ep.role_risk && ep.role_risk !== 'normal' && (
+                        <span className="px-1.5 py-0.5 text-[9px] font-semibold rounded-full bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">
+                            role:{ep.role_risk}
+                        </span>
+                    )}
+                    {ep.network_anomaly && ep.network_anomaly !== 'none' && (
+                        <span className="px-1.5 py-0.5 text-[9px] font-semibold rounded-full bg-fuchsia-500/10 text-fuchsia-400 border border-fuchsia-500/20">
+                            net:{ep.network_anomaly}
+                        </span>
+                    )}
                     {ep.agent_status && (
                         <span className={`ml-auto px-1.5 py-0.5 text-[9px] font-semibold rounded-full ${ep.agent_status === 'online'
                             ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
@@ -301,6 +319,9 @@ export default function EndpointRisk() {
                 hostname,
                 os_type: agent?.os_type,
                 agent_status: agent?.status,
+                device_criticality: agent?.metadata?.device_criticality || 'normal',
+                role_risk: agent?.metadata?.role_risk || 'normal',
+                network_anomaly: agent?.metadata?.network_anomaly || 'none',
             };
 
             const existing = mergedByLogicalKey.get(logicalKey);
@@ -316,6 +337,9 @@ export default function EndpointRisk() {
                 hostname: existing.hostname || candidate.hostname,
                 os_type: existing.os_type || candidate.os_type,
                 agent_status: existing.agent_status || candidate.agent_status,
+                device_criticality: existing.device_criticality !== 'normal' ? existing.device_criticality : candidate.device_criticality,
+                role_risk: existing.role_risk !== 'normal' ? existing.role_risk : candidate.role_risk,
+                network_anomaly: existing.network_anomaly !== 'none' ? existing.network_anomaly : candidate.network_anomaly,
                 total_alerts: existing.total_alerts + candidate.total_alerts,
                 peak_risk_score: Math.max(existing.peak_risk_score, candidate.peak_risk_score),
                 avg_risk_score: Math.max(existing.avg_risk_score, candidate.avg_risk_score),

@@ -149,6 +149,14 @@ func (s *Server) RegisterRoutes(handlers *Handlers) {
 	// "backend unreachable" UI states when role permission catalogs drift.
 	protected.GET("/reliability", handlers.GetReliabilityHealth)
 
+	// ── Context-aware policy controls ──────────────────────────────────────
+	contextPolicies := protected.Group("/context-policies")
+	contextPolicies.GET("", handlers.ListContextPolicies, handlers.RequirePermission("settings", "read"))
+	contextPolicies.POST("", handlers.CreateContextPolicy, handlers.RequirePermission("settings", "write"))
+	contextPolicies.GET("/:id", handlers.GetContextPolicy, handlers.RequirePermission("settings", "read"))
+	contextPolicies.PATCH("/:id", handlers.UpdateContextPolicy, handlers.RequirePermission("settings", "write"))
+	contextPolicies.DELETE("/:id", handlers.DeleteContextPolicy, handlers.RequirePermission("settings", "write"))
+
 	// ── Policy endpoints ─────────────────────────────────────────────────
 	policies := protected.Group("/policies")
 	policies.GET("", handlers.ListPolicies, handlers.RequirePermission("settings", "read"))

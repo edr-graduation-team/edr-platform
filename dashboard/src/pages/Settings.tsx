@@ -8,6 +8,7 @@ import { useSearchParams } from 'react-router-dom';
 // Lazy-load each tab for code-splitting
 const UserProfile = lazy(() => import('../components/settings/UserProfile'));
 const SystemConfiguration = lazy(() => import('./settings/SystemConfiguration'));
+const ContextPolicies = lazy(() => import('./settings/ContextPolicies'));
 const ReliabilityHealth = lazy(() => import('./settings/ReliabilityHealth'));
 const AccessManagement = lazy(() => import('../components/settings/AccessManagement'));
 const RBACMatrix = lazy(() => import('../components/settings/RBACMatrix'));
@@ -25,7 +26,7 @@ export default function Settings() {
     const [searchParams, setSearchParams] = useSearchParams();
     const tabFromUrl = (searchParams.get('tab') || '') as SettingsTab;
     const initialTab: SettingsTab =
-        tabFromUrl === 'profile' || tabFromUrl === 'system' || tabFromUrl === 'reliability' || tabFromUrl === 'users' || tabFromUrl === 'roles'
+        tabFromUrl === 'profile' || tabFromUrl === 'system' || tabFromUrl === 'context' || tabFromUrl === 'reliability' || tabFromUrl === 'users' || tabFromUrl === 'roles'
             ? tabFromUrl
             : 'profile';
 
@@ -39,6 +40,7 @@ export default function Settings() {
         if (
             next === 'profile' ||
             next === 'system' ||
+            next === 'context' ||
             next === 'reliability' ||
             next === 'users' ||
             next === 'roles'
@@ -55,6 +57,8 @@ export default function Settings() {
                 return <Suspense fallback={<TabFallback />}><SystemConfiguration /></Suspense>;
             case 'reliability':
                 return <Suspense fallback={<TabFallback />}><ReliabilityHealth /></Suspense>;
+            case 'context':
+                return <Suspense fallback={<TabFallback />}><ContextPolicies /></Suspense>;
             case 'users':
                 return <Suspense fallback={<TabFallback />}><AccessManagement /></Suspense>;
             case 'roles':

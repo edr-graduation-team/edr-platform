@@ -34,6 +34,7 @@ type Handlers struct {
 	alertRepo           repository.AlertRepository           // alert querying and stats
 	userRepo            repository.UserRepository            // user CRUD
 	roleRepo            repository.RoleRepository            // RBAC role/permission management
+	contextPolicyRepo   repository.ContextPolicyRepository   // context-aware policy controls
 	grpcAddress         string                               // C2 gRPC address (host:port) injected into isolate params
 	fallbackStore       *handlers.EventFallbackStore         // DB fallback store reliability stats
 }
@@ -97,6 +98,11 @@ func (h *Handlers) SetUserRepo(repo repository.UserRepository) {
 // SetRoleRepo sets the RoleRepository for RBAC role/permission management.
 func (h *Handlers) SetRoleRepo(repo repository.RoleRepository) {
 	h.roleRepo = repo
+}
+
+// SetContextPolicyRepo sets the ContextPolicyRepository for context-aware controls.
+func (h *Handlers) SetContextPolicyRepo(repo repository.ContextPolicyRepository) {
+	h.contextPolicyRepo = repo
 }
 
 // SetFallbackStore sets the EventFallbackStore for reliability health.

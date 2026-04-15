@@ -263,6 +263,10 @@ func main() {
 
 	// RiskScorer: always constructed — uses the available lineage + burst + baseline impls.
 	riskScorer := scoring.NewDefaultRiskScorer(lineageCache, burstTracker, baselineProvider)
+	if dbPool != nil {
+		riskScorer.SetContextPolicyProvider(scoring.NewPostgresContextPolicyProvider(dbPool.Pool(), 30*time.Second))
+		logger.Info("Context policy provider enabled (hybrid user/device/network factors)")
+	}
 	logger.Info("RiskScorer initialised — context-aware scoring + UEBA active")
 	// ─────────────────────────────────────────────────────────────────────────
 

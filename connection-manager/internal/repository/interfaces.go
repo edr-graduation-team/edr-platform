@@ -245,6 +245,15 @@ type AuditLogRepository interface {
 	Count(ctx context.Context, filter AuditLogFilter) (int64, error)
 }
 
+// ContextPolicyRepository defines CRUD and listing for context-aware policy controls.
+type ContextPolicyRepository interface {
+	List(ctx context.Context) ([]*models.ContextPolicy, error)
+	GetByID(ctx context.Context, id int64) (*models.ContextPolicy, error)
+	Create(ctx context.Context, policy *models.ContextPolicy) error
+	Update(ctx context.Context, policy *models.ContextPolicy) error
+	Delete(ctx context.Context, id int64) error
+}
+
 // AuditLogFilter defines filters for listing audit logs.
 type AuditLogFilter struct {
 	UserID       *uuid.UUID

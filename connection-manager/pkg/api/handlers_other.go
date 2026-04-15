@@ -17,6 +17,36 @@ import (
 	"github.com/edr-platform/connection-manager/pkg/models"
 )
 
+type contextPolicyRequest struct {
+	Name                    string   `json:"name"`
+	ScopeType               string   `json:"scope_type"`
+	ScopeValue              string   `json:"scope_value"`
+	Enabled                 *bool    `json:"enabled,omitempty"`
+	UserRoleWeight          float64  `json:"user_role_weight"`
+	DeviceCriticalityWeight float64  `json:"device_criticality_weight"`
+	NetworkAnomalyFactor    float64  `json:"network_anomaly_factor"`
+	TrustedNetworks         []string `json:"trusted_networks"`
+	Notes                   string   `json:"notes"`
+}
+
+func validateContextPolicyInput(req *contextPolicyRequest) error {
+	if strings.TrimSpace(req.Name) == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "name is required")
+	}
+	switch req.ScopeType {
+	case "global", "agent", "user":
+	default:
+		return echo.NewHTTPError(http.StatusBadRequest, "scope_type must be one of: global, agent, user")
+	}
+	if strings.TrimSpace(req.ScopeValue) == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "scope_value is required")
+	}
+	if req.UserRoleWeight <= 0 || req.DeviceCriticalityWeight <= 0 || req.NetworkAnomalyFactor <= 0 {
+		return echo.NewHTTPError(http.StatusBadRequest, "all weights/factors must be > 0")
+	}
+	return nil
+}
+
 // GetReliabilityHealth returns operational reliability counters for the data plane.
 // GET /api/v1/reliability
 func (h *Handlers) GetReliabilityHealth(c echo.Context) error {
@@ -44,6 +74,147 @@ func (h *Handlers) GetReliabilityHealth(c echo.Context) error {
 		"fallback_store": fb,
 		"meta":           responseMeta(c),
 	})
+}
+
+// ListContextPolicies returns all context-aware policies.
+func (h *Handlers) ListContextPolicies(c echo.Context) error {
+	if h.contextPolicyRepo == nil {
+		return errorResponse(c, http.StatusServiceUnavailable, "DB_UNAVAILABLE", "Database is unavailable")
+	}
+	items, err := h.contextPolicyRepo.List(c.Request().Context())
+	if err != nil {
+		h.logger.WithError(err).Error("Failed to list context policies")
+		return errorResponse(c, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to list context policies")
+	}
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"data":  items,
+		"total": len(items),
+		"meta":  responseMeta(c),
+	})
+}
+
+// GetContextPolicy returns a context policy by ID.
+func (h *Handlers) GetContextPolicy(c echo.Context) error {
+	if h.contextPolicyRepo == nil {
+		return errorResponse(c, http.StatusServiceUnavailable, "DB_UNAVAILABLE", "Database is unavailable")
+	}
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return errorResponse(c, http.StatusBadRequest, "INVALID_ID", "Invalid policy ID")
+	}
+	item, err := h.contextPolicyRepo.GetByID(c.Request().Context(), id)
+	if err != nil {
+		if err == repository.ErrNotFound {
+			return errorResponse(c, http.StatusNotFound, "NOT_FOUND", "Context policy not found")
+		}
+		h.logger.WithError(err).Error("Failed to get context policy")
+		return errorResponse(c, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to get context policy")
+	}
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"data": item,
+		"meta": responseMeta(c),
+	})
+}
+
+// CreateContextPolicy creates a new context-aware policy.
+func (h *Handlers) CreateContextPolicy(c echo.Context) error {
+	if h.contextPolicyRepo == nil {
+		return errorResponse(c, http.StatusServiceUnavailable, "DB_UNAVAILABLE", "Database is unavailable")
+	}
+	var req contextPolicyRequest
+	if err := c.Bind(&req); err != nil {
+		return errorResponse(c, http.StatusBadRequest, "INVALID_REQUEST", "Invalid request body")
+	}
+	if err := validateContextPolicyInput(&req); err != nil {
+		return errorResponse(c, http.StatusBadRequest, "INVALID_REQUEST", err.Error())
+	}
+	enabled := true
+	if req.Enabled != nil {
+		enabled = *req.Enabled
+	}
+	item := &models.ContextPolicy{
+		Name:                    strings.TrimSpace(req.Name),
+		ScopeType:               req.ScopeType,
+		ScopeValue:              strings.TrimSpace(req.ScopeValue),
+		Enabled:                 enabled,
+		UserRoleWeight:          req.UserRoleWeight,
+		DeviceCriticalityWeight: req.DeviceCriticalityWeight,
+		NetworkAnomalyFactor:    req.NetworkAnomalyFactor,
+		TrustedNetworks:         req.TrustedNetworks,
+		Notes:                   req.Notes,
+	}
+	if err := h.contextPolicyRepo.Create(c.Request().Context(), item); err != nil {
+		h.logger.WithError(err).Error("Failed to create context policy")
+		return errorResponse(c, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to create context policy")
+	}
+	return c.JSON(http.StatusCreated, map[string]interface{}{
+		"data": item,
+		"meta": responseMeta(c),
+	})
+}
+
+// UpdateContextPolicy updates an existing context-aware policy.
+func (h *Handlers) UpdateContextPolicy(c echo.Context) error {
+	if h.contextPolicyRepo == nil {
+		return errorResponse(c, http.StatusServiceUnavailable, "DB_UNAVAILABLE", "Database is unavailable")
+	}
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return errorResponse(c, http.StatusBadRequest, "INVALID_ID", "Invalid policy ID")
+	}
+	var req contextPolicyRequest
+	if err := c.Bind(&req); err != nil {
+		return errorResponse(c, http.StatusBadRequest, "INVALID_REQUEST", "Invalid request body")
+	}
+	if err := validateContextPolicyInput(&req); err != nil {
+		return errorResponse(c, http.StatusBadRequest, "INVALID_REQUEST", err.Error())
+	}
+	enabled := true
+	if req.Enabled != nil {
+		enabled = *req.Enabled
+	}
+	item := &models.ContextPolicy{
+		ID:                      id,
+		Name:                    strings.TrimSpace(req.Name),
+		ScopeType:               req.ScopeType,
+		ScopeValue:              strings.TrimSpace(req.ScopeValue),
+		Enabled:                 enabled,
+		UserRoleWeight:          req.UserRoleWeight,
+		DeviceCriticalityWeight: req.DeviceCriticalityWeight,
+		NetworkAnomalyFactor:    req.NetworkAnomalyFactor,
+		TrustedNetworks:         req.TrustedNetworks,
+		Notes:                   req.Notes,
+	}
+	if err := h.contextPolicyRepo.Update(c.Request().Context(), item); err != nil {
+		if err == repository.ErrNotFound {
+			return errorResponse(c, http.StatusNotFound, "NOT_FOUND", "Context policy not found")
+		}
+		h.logger.WithError(err).Error("Failed to update context policy")
+		return errorResponse(c, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to update context policy")
+	}
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"data": item,
+		"meta": responseMeta(c),
+	})
+}
+
+// DeleteContextPolicy deletes a context-aware policy.
+func (h *Handlers) DeleteContextPolicy(c echo.Context) error {
+	if h.contextPolicyRepo == nil {
+		return errorResponse(c, http.StatusServiceUnavailable, "DB_UNAVAILABLE", "Database is unavailable")
+	}
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		return errorResponse(c, http.StatusBadRequest, "INVALID_ID", "Invalid policy ID")
+	}
+	if err := h.contextPolicyRepo.Delete(c.Request().Context(), id); err != nil {
+		if err == repository.ErrNotFound {
+			return errorResponse(c, http.StatusNotFound, "NOT_FOUND", "Context policy not found")
+		}
+		h.logger.WithError(err).Error("Failed to delete context policy")
+		return errorResponse(c, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to delete context policy")
+	}
+	return c.NoContent(http.StatusNoContent)
 }
 
 // ============================================================================

@@ -213,9 +213,16 @@ func (rs *DefaultRiskScorer) Score(ctx context.Context, input ScoringInput) (*Sc
 		contextFactors = DefaultContextFactors()
 	}
 
+	// ── Step 5.8: Context Quality Adjustment (best-practice uncertainty handling)
+	// If ingestion could not collect all required context fields, avoid
+	// overconfident scoring by applying a bounded quality factor.
+	contextQualityScore := extractFloat64(input.Event.RawData, "context_quality_score")
+	missingFields := extractStringSlice(input.Event.RawData, "missing_context_fields")
+	qualityFactor := computeContextQualityFactor(contextQualityScore, len(missingFields))
+
 	// ── Step 6: Final Score ───────────────────────────────────────────────────
 	raw := baseScore + lineageBonus + privilegeBonus + burstBonus + uebaBonus + interactionBonus - fpDiscount - uebaDiscount
-	contextAdjusted := int(math.Round(float64(raw) * contextFactors.Multiplier()))
+	contextAdjusted := int(math.Round(float64(raw) * contextFactors.Multiplier() * qualityFactor))
 	finalScore := clamp(contextAdjusted, 0, 100)
 
 	breakdown := ScoreBreakdown{
@@ -232,6 +239,8 @@ func (rs *DefaultRiskScorer) Score(ctx context.Context, input ScoringInput) (*Sc
 		DeviceCriticalityWeight: contextFactors.DeviceCriticalityWeight,
 		NetworkAnomalyFactor:    contextFactors.NetworkAnomalyFactor,
 		ContextMultiplier:       contextFactors.Multiplier(),
+		ContextQualityScore:     contextQualityScore,
+		QualityFactor:           qualityFactor,
 		ContextAdjustedScore:    contextAdjusted,
 		RawScore:                raw,
 		FinalScore:              finalScore,
@@ -258,6 +267,13 @@ func (rs *DefaultRiskScorer) Score(ctx context.Context, input ScoringInput) (*Sc
 	snapshot.DeviceCriticalityWeight = contextFactors.DeviceCriticalityWeight
 	snapshot.NetworkAnomalyFactor = contextFactors.NetworkAnomalyFactor
 	snapshot.ContextMultiplier = contextFactors.Multiplier()
+	snapshot.ContextQualityScore = contextQualityScore
+	snapshot.QualityFactor = qualityFactor
+	snapshot.MissingContextFields = missingFields
+	if len(missingFields) > 0 {
+		snapshot.Warnings = append(snapshot.Warnings,
+			fmt.Sprintf("partial context fields missing: %s", strings.Join(missingFields, ",")))
+	}
 
 	return &ScoringOutput{
 		RiskScore:         finalScore,
@@ -366,11 +382,12 @@ func (rs *DefaultRiskScorer) computeUEBA(
 // interaction) which can add up to +140 points total.
 //
 // Derivation (CVSS midpoint → EDR base score):
-//   Informational:  0.0/10 →  10  (minimal detection signal, informational noise)
-//   Low:       2.0/10 × 100 = 20, adjusted to 25 (margin for minimal context)
-//   Medium:    5.45/10 × 100 = 55, set to 45 (leaves +55 headroom for bonuses)
-//   High:      7.95/10 × 100 = 80, set to 65 (leaves +35 headroom for bonuses)
-//   Critical:  9.5/10 × 100 = 95, set to 85 (leaves +15 for worst-case enrichment)
+//
+//	Informational:  0.0/10 →  10  (minimal detection signal, informational noise)
+//	Low:       2.0/10 × 100 = 20, adjusted to 25 (margin for minimal context)
+//	Medium:    5.45/10 × 100 = 55, set to 45 (leaves +55 headroom for bonuses)
+//	High:      7.95/10 × 100 = 80, set to 65 (leaves +35 headroom for bonuses)
+//	Critical:  9.5/10 × 100 = 95, set to 85 (leaves +15 for worst-case enrichment)
 //
 // Reference: NIST NVD CVSS v3.1 Specification §5 (Qualitative Severity Rating)
 func computeBaseScore(severity domain.Severity, matchCount int) int {
@@ -682,6 +699,63 @@ func extractBool(data map[string]interface{}, key string) bool {
 		}
 	}
 	return false
+}
+
+func extractFloat64(data map[string]interface{}, key string) float64 {
+	if v := resolveField(data, key); v != nil {
+		switch n := v.(type) {
+		case float64:
+			return n
+		case int:
+			return float64(n)
+		case int64:
+			return float64(n)
+		case uint:
+			return float64(n)
+		case uint64:
+			return float64(n)
+		}
+	}
+	return 0
+}
+
+func extractStringSlice(data map[string]interface{}, key string) []string {
+	if v := resolveField(data, key); v != nil {
+		switch arr := v.(type) {
+		case []string:
+			return arr
+		case []interface{}:
+			out := make([]string, 0, len(arr))
+			for _, item := range arr {
+				if s, ok := item.(string); ok && strings.TrimSpace(s) != "" {
+					out = append(out, s)
+				}
+			}
+			return out
+		}
+	}
+	return nil
+}
+
+// computeContextQualityFactor converts context quality score [0..100] into a
+// bounded multiplier [0.85..1.0]. This avoids overconfident scoring when key
+// context fields are missing while still preserving signal continuity.
+func computeContextQualityFactor(score float64, missingCount int) float64 {
+	switch {
+	case score >= 80:
+		return 1.00
+	case score >= 60:
+		return 0.97
+	case score >= 40:
+		return 0.93
+	case score > 0:
+		return 0.90
+	default:
+		if missingCount == 0 {
+			return 1.00
+		}
+		return 0.85
+	}
 }
 
 // resolveField retrieves a value from a flat map[string]interface{} by checking

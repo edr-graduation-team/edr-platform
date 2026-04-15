@@ -60,10 +60,13 @@ type ContextSnapshot struct {
 	ScoreBreakdown ScoreBreakdown `json:"score_breakdown"`
 
 	// ── Context-Aware Policy Factors (Hybrid model) ──────────────────────────
-	UserRoleWeight          float64 `json:"user_role_weight,omitempty"`
-	DeviceCriticalityWeight float64 `json:"device_criticality_weight,omitempty"`
-	NetworkAnomalyFactor    float64 `json:"network_anomaly_factor,omitempty"`
-	ContextMultiplier       float64 `json:"context_multiplier,omitempty"`
+	UserRoleWeight          float64  `json:"user_role_weight,omitempty"`
+	DeviceCriticalityWeight float64  `json:"device_criticality_weight,omitempty"`
+	NetworkAnomalyFactor    float64  `json:"network_anomaly_factor,omitempty"`
+	ContextMultiplier       float64  `json:"context_multiplier,omitempty"`
+	ContextQualityScore     float64  `json:"context_quality_score,omitempty"`
+	QualityFactor           float64  `json:"quality_factor,omitempty"`
+	MissingContextFields    []string `json:"missing_context_fields,omitempty"`
 
 	// Warnings contains non-fatal scoring errors (e.g., lineage cache miss).
 	// Presence of warnings indicates the score was computed with partial context.
@@ -87,7 +90,7 @@ type AncestorEntry struct {
 // Enables forensic transparency and academic justification.
 //
 // risk_score = clamp(BaseScore + LineageBonus + PrivilegeBonus + BurstBonus
-//	           + UEBABonus + InteractionBonus - FPDiscount - UEBADiscount, 0, 100)
+//   - UEBABonus + InteractionBonus - FPDiscount - UEBADiscount, 0, 100)
 type ScoreBreakdown struct {
 	BaseScore               int     `json:"base_score"`        // from Sigma severity + multi-match
 	LineageBonus            int     `json:"lineage_bonus"`     // from suspicious parent-child pair
@@ -102,6 +105,8 @@ type ScoreBreakdown struct {
 	DeviceCriticalityWeight float64 `json:"device_criticality_weight,omitempty"`
 	NetworkAnomalyFactor    float64 `json:"network_anomaly_factor,omitempty"`
 	ContextMultiplier       float64 `json:"context_multiplier,omitempty"`
+	ContextQualityScore     float64 `json:"context_quality_score,omitempty"`
+	QualityFactor           float64 `json:"quality_factor,omitempty"`
 	ContextAdjustedScore    int     `json:"context_adjusted_score,omitempty"` // after multiplier, before clamp
 	RawScore                int     `json:"raw_score"`                        // before clamp
 	FinalScore              int     `json:"final_score"`                      // after clamp(0,100)

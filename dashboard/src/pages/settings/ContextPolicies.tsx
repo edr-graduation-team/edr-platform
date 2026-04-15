@@ -65,7 +65,7 @@ export default function ContextPolicies() {
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
                     <input
                         className="px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900"
-                        placeholder="Policy name"
+                        placeholder="Policy name (e.g. Finance laptops, Admin users high risk)"
                         value={draft.name}
                         onChange={(e) => setDraft({ ...draft, name: e.target.value })}
                     />
@@ -80,7 +80,13 @@ export default function ContextPolicies() {
                     </select>
                     <input
                         className="px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900"
-                        placeholder={draft.scope_type === 'global' ? '*' : draft.scope_type === 'agent' ? 'agent_id' : 'username'}
+                        placeholder={
+                            draft.scope_type === 'global'
+                                ? '* (applies to all alerts)'
+                                : draft.scope_type === 'agent'
+                                    ? 'agent UUID (e.g. 7f8c...-...)'
+                                    : 'username (e.g. admin, svc-backup)'
+                        }
                         value={draft.scope_value}
                         onChange={(e) => setDraft({ ...draft, scope_value: e.target.value })}
                     />
@@ -99,7 +105,7 @@ export default function ContextPolicies() {
                         step="0.1"
                         min="0.1"
                         className="px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900"
-                        placeholder="User role weight"
+                        placeholder="User role weight (1.0 neutral, >1 raises risk, <1 lowers risk)"
                         value={draft.user_role_weight}
                         onChange={(e) => setDraft({ ...draft, user_role_weight: Number(e.target.value) })}
                     />
@@ -108,7 +114,7 @@ export default function ContextPolicies() {
                         step="0.1"
                         min="0.1"
                         className="px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900"
-                        placeholder="Device criticality weight"
+                        placeholder="Device criticality weight (DC/server: 1.2-1.5, normal endpoint: 1.0)"
                         value={draft.device_criticality_weight}
                         onChange={(e) => setDraft({ ...draft, device_criticality_weight: Number(e.target.value) })}
                     />
@@ -117,14 +123,14 @@ export default function ContextPolicies() {
                         step="0.1"
                         min="0.1"
                         className="px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900"
-                        placeholder="Network anomaly factor"
+                        placeholder="Network anomaly factor (trusted network: 0.9-1.0, suspicious: 1.1-1.5)"
                         value={draft.network_anomaly_factor}
                         onChange={(e) => setDraft({ ...draft, network_anomaly_factor: Number(e.target.value) })}
                     />
                 </div>
                 <input
                     className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900"
-                    placeholder="Trusted networks CIDR (comma-separated, e.g. 10.0.0.0/8,192.168.1.0/24)"
+                    placeholder="Trusted networks CIDR list (comma-separated). Example: 10.0.0.0/8,192.168.1.0/24,172.16.0.0/12"
                     value={draft.trusted_networks.join(',')}
                     onChange={(e) => setDraft({
                         ...draft,
@@ -133,7 +139,7 @@ export default function ContextPolicies() {
                 />
                 <input
                     className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900"
-                    placeholder="Notes"
+                    placeholder="Notes (why this policy exists, owner, review date)"
                     value={draft.notes || ''}
                     onChange={(e) => setDraft({ ...draft, notes: e.target.value })}
                 />

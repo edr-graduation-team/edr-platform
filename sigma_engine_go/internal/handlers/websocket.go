@@ -7,11 +7,51 @@ import (
 	"sync"
 	"time"
 
+	"github.com/edr-platform/sigma-engine/internal/application/scoring"
 	"github.com/edr-platform/sigma-engine/internal/infrastructure/database"
 	"github.com/edr-platform/sigma-engine/internal/infrastructure/logger"
 	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
 )
+
+// toAlertResponse is a package-level helper used by the WebSocket broadcaster.
+// It converts a *database.Alert to *AlertResponse using default risk-level thresholds.
+// (The AlertHandler method version is identical but uses handler-configured thresholds.)
+func toAlertResponse(alert *database.Alert) *AlertResponse {
+	// RiskLevelFromScore falls back to DefaultRiskScoringConfig() when cfg is zero-value.
+	return &AlertResponse{
+		ID:                alert.ID,
+		Timestamp:         alert.Timestamp,
+		AgentID:           alert.AgentID,
+		RuleID:            alert.RuleID,
+		RuleTitle:         alert.RuleTitle,
+		Severity:          alert.Severity,
+		Category:          alert.Category,
+		EventCount:        alert.EventCount,
+		EventIDs:          alert.EventIDs,
+		MitreTactics:      alert.MitreTactics,
+		MitreTechniques:   alert.MitreTechniques,
+		MatchedFields:     alert.MatchedFields,
+		ContextData:       alert.ContextData,
+		Status:            alert.Status,
+		AssignedTo:        alert.AssignedTo,
+		ResolutionNotes:   alert.ResolutionNotes,
+		Confidence:        alert.Confidence,
+		FalsePositiveRisk: alert.FalsePositiveRisk,
+		CreatedAt:         alert.CreatedAt,
+		UpdatedAt:         alert.UpdatedAt,
+		RiskScore:         alert.RiskScore,
+		RiskLevel:         scoring.RiskLevelFromScore(alert.RiskScore, scoring.RiskLevelsConfig{}),
+		ContextSnapshot:   alert.ContextSnapshot,
+		ScoreBreakdown:    alert.ScoreBreakdown,
+		MatchCount:        alert.MatchCount,
+		RelatedRules:      alert.RelatedRules,
+		CombinedConfidence: alert.CombinedConfidence,
+		SeverityPromoted:  alert.SeverityPromoted,
+		OriginalSeverity:  alert.OriginalSeverity,
+	}
+}
+
 
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,

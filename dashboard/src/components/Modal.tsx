@@ -60,46 +60,46 @@ export function Modal({
         <div className="fixed inset-0 z-50 flex items-center justify-center">
             {/* Overlay */}
             <div
-                className="absolute inset-0 bg-black/50 backdrop-blur-sm animate-fade-in"
+                className="absolute inset-0 bg-black/60 backdrop-blur-md animate-fade-in"
                 onClick={closeOnOverlayClick ? onClose : undefined}
                 aria-hidden="true"
             />
 
             {/* Modal Content */}
             <div
-                className={`relative w-full ${sizeClasses[size]} mx-4 bg-white dark:bg-gray-800 rounded-xl shadow-2xl animate-scale-in`}
+                className={`relative w-full ${sizeClasses[size]} mx-4 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700/80 rounded-2xl shadow-2xl dark:shadow-slate-900/60 animate-slide-up-fade overflow-hidden`}
                 role="dialog"
                 aria-modal="true"
                 aria-labelledby={title ? 'modal-title' : undefined}
             >
                 {/* Header */}
                 {(title || showCloseButton) && (
-                    <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+                    <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-700/80 bg-slate-50/80 dark:bg-slate-800/80">
                         {title && (
-                            <h2 id="modal-title" className="text-lg font-semibold text-gray-900 dark:text-white">
+                            <h2 id="modal-title" className="text-base font-bold text-slate-900 dark:text-white tracking-tight">
                                 {title}
                             </h2>
                         )}
                         {showCloseButton && (
                             <button
                                 onClick={onClose}
-                                className="p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+                                className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-all duration-150"
                                 aria-label="Close modal"
                             >
-                                <X className="w-5 h-5" />
+                                <X className="w-4 h-4" />
                             </button>
                         )}
                     </div>
                 )}
 
                 {/* Body */}
-                <div className="px-6 py-4 max-h-[70vh] overflow-y-auto">
+                <div className="px-6 py-5 max-h-[70vh] overflow-y-auto">
                     {children}
                 </div>
 
                 {/* Footer */}
                 {footer && (
-                    <div className="px-6 py-4 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50 rounded-b-xl">
+                    <div className="px-6 py-4 border-t border-slate-200 dark:border-slate-700/80 bg-slate-50/80 dark:bg-slate-900/50 rounded-b-2xl">
                         {footer}
                     </div>
                 )}

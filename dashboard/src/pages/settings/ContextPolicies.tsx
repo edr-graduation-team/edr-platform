@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Plus, Save, Trash2 } from 'lucide-react';
-import { contextPoliciesApi, type ContextPolicy } from '../../api/client';
+import { agentsApi, alertsApi, contextPoliciesApi, type ContextPolicy } from '../../api/client';
+import { useToast } from '../../components/Toast';
 
 type EditablePolicy = Omit<ContextPolicy, 'id' | 'created_at' | 'updated_at'> & { id?: number };
 
@@ -17,40 +18,153 @@ const NEW_POLICY: EditablePolicy = {
     notes: '',
 };
 
+const CIDR_PATTERN = /^(?:\d{1,3}\.){3}\d{1,3}\/(?:[0-9]|[1-2][0-9]|3[0-2])$/;
+
+function parseTrustedNetworks(value: string): string[] {
+    return value.split(',').map(v => v.trim()).filter(Boolean);
+}
+
 export default function ContextPolicies() {
     const queryClient = useQueryClient();
+    const { showToast } = useToast();
     const [draft, setDraft] = useState<EditablePolicy>(NEW_POLICY);
+    const [trustedNetworksText, setTrustedNetworksText] = useState('');
+    const [validationError, setValidationError] = useState<string>('');
 
     const { data, isLoading, error } = useQuery({
         queryKey: ['contextPolicies'],
         queryFn: contextPoliciesApi.list,
         refetchInterval: 15000,
     });
+    const { data: agentsData, isLoading: isAgentsLoading, refetch: refetchAgents } = useQuery({
+        queryKey: ['contextPolicyAgents'],
+        queryFn: () => agentsApi.list({ limit: 500, offset: 0, sort_by: 'hostname', sort_order: 'asc' }),
+        staleTime: 30000,
+    });
+    const { data: endpointUsersData, isLoading: isEndpointUsersLoading, refetch: refetchEndpointUsers } = useQuery({
+        queryKey: ['contextPolicyEndpointUsers'],
+        queryFn: () => alertsApi.list({ limit: 500, offset: 0, sort: 'timestamp', order: 'desc' }),
+        staleTime: 30000,
+    });
 
     const items = data?.data ?? [];
+    const agentOptions = useMemo(
+        () => (agentsData?.data ?? []).map(a => ({ value: a.id, label: `${a.hostname} (${a.id})` })),
+        [agentsData]
+    );
+    const userOptions = useMemo(() => {
+        const hostnameByAgentId = new Map((agentsData?.data ?? []).map(a => [a.id, a.hostname] as const));
+        const entries = (endpointUsersData?.alerts ?? [])
+            .map((a) => {
+                const user = a.context_snapshot?.user_name?.trim();
+                if (!user) return null;
+                const host = (hostnameByAgentId.get(a.agent_id) || a.agent_id || 'unknown-host').trim();
+                return {
+                    value: user,
+                    label: `${host}/${user}`,
+                };
+            })
+            .filter((v): v is { value: string; label: string } => Boolean(v));
+
+        // Deduplicate by user value (scope_value remains user account), keep first recent host/user label.
+        const seen = new Set<string>();
+        const unique: { value: string; label: string }[] = [];
+        for (const e of entries) {
+            if (seen.has(e.value)) continue;
+            seen.add(e.value);
+            unique.push(e);
+        }
+        return unique;
+    }, [endpointUsersData, agentsData]);
+
+    const matchingScope = useMemo(
+        () => items.find(i => i.scope_type === draft.scope_type && i.scope_value === (draft.scope_type === 'global' ? '*' : draft.scope_value.trim())),
+        [items, draft.scope_type, draft.scope_value]
+    );
 
     const createMutation = useMutation({
         mutationFn: (payload: EditablePolicy) => contextPoliciesApi.create(payload),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['contextPolicies'] });
             setDraft(NEW_POLICY);
+            setTrustedNetworksText('');
+            setValidationError('');
+            showToast('Context policy saved successfully', 'success');
+        },
+        onError: (err: unknown) => {
+            const msg = err instanceof Error ? err.message : 'Failed to save context policy';
+            showToast(msg, 'error');
         },
     });
 
     const updateMutation = useMutation({
         mutationFn: ({ id, payload }: { id: number; payload: EditablePolicy }) => contextPoliciesApi.update(id, payload),
-        onSuccess: () => queryClient.invalidateQueries({ queryKey: ['contextPolicies'] }),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['contextPolicies'] });
+            showToast('Context policy updated', 'success');
+        },
+        onError: (err: unknown) => {
+            const msg = err instanceof Error ? err.message : 'Failed to update context policy';
+            showToast(msg, 'error');
+        },
     });
 
     const deleteMutation = useMutation({
         mutationFn: (id: number) => contextPoliciesApi.remove(id),
-        onSuccess: () => queryClient.invalidateQueries({ queryKey: ['contextPolicies'] }),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['contextPolicies'] });
+            showToast('Context policy deleted', 'success');
+        },
+        onError: (err: unknown) => {
+            const msg = err instanceof Error ? err.message : 'Failed to delete context policy';
+            showToast(msg, 'error');
+        },
     });
 
     const globalExists = useMemo(
         () => items.some(i => i.scope_type === 'global' && i.scope_value === '*'),
         [items]
     );
+
+    const hasPendingMutation = createMutation.isPending || updateMutation.isPending || deleteMutation.isPending;
+
+    const validateDraft = (input: EditablePolicy, trustedNetworksRaw: string): string | null => {
+        if (!input.name.trim()) return 'Policy name is required.';
+        const scopeValue = input.scope_type === 'global' ? '*' : input.scope_value.trim();
+        if (!scopeValue) return 'Scope value is required.';
+        if (input.scope_type === 'agent' && !agentOptions.some(o => o.value === scopeValue)) {
+            return 'Please select a valid agent from the dropdown.';
+        }
+        if (input.scope_type === 'user' && !userOptions.some(o => o.value === scopeValue)) {
+            return 'Please select a valid user from the dropdown.';
+        }
+        if (input.user_role_weight <= 0 || input.device_criticality_weight <= 0 || input.network_anomaly_factor <= 0) {
+            return 'All weights/factors must be greater than 0.';
+        }
+        const cidrs = parseTrustedNetworks(trustedNetworksRaw);
+        if (cidrs.some(c => !CIDR_PATTERN.test(c))) {
+            return 'Trusted networks must be valid CIDR values (example: 10.10.0.0/16).';
+        }
+        return null;
+    };
+
+    const handleCreatePolicy = () => {
+        const errMsg = validateDraft(draft, trustedNetworksText);
+        if (errMsg) {
+            setValidationError(errMsg);
+            showToast(errMsg, 'warning');
+            return;
+        }
+        setValidationError('');
+        const payload: EditablePolicy = {
+            ...draft,
+            name: draft.name.trim(),
+            scope_value: draft.scope_type === 'global' ? '*' : draft.scope_value.trim(),
+            trusted_networks: parseTrustedNetworks(trustedNetworksText),
+            notes: (draft.notes || '').trim(),
+        };
+        createMutation.mutate(payload);
+    };
 
     return (
         <div className="space-y-6">
@@ -78,7 +192,14 @@ export default function ContextPolicies() {
                         <select
                             className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900"
                             value={draft.scope_type}
-                            onChange={(e) => setDraft({ ...draft, scope_type: e.target.value as EditablePolicy['scope_type'] })}
+                            onChange={(e) => {
+                                const nextScope = e.target.value as EditablePolicy['scope_type'];
+                                setDraft(prev => ({
+                                    ...prev,
+                                    scope_type: nextScope,
+                                    scope_value: nextScope === 'global' ? '*' : (prev.scope_value === '*' ? '' : prev.scope_value),
+                                }));
+                            }}
                         >
                             <option value="global">global</option>
                             <option value="agent">agent</option>
@@ -88,18 +209,55 @@ export default function ContextPolicies() {
 
                     <label className="space-y-1">
                         <div className="text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide">Scope Value</div>
-                        <input
-                            className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900"
-                            placeholder={
-                                draft.scope_type === 'global'
-                                    ? 'Example: *'
-                                    : draft.scope_type === 'agent'
-                                        ? 'Example: 7f8c2a1b-4c11-4fd6-b2ae-...'
-                                        : 'Example: admin or svc-backup'
-                            }
-                            value={draft.scope_value}
-                            onChange={(e) => setDraft({ ...draft, scope_value: e.target.value })}
-                        />
+                        {draft.scope_type === 'global' ? (
+                            <input
+                                className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900"
+                                placeholder="Example: *"
+                                value="*"
+                                disabled
+                                readOnly
+                            />
+                        ) : (
+                            <select
+                                className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900"
+                                value={draft.scope_value}
+                                disabled={draft.scope_type === 'agent' ? isAgentsLoading : isEndpointUsersLoading}
+                                onChange={(e) => setDraft({ ...draft, scope_value: e.target.value })}
+                            >
+                                <option value="">
+                                    {draft.scope_type === 'agent'
+                                        ? (isAgentsLoading ? 'Loading agents...' : 'Select agent...')
+                                        : (isEndpointUsersLoading ? 'Loading endpoint users...' : 'Select endpoint user...')}
+                                </option>
+                                {(draft.scope_type === 'agent' ? agentOptions : userOptions).map((opt) => (
+                                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                                ))}
+                            </select>
+                        )}
+                        {draft.scope_type === 'agent' && (
+                            <div className="mt-2 flex items-center justify-between text-xs text-gray-500 dark:text-gray-400">
+                                <span>{agentOptions.length === 0 && !isAgentsLoading ? 'No agents found yet.' : `${agentOptions.length} agents available`}</span>
+                                <button
+                                    type="button"
+                                    className="underline hover:text-gray-700 dark:hover:text-gray-200"
+                                    onClick={() => refetchAgents()}
+                                >
+                                    Refresh agents
+                                </button>
+                            </div>
+                        )}
+                        {draft.scope_type === 'user' && (
+                            <div className="mt-2 flex items-center justify-between text-xs text-gray-500 dark:text-gray-400">
+                                <span>{userOptions.length === 0 && !isEndpointUsersLoading ? 'No endpoint users found yet.' : `${userOptions.length} endpoint users available`}</span>
+                                <button
+                                    type="button"
+                                    className="underline hover:text-gray-700 dark:hover:text-gray-200"
+                                    onClick={() => refetchEndpointUsers()}
+                                >
+                                    Refresh endpoint users
+                                </button>
+                            </div>
+                        )}
                     </label>
 
                     <label className="space-y-1">
@@ -163,11 +321,14 @@ export default function ContextPolicies() {
                     <input
                         className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900"
                         placeholder="Example: 10.0.0.0/8, 192.168.1.0/24, 172.16.0.0/12"
-                        value={draft.trusted_networks.join(',')}
-                        onChange={(e) => setDraft({
-                            ...draft,
-                            trusted_networks: e.target.value.split(',').map(v => v.trim()).filter(Boolean),
-                        })}
+                        value={trustedNetworksText}
+                        onChange={(e) => {
+                            setTrustedNetworksText(e.target.value);
+                            setDraft({
+                                ...draft,
+                                trusted_networks: parseTrustedNetworks(e.target.value),
+                            });
+                        }}
                     />
                 </label>
 
@@ -181,12 +342,22 @@ export default function ContextPolicies() {
                     />
                 </label>
                 <button
-                    onClick={() => createMutation.mutate(draft)}
+                    onClick={handleCreatePolicy}
                     className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-500 disabled:opacity-50"
-                    disabled={createMutation.isPending || !draft.name || !draft.scope_value}
+                    disabled={hasPendingMutation || !draft.name || !(draft.scope_type === 'global' ? '*' : draft.scope_value.trim())}
                 >
                     <Plus size={16} /> Add Policy
                 </button>
+                {matchingScope && (
+                    <div className="text-xs text-blue-600 dark:text-blue-400">
+                        Note: a policy already exists for `{matchingScope.scope_type}:{matchingScope.scope_value}`. Saving will replace it (upsert semantics).
+                    </div>
+                )}
+                {validationError && (
+                    <div className="text-xs text-red-600 dark:text-red-400">
+                        {validationError}
+                    </div>
+                )}
                 {!globalExists && (
                     <div className="text-xs text-amber-600 dark:text-amber-400">
                         Warning: global baseline policy is missing. Create one with scope `global` and scope value `*`.
@@ -224,6 +395,8 @@ export default function ContextPolicies() {
                                     <button
                                         onClick={() => deleteMutation.mutate(item.id)}
                                         className="px-3 py-1.5 text-xs rounded-md border border-red-300 text-red-600 dark:border-red-700"
+                                        disabled={item.scope_type === 'global' && item.scope_value === '*'}
+                                        title={item.scope_type === 'global' && item.scope_value === '*' ? 'Keep global baseline policy in place' : undefined}
                                     >
                                         <Trash2 size={14} className="inline mr-1" /> Delete
                                     </button>

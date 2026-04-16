@@ -68,6 +68,7 @@ type AlertStats struct {
 	ByStatus      map[string]int64 `json:"by_status"`
 	ByRule        map[string]int64 `json:"by_rule"`
 	ByAgent       map[string]int64 `json:"by_agent"`
+	ByTactic      map[string]int64 `json:"by_tactic"`
 	Last24Hours   int64            `json:"last_24h"`
 	Last7Days     int64            `json:"last_7d"`
 	AvgConfidence float64          `json:"avg_confidence"`

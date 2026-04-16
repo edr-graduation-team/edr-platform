@@ -193,6 +193,8 @@ export interface AlertStats {
     by_severity: Record<string, number>;
     by_status: Record<string, number>;
     by_rule?: Record<string, number>;
+    by_agent?: Record<string, number>;
+    by_tactic?: Record<string, number>;
     last_24h: number;
     last_7d: number;
     avg_confidence: number;

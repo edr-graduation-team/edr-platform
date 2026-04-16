@@ -74,15 +74,26 @@ func (c *ETWCollector) handleFileIo(pid uint32, opcode uint8, filePath string) {
 	dir := filepath.Dir(filePath)
 	ext := filepath.Ext(name)
 
+	// For production context-aware scoring, file events must carry enough
+	// endpoint/process context (user + command-line) to satisfy the required
+	// `context_quality_score` inputs.
+	sid, user, elevated, integrity := getPrivileges(pid)
+	cmdLine := getCmdLine(pid)
+
 	evt := event.NewEvent(event.EventTypeFile, severity, map[string]interface{}{
-		"action":       action,
-		"path":         filePath,
-		"name":         name,
-		"directory":    dir,
-		"extension":    ext,
-		"pid":          pid,
-		"process_name": procName,
-		"process_path": procPath,
+		"action":          action,
+		"path":            filePath,
+		"name":            name,
+		"directory":       dir,
+		"extension":       ext,
+		"pid":             pid,
+		"process_name":    procName,
+		"process_path":    procPath,
+		"user_name":       user,
+		"user_sid":        sid,
+		"command_line":    cmdLine,
+		"is_elevated":     elevated,
+		"integrity_level": integrity,
 	})
 
 	// Apply configurable filter.

@@ -162,7 +162,15 @@ func (ag *AlertGenerator) enrichEventData(
 	}
 
 	// Add command line if available
-	if cmdLine, ok := event.GetField("CommandLine"); ok {
+	// Prefer EDR agent normalized key: `command_line`.
+	// Fallback to legacy/case variants for backward compatibility.
+	if cmdLine, ok := event.GetField("command_line"); ok {
+		eventData["command_line"] = cmdLine
+	} else if cmdLine, ok := event.GetField("CommandLine"); ok {
+		eventData["command_line"] = cmdLine
+	} else if cmdLine, ok := event.GetField("process.command_line"); ok {
+		eventData["command_line"] = cmdLine
+	} else if cmdLine, ok := event.GetField("data.command_line"); ok {
 		eventData["command_line"] = cmdLine
 	}
 
@@ -231,16 +239,16 @@ func initializeMitreMappings() map[string]string {
 		// ================================================================
 		// Reconnaissance (TA0043)
 		// ================================================================
-		"T1595": "Reconnaissance",  // Active Scanning
-		"T1592": "Reconnaissance",  // Gather Victim Host Information
-		"T1589": "Reconnaissance",  // Gather Victim Identity Information
-		"T1590": "Reconnaissance",  // Gather Victim Network Information
-		"T1591": "Reconnaissance",  // Gather Victim Org Information
-		"T1596": "Reconnaissance",  // Search Open Technical Databases
-		"T1593": "Reconnaissance",  // Search Open Websites/Domains
-		"T1594": "Reconnaissance",  // Search Victim-Owned Websites
-		"T1597": "Reconnaissance",  // Search Closed Sources
-		"T1598": "Reconnaissance",  // Phishing for Information
+		"T1595": "Reconnaissance", // Active Scanning
+		"T1592": "Reconnaissance", // Gather Victim Host Information
+		"T1589": "Reconnaissance", // Gather Victim Identity Information
+		"T1590": "Reconnaissance", // Gather Victim Network Information
+		"T1591": "Reconnaissance", // Gather Victim Org Information
+		"T1596": "Reconnaissance", // Search Open Technical Databases
+		"T1593": "Reconnaissance", // Search Open Websites/Domains
+		"T1594": "Reconnaissance", // Search Victim-Owned Websites
+		"T1597": "Reconnaissance", // Search Closed Sources
+		"T1598": "Reconnaissance", // Phishing for Information
 
 		// ================================================================
 		// Resource Development (TA0042)
@@ -269,32 +277,32 @@ func initializeMitreMappings() map[string]string {
 		// ================================================================
 		// Execution (TA0002)
 		// ================================================================
-		"T1059": "Execution",  // Command and Scripting Interpreter
-		"T1047": "Execution",  // Windows Management Instrumentation
-		"T1053": "Execution",  // Scheduled Task/Job
-		"T1129": "Execution",  // Shared Modules
-		"T1203": "Execution",  // Exploitation for Client Execution
-		"T1569": "Execution",  // System Services
-		"T1204": "Execution",  // User Execution
-		"T1559": "Execution",  // Inter-Process Communication
-		"T1106": "Execution",  // Native API
-		"T1648": "Execution",  // Serverless Execution
+		"T1059": "Execution", // Command and Scripting Interpreter
+		"T1047": "Execution", // Windows Management Instrumentation
+		"T1053": "Execution", // Scheduled Task/Job
+		"T1129": "Execution", // Shared Modules
+		"T1203": "Execution", // Exploitation for Client Execution
+		"T1569": "Execution", // System Services
+		"T1204": "Execution", // User Execution
+		"T1559": "Execution", // Inter-Process Communication
+		"T1106": "Execution", // Native API
+		"T1648": "Execution", // Serverless Execution
 
 		// ================================================================
 		// Persistence (TA0003)
 		// ================================================================
-		"T1547": "Persistence",  // Boot or Logon Autostart Execution
-		"T1543": "Persistence",  // Create or Modify System Process
-		"T1546": "Persistence",  // Event Triggered Execution
+		"T1547": "Persistence", // Boot or Logon Autostart Execution
+		"T1543": "Persistence", // Create or Modify System Process
+		"T1546": "Persistence", // Event Triggered Execution
 		// T1556: see Credential Access (primary tactic)
-		"T1137": "Persistence",  // Office Application Startup
-		"T1542": "Persistence",  // Pre-OS Boot
-		"T1574": "Persistence",  // Hijack Execution Flow
-		"T1136": "Persistence",  // Create Account
-		"T1098": "Persistence",  // Account Manipulation
-		"T1197": "Persistence",  // BITS Jobs
-		"T1505": "Persistence",  // Server Software Component
-		"T1205": "Persistence",  // Traffic Signaling
+		"T1137": "Persistence", // Office Application Startup
+		"T1542": "Persistence", // Pre-OS Boot
+		"T1574": "Persistence", // Hijack Execution Flow
+		"T1136": "Persistence", // Create Account
+		"T1098": "Persistence", // Account Manipulation
+		"T1197": "Persistence", // BITS Jobs
+		"T1505": "Persistence", // Server Software Component
+		"T1205": "Persistence", // Traffic Signaling
 
 		// ================================================================
 		// Privilege Escalation (TA0004)
@@ -308,138 +316,138 @@ func initializeMitreMappings() map[string]string {
 		// ================================================================
 		// Defense Evasion (TA0005)
 		// ================================================================
-		"T1027": "Defense Evasion",  // Obfuscated Files or Information
-		"T1036": "Defense Evasion",  // Masquerading
-		"T1070": "Defense Evasion",  // Indicator Removal
-		"T1218": "Defense Evasion",  // System Binary Proxy Execution
-		"T1562": "Defense Evasion",  // Impair Defenses
-		"T1140": "Defense Evasion",  // Deobfuscate/Decode Files
-		"T1112": "Defense Evasion",  // Modify Registry
-		"T1564": "Defense Evasion",  // Hide Artifacts
-		"T1497": "Defense Evasion",  // Virtualization/Sandbox Evasion
-		"T1220": "Defense Evasion",  // XSL Script Processing
-		"T1221": "Defense Evasion",  // Template Injection
-		"T1202": "Defense Evasion",  // Indirect Command Execution
-		"T1216": "Defense Evasion",  // System Script Proxy Execution
-		"T1553": "Defense Evasion",  // Subvert Trust Controls
-		"T1480": "Defense Evasion",  // Execution Guardrails
-		"T1622": "Defense Evasion",  // Debugger Evasion
-		"T1006": "Defense Evasion",  // Direct Volume Access
-		"T1014": "Defense Evasion",  // Rootkit
-		"T1127": "Defense Evasion",  // Trusted Developer Utilities Proxy Execution
+		"T1027": "Defense Evasion", // Obfuscated Files or Information
+		"T1036": "Defense Evasion", // Masquerading
+		"T1070": "Defense Evasion", // Indicator Removal
+		"T1218": "Defense Evasion", // System Binary Proxy Execution
+		"T1562": "Defense Evasion", // Impair Defenses
+		"T1140": "Defense Evasion", // Deobfuscate/Decode Files
+		"T1112": "Defense Evasion", // Modify Registry
+		"T1564": "Defense Evasion", // Hide Artifacts
+		"T1497": "Defense Evasion", // Virtualization/Sandbox Evasion
+		"T1220": "Defense Evasion", // XSL Script Processing
+		"T1221": "Defense Evasion", // Template Injection
+		"T1202": "Defense Evasion", // Indirect Command Execution
+		"T1216": "Defense Evasion", // System Script Proxy Execution
+		"T1553": "Defense Evasion", // Subvert Trust Controls
+		"T1480": "Defense Evasion", // Execution Guardrails
+		"T1622": "Defense Evasion", // Debugger Evasion
+		"T1006": "Defense Evasion", // Direct Volume Access
+		"T1014": "Defense Evasion", // Rootkit
+		"T1127": "Defense Evasion", // Trusted Developer Utilities Proxy Execution
 
 		// ================================================================
 		// Credential Access (TA0006)
 		// ================================================================
-		"T1003": "Credential Access",  // OS Credential Dumping
-		"T1110": "Credential Access",  // Brute Force
-		"T1557": "Credential Access",  // Adversary-in-the-Middle
-		"T1558": "Credential Access",  // Steal or Forge Kerberos Tickets
-		"T1555": "Credential Access",  // Credentials from Password Stores
-		"T1552": "Credential Access",  // Unsecured Credentials
-		"T1556": "Credential Access",  // Modify Authentication Process
-		"T1539": "Credential Access",  // Steal Web Session Cookie
-		"T1528": "Credential Access",  // Steal Application Access Token
-		"T1649": "Credential Access",  // Steal or Forge Authentication Certificates
-		"T1187": "Credential Access",  // Forced Authentication
-		"T1212": "Credential Access",  // Exploitation for Credential Access
-		"T1040": "Credential Access",  // Network Sniffing
+		"T1003": "Credential Access", // OS Credential Dumping
+		"T1110": "Credential Access", // Brute Force
+		"T1557": "Credential Access", // Adversary-in-the-Middle
+		"T1558": "Credential Access", // Steal or Forge Kerberos Tickets
+		"T1555": "Credential Access", // Credentials from Password Stores
+		"T1552": "Credential Access", // Unsecured Credentials
+		"T1556": "Credential Access", // Modify Authentication Process
+		"T1539": "Credential Access", // Steal Web Session Cookie
+		"T1528": "Credential Access", // Steal Application Access Token
+		"T1649": "Credential Access", // Steal or Forge Authentication Certificates
+		"T1187": "Credential Access", // Forced Authentication
+		"T1212": "Credential Access", // Exploitation for Credential Access
+		"T1040": "Credential Access", // Network Sniffing
 
 		// ================================================================
 		// Discovery (TA0007)
 		// ================================================================
-		"T1082": "Discovery",  // System Information Discovery
-		"T1083": "Discovery",  // File and Directory Discovery
-		"T1087": "Discovery",  // Account Discovery
-		"T1016": "Discovery",  // System Network Configuration Discovery
-		"T1033": "Discovery",  // System Owner/User Discovery
-		"T1049": "Discovery",  // System Network Connections Discovery
-		"T1057": "Discovery",  // Process Discovery
-		"T1012": "Discovery",  // Query Registry
-		"T1018": "Discovery",  // Remote System Discovery
-		"T1069": "Discovery",  // Permission Groups Discovery
-		"T1007": "Discovery",  // System Service Discovery
-		"T1010": "Discovery",  // Application Window Discovery
-		"T1046": "Discovery",  // Network Service Discovery
-		"T1135": "Discovery",  // Network Share Discovery
-		"T1201": "Discovery",  // Password Policy Discovery
-		"T1482": "Discovery",  // Domain Trust Discovery
-		"T1518": "Discovery",  // Software Discovery
-		"T1124": "Discovery",  // System Time Discovery
+		"T1082": "Discovery", // System Information Discovery
+		"T1083": "Discovery", // File and Directory Discovery
+		"T1087": "Discovery", // Account Discovery
+		"T1016": "Discovery", // System Network Configuration Discovery
+		"T1033": "Discovery", // System Owner/User Discovery
+		"T1049": "Discovery", // System Network Connections Discovery
+		"T1057": "Discovery", // Process Discovery
+		"T1012": "Discovery", // Query Registry
+		"T1018": "Discovery", // Remote System Discovery
+		"T1069": "Discovery", // Permission Groups Discovery
+		"T1007": "Discovery", // System Service Discovery
+		"T1010": "Discovery", // Application Window Discovery
+		"T1046": "Discovery", // Network Service Discovery
+		"T1135": "Discovery", // Network Share Discovery
+		"T1201": "Discovery", // Password Policy Discovery
+		"T1482": "Discovery", // Domain Trust Discovery
+		"T1518": "Discovery", // Software Discovery
+		"T1124": "Discovery", // System Time Discovery
 		// T1497: see Defense Evasion (primary tactic)
-		"T1615": "Discovery",  // Group Policy Discovery
+		"T1615": "Discovery", // Group Policy Discovery
 
 		// ================================================================
 		// Lateral Movement (TA0008)
 		// ================================================================
-		"T1021": "Lateral Movement",  // Remote Services
-		"T1570": "Lateral Movement",  // Lateral Tool Transfer
-		"T1563": "Lateral Movement",  // Remote Service Session Hijacking
-		"T1534": "Lateral Movement",  // Internal Spearphishing
-		"T1080": "Lateral Movement",  // Taint Shared Content
-		"T1550": "Lateral Movement",  // Use Alternate Authentication Material
+		"T1021": "Lateral Movement", // Remote Services
+		"T1570": "Lateral Movement", // Lateral Tool Transfer
+		"T1563": "Lateral Movement", // Remote Service Session Hijacking
+		"T1534": "Lateral Movement", // Internal Spearphishing
+		"T1080": "Lateral Movement", // Taint Shared Content
+		"T1550": "Lateral Movement", // Use Alternate Authentication Material
 
 		// ================================================================
 		// Collection (TA0009)
 		// ================================================================
-		"T1005": "Collection",  // Data from Local System
-		"T1113": "Collection",  // Screen Capture
-		"T1560": "Collection",  // Archive Collected Data
-		"T1115": "Collection",  // Clipboard Data
-		"T1119": "Collection",  // Automated Collection
-		"T1530": "Collection",  // Data from Cloud Storage
-		"T1213": "Collection",  // Data from Information Repositories
-		"T1025": "Collection",  // Data from Removable Media
-		"T1074": "Collection",  // Data Staged
-		"T1056": "Collection",  // Input Capture
-		"T1123": "Collection",  // Audio Capture
-		"T1125": "Collection",  // Video Capture
-		"T1039": "Collection",  // Data from Network Shared Drive
+		"T1005": "Collection", // Data from Local System
+		"T1113": "Collection", // Screen Capture
+		"T1560": "Collection", // Archive Collected Data
+		"T1115": "Collection", // Clipboard Data
+		"T1119": "Collection", // Automated Collection
+		"T1530": "Collection", // Data from Cloud Storage
+		"T1213": "Collection", // Data from Information Repositories
+		"T1025": "Collection", // Data from Removable Media
+		"T1074": "Collection", // Data Staged
+		"T1056": "Collection", // Input Capture
+		"T1123": "Collection", // Audio Capture
+		"T1125": "Collection", // Video Capture
+		"T1039": "Collection", // Data from Network Shared Drive
 
 		// ================================================================
 		// Command and Control (TA0011)
 		// ================================================================
-		"T1071": "Command and Control",  // Application Layer Protocol
-		"T1105": "Command and Control",  // Ingress Tool Transfer
-		"T1090": "Command and Control",  // Proxy
-		"T1573": "Command and Control",  // Encrypted Channel
-		"T1572": "Command and Control",  // Protocol Tunneling
-		"T1568": "Command and Control",  // Dynamic Resolution
-		"T1095": "Command and Control",  // Non-Application Layer Protocol
-		"T1104": "Command and Control",  // Multi-Stage Channels
-		"T1132": "Command and Control",  // Data Encoding
-		"T1001": "Command and Control",  // Data Obfuscation
-		"T1008": "Command and Control",  // Fallback Channels
-		"T1219": "Command and Control",  // Remote Access Software
-		"T1102": "Command and Control",  // Web Service
-		"T1571": "Command and Control",  // Non-Standard Port
+		"T1071": "Command and Control", // Application Layer Protocol
+		"T1105": "Command and Control", // Ingress Tool Transfer
+		"T1090": "Command and Control", // Proxy
+		"T1573": "Command and Control", // Encrypted Channel
+		"T1572": "Command and Control", // Protocol Tunneling
+		"T1568": "Command and Control", // Dynamic Resolution
+		"T1095": "Command and Control", // Non-Application Layer Protocol
+		"T1104": "Command and Control", // Multi-Stage Channels
+		"T1132": "Command and Control", // Data Encoding
+		"T1001": "Command and Control", // Data Obfuscation
+		"T1008": "Command and Control", // Fallback Channels
+		"T1219": "Command and Control", // Remote Access Software
+		"T1102": "Command and Control", // Web Service
+		"T1571": "Command and Control", // Non-Standard Port
 
 		// ================================================================
 		// Exfiltration (TA0010)
 		// ================================================================
-		"T1041": "Exfiltration",  // Exfiltration Over C2 Channel
-		"T1048": "Exfiltration",  // Exfiltration Over Alternative Protocol
-		"T1567": "Exfiltration",  // Exfiltration Over Web Service
-		"T1029": "Exfiltration",  // Scheduled Transfer
-		"T1537": "Exfiltration",  // Transfer Data to Cloud Account
-		"T1020": "Exfiltration",  // Automated Exfiltration
-		"T1030": "Exfiltration",  // Data Transfer Size Limits
-		"T1052": "Exfiltration",  // Exfiltration Over Physical Medium
+		"T1041": "Exfiltration", // Exfiltration Over C2 Channel
+		"T1048": "Exfiltration", // Exfiltration Over Alternative Protocol
+		"T1567": "Exfiltration", // Exfiltration Over Web Service
+		"T1029": "Exfiltration", // Scheduled Transfer
+		"T1537": "Exfiltration", // Transfer Data to Cloud Account
+		"T1020": "Exfiltration", // Automated Exfiltration
+		"T1030": "Exfiltration", // Data Transfer Size Limits
+		"T1052": "Exfiltration", // Exfiltration Over Physical Medium
 
 		// ================================================================
 		// Impact (TA0040)
 		// ================================================================
-		"T1486": "Impact",  // Data Encrypted for Impact (Ransomware)
-		"T1489": "Impact",  // Service Stop
-		"T1490": "Impact",  // Inhibit System Recovery
-		"T1485": "Impact",  // Data Destruction
-		"T1491": "Impact",  // Defacement
-		"T1499": "Impact",  // Endpoint Denial of Service
-		"T1498": "Impact",  // Network Denial of Service
-		"T1496": "Impact",  // Resource Hijacking (Cryptomining)
-		"T1531": "Impact",  // Account Access Removal
-		"T1529": "Impact",  // System Shutdown/Reboot
-		"T1565": "Impact",  // Data Manipulation
+		"T1486": "Impact", // Data Encrypted for Impact (Ransomware)
+		"T1489": "Impact", // Service Stop
+		"T1490": "Impact", // Inhibit System Recovery
+		"T1485": "Impact", // Data Destruction
+		"T1491": "Impact", // Defacement
+		"T1499": "Impact", // Endpoint Denial of Service
+		"T1498": "Impact", // Network Denial of Service
+		"T1496": "Impact", // Resource Hijacking (Cryptomining)
+		"T1531": "Impact", // Account Access Removal
+		"T1529": "Impact", // System Shutdown/Reboot
+		"T1565": "Impact", // Data Manipulation
 	}
 }
 
@@ -504,24 +512,24 @@ func (ag *AlertGenerator) GenerateAggregatedAlert(
 	combinedConf := matchResult.CombinedConfidence()
 	relatedTitles := matchResult.RelatedRuleTitles()
 	relatedIDs := matchResult.RelatedRuleIDs()
-	
+
 	alert := &domain.Alert{
-		ID:                 ag.generateAlertID(),
-		RuleID:             primary.Rule.ID,
-		RuleTitle:          primary.Rule.Title,
-		Severity:           finalSeverity,
-		Confidence:         primary.Confidence,
-		Timestamp:          matchResult.Timestamp,
-		EventID:            matchResult.Event.EventID,
-		EventCategory:      matchResult.Event.Category,
-		Product:            matchResult.Event.Product,
-		MITRETactics:       tactics,
-		MITRETechniques:    allTechniques,
-		MatchedFields:      matchResult.AllMatchedFields(),
-		MatchedSelections:  primary.MatchedSelections,
-		EventData:          ag.sanitizeEventData(matchResult.Event.RawData),
-		FalsePositiveRisk:  0.0,
-		
+		ID:                ag.generateAlertID(),
+		RuleID:            primary.Rule.ID,
+		RuleTitle:         primary.Rule.Title,
+		Severity:          finalSeverity,
+		Confidence:        primary.Confidence,
+		Timestamp:         matchResult.Timestamp,
+		EventID:           matchResult.Event.EventID,
+		EventCategory:     matchResult.Event.Category,
+		Product:           matchResult.Event.Product,
+		MITRETactics:      tactics,
+		MITRETechniques:   allTechniques,
+		MatchedFields:     matchResult.AllMatchedFields(),
+		MatchedSelections: primary.MatchedSelections,
+		EventData:         ag.sanitizeEventData(matchResult.Event.RawData),
+		FalsePositiveRisk: 0.0,
+
 		// Aggregation fields - EXPLICIT assignment to ensure they're set
 		MatchCount:         matchCount,
 		RelatedRules:       relatedTitles,
@@ -606,4 +614,3 @@ func (ag *AlertGenerator) extractTacticsFromTechniques(techniques []string) []st
 
 	return tactics
 }
-

@@ -47,6 +47,214 @@
 
 </div>
 
+<div dir="rtl">
+
+## 9) Compliance Matrix (الخطة → التنفيذ الفعلي)
+
+</div>
+
+<div dir="ltr">
+
+| Plan Requirement | Implementation Status | Files / Symbols |
+|---|---|---|
+| Centralize scoring constants in one YAML config | Completed | `sigma_engine_go/config/config.yaml` (`risk_scoring`), `sigma_engine_go/internal/infrastructure/config/config.go` (`Config.RiskScoring`), `sigma_engine_go/internal/application/scoring/scoring_config.go` |
+| Inject config into scorer/provider and remove hardcoded constants | Completed | `sigma_engine_go/internal/application/scoring/risk_scorer.go` (`NewDefaultRiskScorerWithConfig`, config-driven compute functions), `sigma_engine_go/internal/application/scoring/context_policy_provider.go` (`NewPostgresContextPolicyProviderWithConfig`, config clamps/multipliers), `sigma_engine_go/cmd/sigma-engine-kafka/main.go` (wiring) |
+| Add backend risk-level mapping from final_score | Completed | `sigma_engine_go/internal/application/scoring/risk_level.go` (`RiskLevelFromScore`), `sigma_engine_go/internal/handlers/alerts.go` (`RiskLevel` in response), `sigma_engine_go/internal/handlers/server.go` (pass `RiskLevelsConfig`) |
+| Align dashboard with backend risk level source-of-truth | Completed | `dashboard/src/api/client.ts` (`Alert.risk_level`), `dashboard/src/pages/Alerts.tsx` (`RiskScoreBadge` prefers `risk_level`) |
+| Keep one-policy-per-scope and avoid stacking | Completed | `connection-manager/internal/database/migrations/017_create_context_policies.up.sql` (`UNIQUE(scope_type, scope_value)`), `connection-manager/internal/repository/context_policy_repo.go` (`Create` as UPSERT/replace), `connection-manager/pkg/api/handlers_other.go` (global `scope_value='*'` validation) |
+| Produce formal design doc with formulas/pipeline/rationale | Completed | `docs/context-aware-scoring-v2.md` |
+| Add targeted tests for config-driven behavior | Completed | `sigma_engine_go/internal/application/scoring/risk_level_test.go`, `sigma_engine_go/internal/application/scoring/context_multiplier_test.go` |
+
+</div>
+
+<div dir="rtl">
+
+## 10) Baseline Deep Dive (نفس نمط أسئلتك التفصيلي)
+
+### 10.1 ما هو baseline في هذا النظام؟
+
+الـ baseline هنا هو **ملف سلوك process** لكل:
+- `agent_id` + `process_name` + `hour_of_day (UTC)`
+
+أي أن النطاق الأساسي هو:
+- **مستوى الجهاز + العملية + الساعة**
+- وليس baseline per user بشكل مباشر.
+
+### 10.2 ما هي الحقول التي تُجمع من الوكيل؟
+
+الحقول التي تُستخرج إلى `AggregationInput` (من event الخام):
+- `AgentID`
+- `ProcessName` (`name`)
+- `ProcessPath` (`executable`)
+- `SigStatus` (`signature_status`)
+- `IntegrityLevel` (`integrity_level`)
+- `IsElevated` (`is_elevated`)
+- `ParentName` (`parent_name`)
+- `ObservedAt`
+
+الكود المسؤول:
+- `sigma_engine_go/internal/application/baselines/baseline_aggregator.go`
+  - `ExtractAggregationInput(...)`
+
+### 10.3 كيف يتم اختيار الأحداث التي تدخل baseline؟
+
+بالدالة:
+- `ShouldRecord(eventData)` في نفس الملف.
+
+المنطق:
+- يقبل process creation (`event_id` 1 أو 4688) أو `event_type=process`
+- fallback: وجود `name` كإشارة process event
+
+### 10.4 أين يُخزن baseline في السيرفر؟
+
+في PostgreSQL، جدول:
+- `process_baselines`
+
+والتمثيل البرمجي:
+- `ProcessBaseline` في:
+  - `sigma_engine_go/internal/application/baselines/baseline_repository.go`
+
+### 10.5 كيف تتم عملية التعلم (learning)؟
+
+التعلم **event-driven** وليس cron:
+- كل process event يتم enqueue بشكل غير حاجب (fire-and-forget)
+- background workers تقوم `Upsert` للـ baseline
+
+الكود:
+- `BaselineAggregator.Record(...)`, `worker(...)`, `upsert(...)`
+  - `sigma_engine_go/internal/application/baselines/baseline_aggregator.go`
+
+### 10.6 ما هي الخوارزمية المستخدمة؟
+
+داخل `PostgresBaselineRepository.Upsert(...)`:
+- EMA للمتوسط:
+  - `new_avg = 0.90*old_avg + 0.10*1.0`
+- EWMV/Stddev:
+  - تحديث `stddev_executions` بصيغة EWMA variance
+- observation_days:
+  - يزيد يوميًا حتى سقف 14
+- confidence_score:
+  - `1 - exp(-days/7)` مع cap `0.99`
+
+الكود:
+- `sigma_engine_go/internal/application/baselines/baseline_repository.go`
+
+### 10.7 فترة التعلم (learning period)؟
+
+عمليًا عندك مستويان:
+1. نافذة baseline المخزنة: `baseline_window_days = 14`
+2. تفعيل إشارة UEBA في الـ scorer عند:
+   - `ConfidenceScore >= risk_scoring.ueba.confidence_gate` (default 0.30)
+
+هذا يعني أن baseline يبدأ يتعلم من أول حدث، لكن التأثير في scoring يُفعّل بعد تخطي confidence gate.
+
+### 10.8 هل baseline مستخدم الآن فعليًا؟
+
+نعم، في المسار الإنتاجي الحالي:
+- bootstrapping:
+  - `sigma_engine_go/cmd/sigma-engine-kafka/main.go`
+  - ينشئ `BaselineRepository` + `BaselineCache` + `BaselineAggregator`
+- event loop:
+  - `sigma_engine_go/internal/infrastructure/kafka/event_loop.go`
+  - يسجل process events إلى aggregator
+- scorer:
+  - `sigma_engine_go/internal/application/scoring/risk_scorer.go`
+  - يستدعي `computeUEBA(...)` ويستخدم baseline lookup
+
+### 10.9 ما دوره وتأثيره في النتيجة؟
+
+التأثير المباشر في المعادلة:
+- `ueba_bonus` (anomaly) يزيد `raw_score`
+- `ueba_discount` (normal) ينقص `raw_score`
+
+يعني baseline يدخل في decision النهائي عبر UEBA فقط (في النسخة الحالية).
+
+### 10.10 أين وكيف يتم تحديث baseline؟
+
+التحديث يتم مع كل event process مقبول:
+- enqueue في channel
+- upsert async إلى DB
+
+إذا queue ممتلئة:
+- drop best-effort (لا يؤثر على correctness pipeline، لكنه يؤثر على غنى baseline)
+
+</div>
+
+<div dir="ltr">
+
+## 11) ContextSnapshot Deep Dive (same detailed framing)
+
+### 11.1 What is ContextSnapshot?
+
+`ContextSnapshot` is the forensic payload captured at scoring time and stored per alert.
+
+Definition:
+- `sigma_engine_go/internal/application/scoring/context_snapshot.go`
+
+Built in:
+- `buildContextSnapshot(...)` in `sigma_engine_go/internal/application/scoring/risk_scorer.go`
+
+### 11.2 How is it constructed?
+
+`Score(...)` computes all score components, then:
+1. Creates `ScoreBreakdown`.
+2. Calls `buildContextSnapshot(...)` with lineage/burst/breakdown.
+3. Adds warnings for non-fatal degradation (lineage/burst/ueba/context provider errors).
+4. Injects context factors:
+   - `UserRoleWeight`
+   - `DeviceCriticalityWeight`
+   - `NetworkAnomalyFactor`
+   - `ContextMultiplier`
+   - `ContextQualityScore`
+   - `QualityFactor`
+   - `MissingContextFields`
+
+### 11.3 What fields does it contain?
+
+Major groups:
+- Process image
+- Privilege context
+- Parent/grandparent/ancestor chain
+- Burst metadata
+- Rule metadata
+- ScoreBreakdown
+- Context policy factors and quality
+- Warnings
+
+### 11.4 Where is it stored?
+
+Persisted into alerts table as JSONB:
+- `context_snapshot`
+- `score_breakdown`
+
+Persistence path:
+- `sigma_engine_go/internal/infrastructure/database/alert_writer.go`
+- `sigma_engine_go/internal/infrastructure/database/alert_repo.go`
+- migration: `sigma_engine_go/internal/infrastructure/database/migrations/014_add_risk_scoring.up.sql`
+
+### 11.5 Is ContextSnapshot used now?
+
+Yes:
+- API returns it via alerts endpoints.
+- Dashboard reads and renders:
+  - process lineage
+  - UEBA signal
+  - score breakdown
+  - context multiplier and quality details
+
+UI surfaces:
+- `dashboard/src/pages/Alerts.tsx` (detail modal/context tab)
+
+### 11.6 Role and impact
+
+`ContextSnapshot` itself does not change score after computation; it is explainability/evidence.
+Its practical impact is:
+- analyst trust
+- tuning/debugging
+- post-incident forensic traceability
+
+</div>
+
 <div dir="ltr">
 
 ## 1) End-to-End Pipeline (Agent → Sigma Engine → DB → API → Dashboard)

@@ -256,6 +256,7 @@ func (r *PostgresAlertRepository) GetStats(ctx context.Context) (*AlertStats, er
 		ByStatus:   make(map[string]int64),
 		ByRule:     make(map[string]int64),
 		ByAgent:    make(map[string]int64),
+		ByTactic:   make(map[string]int64),
 	}
 
 	// Total
@@ -299,6 +300,33 @@ func (r *PostgresAlertRepository) GetStats(ctx context.Context) (*AlertStats, er
 		stats.ByRule[title] = count
 	}
 	rowsRule.Close()
+
+	// By agent (top 10 most-alerted endpoints)
+	rowsAgent, _ := r.pool.Query(ctx, "SELECT agent_id, COUNT(*) FROM sigma_alerts GROUP BY agent_id ORDER BY COUNT(*) DESC LIMIT 10")
+	for rowsAgent.Next() {
+		var agentID string
+		var count int64
+		rowsAgent.Scan(&agentID, &count)
+		stats.ByAgent[agentID] = count
+	}
+	rowsAgent.Close()
+
+	// By tactic — unnest() expands the array column into individual rows
+	rowsTactic, _ := r.pool.Query(ctx, `
+		SELECT tactic, COUNT(*)
+		FROM sigma_alerts, unnest(mitre_tactics) AS tactic
+		WHERE mitre_tactics IS NOT NULL
+		GROUP BY tactic
+		ORDER BY COUNT(*) DESC
+		LIMIT 14
+	`)
+	for rowsTactic.Next() {
+		var tactic string
+		var count int64
+		rowsTactic.Scan(&tactic, &count)
+		stats.ByTactic[tactic] = count
+	}
+	rowsTactic.Close()
 
 	return stats, nil
 }

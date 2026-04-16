@@ -3,7 +3,47 @@
 /* Enable class-based dark mode for Tailwind v4 */
 @variant dark (&:where(.dark, .dark *));
 
-/* Tailwind v4 Theme Configuration */
+/* ============================================================
+   EDR DESIGN TOKENS
+   ============================================================ */
+:root {
+  /* Fonts */
+  --font-ui:   'Inter', system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+
+  /* EDR Surface Backgrounds (light) */
+  --edr-bg:         #f1f5f9;
+  --edr-surface:    #ffffff;
+  --edr-surface-2:  #f8fafc;
+  --edr-border:     #e2e8f0;
+
+  /* Accent Colors */
+  --edr-cyan:    #22d3ee;
+  --edr-red:     #f43f5e;
+  --edr-amber:   #f59e0b;
+  --edr-emerald: #10b981;
+  --edr-purple:  #a855f7;
+  --edr-orange:  #f97316;
+  --edr-blue:    #3b82f6;
+
+  /* Glow shadows */
+  --glow-cyan:    0 0 20px rgba(34, 211, 238, 0.3);
+  --glow-red:     0 0 20px rgba(244, 63, 94, 0.4);
+  --glow-emerald: 0 0 20px rgba(16, 185, 129, 0.3);
+  --glow-amber:   0 0 20px rgba(245, 158, 11, 0.3);
+}
+
+.dark {
+  /* EDR Surface Backgrounds (dark) */
+  --edr-bg:         #0d1b2a;
+  --edr-surface:    #111e2e;
+  --edr-surface-2:  #152438;
+  --edr-border:     #1e3048;
+}
+
+/* ============================================================
+   TAILWIND v4 THEME CONFIG
+   ============================================================ */
 @theme {
   --color-primary-50: #f0f9ff;
   --color-primary-100: #e0f2fe;
@@ -50,82 +90,490 @@
   --color-success-900: #14532d;
 }
 
-:root {
-  --primary: #0ea5e9;
-  --danger: #ef4444;
-  --warning: #f59e0b;
-  --success: #22c55e;
+/* ============================================================
+   BASE / TYPOGRAPHY
+   ============================================================ */
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
 }
 
 body {
+  font-family: var(--font-ui);
   @apply bg-gray-50 text-gray-900 dark:bg-gray-900 dark:text-gray-100;
 }
 
-.card {
-  @apply bg-white dark:bg-gray-800 rounded-lg shadow-md p-6;
+/* Slide-in animations */
+@keyframes slideInRight {
+  from { opacity: 0; transform: translateX(24px); }
+  to   { opacity: 1; transform: translateX(0); }
 }
 
+@keyframes statusPulseOnline {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(16,185,129,0.6); }
+  50%       { box-shadow: 0 0 0 6px rgba(16,185,129,0); }
+}
+
+@keyframes statusPulseOffline {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(239,68,68,0.6); }
+  50%       { box-shadow: 0 0 0 6px rgba(239,68,68,0); }
+}
+
+@keyframes statusPulseDegraded {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(245,158,11,0.6); }
+  50%       { box-shadow: 0 0 0 5px rgba(245,158,11,0); }
+}
+
+.status-pulse-online {
+  animation: statusPulseOnline 2s ease-in-out infinite;
+}
+.status-pulse-degraded {
+  animation: statusPulseDegraded 1.5s ease-in-out infinite;
+}
+.status-pulse-offline {
+  background-color: #ef4444;
+  animation: statusPulseOffline 1s ease-in-out infinite;
+}
+
+code, pre, .font-mono {
+  font-family: var(--font-mono) !important;
+}
+
+/* ============================================================
+   CARD COMPONENT
+   ============================================================ */
+.card {
+  @apply bg-white dark:bg-gray-800 rounded-xl shadow-md p-6;
+  border: 1px solid rgba(226, 232, 240, 0.8);
+  transition: box-shadow 0.2s ease, transform 0.2s ease;
+}
+
+.dark .card {
+  border-color: rgba(30, 48, 72, 0.8);
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.3);
+}
+
+.card-hover:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
+}
+
+.dark .card-hover:hover {
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5), var(--glow-cyan);
+}
+
+/* ============================================================
+   BUTTONS
+   ============================================================ */
 .btn {
-  @apply px-4 py-2 rounded-md font-medium transition-colors;
+  @apply inline-flex items-center gap-2 px-4 py-2 rounded-lg font-medium text-sm transition-all duration-200;
+  font-family: var(--font-ui);
+}
+
+.btn:focus-visible {
+  outline: 2px solid var(--edr-cyan);
+  outline-offset: 2px;
 }
 
 .btn-primary {
-  @apply bg-primary-600 text-white hover:bg-primary-700;
+  @apply bg-primary-600 text-white hover:bg-primary-700 active:scale-95;
+  box-shadow: 0 2px 8px rgba(2, 132, 199, 0.3);
+}
+
+.btn-primary:hover {
+  box-shadow: 0 4px 16px rgba(2, 132, 199, 0.5);
+}
+
+.btn-secondary {
+  @apply bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600 active:scale-95;
 }
 
 .btn-danger {
-  @apply bg-danger-500 text-white hover:bg-danger-600;
+  @apply bg-red-600 text-white hover:bg-red-700 active:scale-95;
+  box-shadow: 0 2px 8px rgba(220, 38, 38, 0.3);
 }
 
+.btn-success {
+  @apply bg-green-600 text-white hover:bg-green-700 active:scale-95;
+}
+
+.btn-warning {
+  @apply bg-amber-500 text-white hover:bg-amber-600 active:scale-95;
+}
+
+.btn-ghost {
+  @apply text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700 active:scale-95;
+}
+
+/* ============================================================
+   INPUTS
+   ============================================================ */
 .input {
-  @apply w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 focus:ring-2 focus:ring-primary-500 outline-none;
+  @apply w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-sm focus:ring-2 focus:ring-cyan-500 focus:border-transparent outline-none transition-all duration-200;
+  font-family: var(--font-ui);
 }
 
+.dark .input {
+  background-color: rgba(17, 30, 46, 0.8);
+  border-color: rgba(30, 48, 72, 0.8);
+}
+
+.input:focus {
+  box-shadow: 0 0 0 3px rgba(34, 211, 238, 0.15);
+}
+
+/* ============================================================
+   BADGES
+   ============================================================ */
 .badge {
-  @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium;
+  @apply inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold uppercase tracking-wide;
+  font-family: var(--font-ui);
 }
 
 .badge-critical {
-  @apply bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200;
+  background: rgba(244, 63, 94, 0.12);
+  color: #f43f5e;
+  border: 1px solid rgba(244, 63, 94, 0.25);
+}
+
+.dark .badge-critical {
+  background: rgba(244, 63, 94, 0.18);
+  color: #fb7185;
+  border-color: rgba(244, 63, 94, 0.35);
 }
 
 .badge-high {
-  @apply bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200;
+  background: rgba(249, 115, 22, 0.12);
+  color: #f97316;
+  border: 1px solid rgba(249, 115, 22, 0.25);
+}
+
+.dark .badge-high {
+  background: rgba(249, 115, 22, 0.18);
+  color: #fb923c;
+  border-color: rgba(249, 115, 22, 0.35);
 }
 
 .badge-medium {
-  @apply bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200;
+  background: rgba(245, 158, 11, 0.12);
+  color: #d97706;
+  border: 1px solid rgba(245, 158, 11, 0.25);
+}
+
+.dark .badge-medium {
+  background: rgba(245, 158, 11, 0.18);
+  color: #fbbf24;
+  border-color: rgba(245, 158, 11, 0.35);
 }
 
 .badge-low {
-  @apply bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200;
+  background: rgba(59, 130, 246, 0.12);
+  color: #2563eb;
+  border: 1px solid rgba(59, 130, 246, 0.25);
 }
 
+.dark .badge-low {
+  background: rgba(59, 130, 246, 0.18);
+  color: #60a5fa;
+  border-color: rgba(59, 130, 246, 0.35);
+}
+
+.badge-info {
+  background: rgba(6, 182, 212, 0.12);
+  color: #0891b2;
+  border: 1px solid rgba(6, 182, 212, 0.25);
+}
+
+.dark .badge-info {
+  background: rgba(6, 182, 212, 0.18);
+  color: #22d3ee;
+}
+
+.badge-success {
+  background: rgba(16, 185, 129, 0.12);
+  color: #059669;
+  border: 1px solid rgba(16, 185, 129, 0.25);
+}
+
+.dark .badge-success {
+  background: rgba(16, 185, 129, 0.18);
+  color: #34d399;
+}
+
+.badge-warning {
+  background: rgba(245, 158, 11, 0.12);
+  color: #d97706;
+  border: 1px solid rgba(245, 158, 11, 0.25);
+}
+.dark .badge-warning {
+  background: rgba(245, 158, 11, 0.18);
+  color: #fbbf24;
+  border-color: rgba(245, 158, 11, 0.35);
+}
+
+
+.badge-danger {
+  background: rgba(239, 68, 68, 0.12);
+  color: #dc2626;
+  border: 1px solid rgba(239, 68, 68, 0.25);
+}
+.dark .badge-danger {
+  background: rgba(239, 68, 68, 0.18);
+  color: #f87171;
+  border-color: rgba(239, 68, 68, 0.35);
+}
+
+
+/* Status badges */
+.badge-online {
+  background: rgba(16, 185, 129, 0.12);
+  color: #059669;
+  border: 1px solid rgba(16, 185, 129, 0.25);
+}
+
+.dark .badge-online {
+  background: rgba(16, 185, 129, 0.18);
+  color: #34d399;
+}
+
+.badge-offline {
+  @apply bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+}
+
+.badge-degraded {
+  background: rgba(245, 158, 11, 0.12);
+  color: #d97706;
+  border: 1px solid rgba(245, 158, 11, 0.25);
+}
+.dark .badge-degraded {
+  background: rgba(245, 158, 11, 0.18);
+  color: #fbbf24;
+  border-color: rgba(245, 158, 11, 0.35);
+}
+
+
+/* MITRE Purple badges */
+.badge-mitre {
+  background: rgba(168, 85, 247, 0.12);
+  color: #9333ea;
+  border: 1px solid rgba(168, 85, 247, 0.25);
+  @apply text-[10px] font-mono;
+}
+
+.dark .badge-mitre {
+  background: rgba(168, 85, 247, 0.18);
+  color: #c084fc;
+}
+
+/* ============================================================
+   TABLE
+   ============================================================ */
 .table {
-  @apply w-full divide-y divide-gray-200 dark:divide-gray-700;
+  @apply w-full;
+  border-collapse: separate;
+  border-spacing: 0;
 }
 
 .table th {
-  @apply px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider;
+  @apply px-4 py-3 text-left text-[11px] font-bold uppercase tracking-widest;
+  color: #64748b;
+  font-family: var(--font-ui);
+  border-bottom: 1px solid rgba(226, 232, 240, 0.8);
+}
+
+.dark .table th {
+  color: #475569;
+  border-bottom-color: rgba(30, 48, 72, 0.8);
 }
 
 .table td {
-  @apply px-4 py-4 text-sm text-gray-900 dark:text-gray-100;
+  @apply px-4 py-3.5 text-sm;
+  font-family: var(--font-ui);
+  border-bottom: 1px solid rgba(226, 232, 240, 0.4);
 }
 
-.table tr:hover {
-  @apply bg-gray-50 dark:bg-gray-700;
+.dark .table td {
+  border-bottom-color: rgba(30, 48, 72, 0.4);
 }
 
-/* Animations */
-@keyframes fade-in {
+.table tr:last-child td {
+  border-bottom: none;
+}
+
+.table tr:hover td {
+  background-color: rgba(241, 245, 249, 0.6);
+}
+
+.dark .table tr:hover td {
+  background-color: rgba(21, 36, 56, 0.6);
+}
+
+/* Severity stripe on table rows */
+.table-row-critical {
+  border-left: 3px solid var(--edr-red) !important;
+}
+
+.table-row-high {
+  border-left: 3px solid var(--edr-orange) !important;
+}
+
+.table-row-medium {
+  border-left: 3px solid var(--edr-amber) !important;
+}
+
+.table-row-low {
+  border-left: 3px solid var(--edr-blue) !important;
+}
+
+.table-row-informational {
+  border-left: 3px solid var(--edr-cyan) !important;
+}
+
+/* ============================================================
+   TABS
+   ============================================================ */
+.tab {
+  @apply px-4 py-2.5 text-sm font-semibold border-b-2 border-transparent transition-all duration-200;
+  color: #94a3b8;
+  font-family: var(--font-ui);
+}
+
+.tab:hover {
+  color: #cbd5e1;
+  border-bottom-color: rgba(34, 211, 238, 0.3);
+}
+
+.tab-active {
+  color: var(--edr-cyan);
+  border-bottom-color: var(--edr-cyan);
+}
+
+/* ============================================================
+   HEALTH BAR
+   ============================================================ */
+.health-bar {
+  @apply h-1.5 rounded-full bg-gray-200 dark:bg-gray-700 overflow-hidden;
+}
+
+.health-bar-fill {
+  @apply h-full rounded-full transition-all duration-700 ease-out;
+}
+
+/* ============================================================
+   TOOLTIP
+   ============================================================ */
+.tooltip {
+  @apply absolute z-50 px-2.5 py-1.5 text-xs font-medium text-white rounded-lg shadow-xl;
+  background: rgba(15, 23, 42, 0.95);
+  backdrop-filter: blur(4px);
+  pointer-events: none;
+}
+
+/* ============================================================
+   STATUS PULSE ANIMATIONS (for agent status dots)
+   ============================================================ */
+
+/* Online: growing green ring */
+@keyframes pulse-ring {
+  0%   { transform: scale(0.8); opacity: 1; }
+  70%  { transform: scale(2);   opacity: 0; }
+  100% { transform: scale(2);   opacity: 0; }
+}
+
+.status-pulse-online::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: rgba(16, 185, 129, 0.4);
+  animation: pulse-ring 1.8s cubic-bezier(0.215, 0.61, 0.355, 1) infinite;
+}
+
+/* Isolated / Critical: red blink */
+@keyframes threat-blink {
+  0%, 100%  { opacity: 1; }
+  50%       { opacity: 0.2; }
+}
+
+.status-blink-isolated {
+  animation: threat-blink 0.9s ease-in-out infinite;
+}
+
+/* Degraded: amber flicker */
+@keyframes amber-flicker {
+  0%, 100%  { opacity: 1; }
+  30%       { opacity: 0.5; }
+  60%       { opacity: 0.9; }
+  80%       { opacity: 0.4; }
+}
+
+.status-flicker-degraded {
+  animation: amber-flicker 2s ease-in-out infinite;
+}
+
+/* ============================================================
+   DRAWER / DETAIL PANEL ANIMATIONS
+   ============================================================ */
+@keyframes enter-from-right {
   from {
     opacity: 0;
+    transform: translateX(100%);
   }
-
   to {
     opacity: 1;
+    transform: translateX(0);
   }
+}
+
+@keyframes exit-to-right {
+  from {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateX(100%);
+  }
+}
+
+.drawer-enter {
+  animation: enter-from-right 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* ============================================================
+   PAGE / ELEMENT ENTRANCE ANIMATIONS
+   ============================================================ */
+@keyframes slide-up-fade {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes count-up {
+  from {
+    opacity: 0;
+    transform: scale(0.8);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
 }
 
 @keyframes scale-in {
@@ -133,7 +581,6 @@ body {
     opacity: 0;
     transform: scale(0.95);
   }
-
   to {
     opacity: 1;
     transform: scale(1);
@@ -145,7 +592,6 @@ body {
     opacity: 0;
     transform: translateX(100%);
   }
-
   to {
     opacity: 1;
     transform: translateX(0);
@@ -157,117 +603,183 @@ body {
     opacity: 0;
     transform: translateY(20px);
   }
-
   to {
     opacity: 1;
     transform: translateY(0);
   }
 }
 
-.animate-fade-in {
-  animation: fade-in 0.2s ease-out;
+@keyframes float-up {
+  from {
+    opacity: 0;
+    transform: translateY(40px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
-.animate-scale-in {
-  animation: scale-in 0.2s ease-out;
-}
+.animate-fade-in     { animation: fade-in 0.2s ease-out; }
+.animate-scale-in    { animation: scale-in 0.2s ease-out; }
+.animate-slide-in    { animation: slide-in 0.3s ease-out; }
+.animate-slide-up    { animation: slide-up 0.3s ease-out; }
+.animate-slide-up-fade { animation: slide-up-fade 0.4s cubic-bezier(0.16, 1, 0.3, 1) both; }
+.animate-count-up    { animation: count-up 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) both; }
+.animate-float-up    { animation: float-up 0.5s cubic-bezier(0.16, 1, 0.3, 1) both; }
 
-.animate-slide-in {
-  animation: slide-in 0.3s ease-out;
-}
+/* Staggered entrance delays */
+.animate-delay-100 { animation-delay: 100ms; }
+.animate-delay-200 { animation-delay: 200ms; }
+.animate-delay-300 { animation-delay: 300ms; }
+.animate-delay-400 { animation-delay: 400ms; }
 
-.animate-slide-up {
-  animation: slide-up 0.3s ease-out;
-}
+/* ============================================================
+   GLOW UTILITIES
+   ============================================================ */
+.glow-cyan   { box-shadow: var(--glow-cyan); }
+.glow-red    { box-shadow: var(--glow-red); }
+.glow-emerald { box-shadow: var(--glow-emerald); }
+.glow-amber  { box-shadow: var(--glow-amber); }
 
-/* Badge variants */
-.badge-info {
-  @apply bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200;
-}
+/* Interactive glow on hover */
+.hover\:glow-cyan:hover   { box-shadow: var(--glow-cyan); }
+.hover\:glow-red:hover    { box-shadow: var(--glow-red); }
 
-.badge-success {
-  @apply bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200;
-}
-
-.badge-warning {
-  @apply bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200;
-}
-
-.badge-danger {
-  @apply bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200;
-}
-
-/* Status badges */
-.badge-online {
-  @apply bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200;
-}
-
-.badge-offline {
-  @apply bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300;
-}
-
-.badge-degraded {
-  @apply bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200;
-}
-
-/* Button variants */
-.btn-secondary {
-  @apply bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600;
-}
-
-.btn-success {
-  @apply bg-green-600 text-white hover:bg-green-700;
-}
-
-.btn-warning {
-  @apply bg-amber-600 text-white hover:bg-amber-700;
-}
-
-/* Tab styles */
-.tab {
-  @apply px-4 py-2 text-sm font-medium text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 border-b-2 border-transparent transition-colors;
-}
-
-.tab-active {
-  @apply text-primary-600 dark:text-primary-400 border-primary-600 dark:border-primary-400;
-}
-
-/* Health score indicator */
-.health-bar {
-  @apply h-2 rounded-full bg-gray-200 dark:bg-gray-700 overflow-hidden;
-}
-
-.health-bar-fill {
-  @apply h-full rounded-full transition-all duration-500;
-}
-
-/* Tooltip base */
-.tooltip {
-  @apply absolute z-50 px-2 py-1 text-xs font-medium text-white bg-gray-900 rounded shadow-lg;
-}
-
-/* Dark mode form elements — native <option> elements ignore Tailwind dark: classes */
+/* ============================================================
+   DARK MODE — NATIVE FORM ELEMENTS
+   ============================================================ */
 .dark select,
 .dark select option {
-  background-color: #1e293b; /* gray-800 */
-  color: #e2e8f0;           /* gray-200 */
-  border-color: #475569;    /* gray-600 */
+  background-color: #111e2e;
+  color: #e2e8f0;
+  border-color: #1e3048;
 }
 
 .dark select option:checked {
-  background-color: #334155; /* gray-700 */
+  background-color: #152438;
 }
 
-/* Dark mode code/pre blocks */
 .dark code {
-  color: #e2e8f0; /* gray-200 */
+  color: #e2e8f0;
 }
 
-/* Hide all scrollbar visual tracks globally to prevent movement interference while retaining scroll functionality */
+/* ============================================================
+   SCROLLBAR — HIDDEN GLOBALLY
+   ============================================================ */
 ::-webkit-scrollbar {
   display: none;
 }
+
 * {
   scrollbar-width: none;
   -ms-overflow-style: none;
+}
+
+/* ============================================================
+   BULK ACTION FLOATING BAR
+   ============================================================ */
+@keyframes float-up-bar {
+  from {
+    opacity: 0;
+    transform: translateY(100%) translateX(-50%);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) translateX(-50%);
+  }
+}
+
+.bulk-action-bar {
+  animation: float-up-bar 0.3s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* ============================================================
+   SPLIT PANE
+   ============================================================ */
+.split-pane-left {
+  @apply overflow-y-auto;
+  flex: 0 0 42%;
+  min-width: 320px;
+  max-width: 560px;
+}
+
+.split-pane-right {
+  @apply overflow-y-auto flex-1;
+  min-width: 0;
+}
+
+/* ============================================================
+   HEATMAP CALENDAR CELLS
+   ============================================================ */
+.heatmap-cell {
+  @apply rounded-sm transition-all duration-200 cursor-pointer;
+  aspect-ratio: 1;
+}
+
+.heatmap-cell:hover {
+  transform: scale(1.3);
+  z-index: 10;
+  position: relative;
+}
+
+/* ============================================================
+   THREAT METER / RADIAL GAUGE
+   ============================================================ */
+.threat-meter-text {
+  font-family: var(--font-mono);
+}
+
+/* ============================================================
+   KILL CHAIN SWIMLANE
+   ============================================================ */
+.killchain-phase {
+  @apply flex flex-col items-center gap-2 flex-1 min-w-0;
+}
+
+.killchain-phase-header {
+  @apply text-[10px] font-bold uppercase tracking-widest text-center px-2 py-1.5 rounded-lg w-full;
+  font-family: var(--font-ui);
+}
+
+.killchain-connector {
+  @apply h-0.5 flex-1 self-center;
+  background: linear-gradient(to right, rgba(30, 48, 72, 0.8), rgba(34, 211, 238, 0.3), rgba(30, 48, 72, 0.8));
+}
+
+/* ============================================================
+   CARD GRID (Endpoints view)
+   ============================================================ */
+.agent-card {
+  @apply rounded-xl p-4 border transition-all duration-200 cursor-pointer;
+  border-color: rgba(226, 232, 240, 0.8);
+  background: white;
+}
+
+.dark .agent-card {
+  border-color: rgba(30, 48, 72, 0.8);
+  background: rgba(17, 30, 46, 0.8);
+}
+
+.agent-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.15);
+  border-color: rgba(34, 211, 238, 0.3);
+}
+
+.dark .agent-card:hover {
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(34, 211, 238, 0.2);
+}
+
+/* Heatmap Calendar */
+.heatmap-cell {
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  min-height: 14px;
+}
+.heatmap-cell:hover {
+  transform: scale(1.25);
+  box-shadow: 0 0 8px rgba(34, 211, 238, 0.5);
+  z-index: 10;
+  position: relative;
 }

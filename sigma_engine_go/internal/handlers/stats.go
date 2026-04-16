@@ -58,6 +58,7 @@ type AlertStatsResponse struct {
 	ByStatus      map[string]int64 `json:"by_status"`
 	ByRule        map[string]int64 `json:"by_rule,omitempty"`
 	ByAgent       map[string]int64 `json:"by_agent,omitempty"`
+	ByTactic      map[string]int64 `json:"by_tactic,omitempty"`
 	Alerts24h     int64            `json:"last_24h"`
 	Alerts7d      int64            `json:"last_7d"`
 	AvgConfidence float64          `json:"avg_confidence"`
@@ -80,6 +81,7 @@ func (h *StatsHandler) AlertStats(w http.ResponseWriter, r *http.Request) {
 		ByStatus:      stats.ByStatus,
 		ByRule:        stats.ByRule,
 		ByAgent:       stats.ByAgent,
+		ByTactic:      stats.ByTactic,
 		Alerts24h:     stats.Last24Hours,
 		Alerts7d:      stats.Last7Days,
 		AvgConfidence: stats.AvgConfidence,

@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Plus, Save, Trash2 } from 'lucide-react';
-import { agentsApi, contextPoliciesApi, usersApi, type ContextPolicy } from '../../api/client';
+import { agentsApi, alertsApi, contextPoliciesApi, type ContextPolicy } from '../../api/client';
 import { useToast } from '../../components/Toast';
 
 type EditablePolicy = Omit<ContextPolicy, 'id' | 'created_at' | 'updated_at'> & { id?: number };
@@ -41,9 +41,9 @@ export default function ContextPolicies() {
         queryFn: () => agentsApi.list({ limit: 500, offset: 0, sort_by: 'hostname', sort_order: 'asc' }),
         staleTime: 30000,
     });
-    const { data: usersData, isLoading: isUsersLoading, refetch: refetchUsers } = useQuery({
-        queryKey: ['contextPolicyUsers'],
-        queryFn: () => usersApi.list({ limit: 500, offset: 0 }),
+    const { data: endpointUsersData, isLoading: isEndpointUsersLoading, refetch: refetchEndpointUsers } = useQuery({
+        queryKey: ['contextPolicyEndpointUsers'],
+        queryFn: () => alertsApi.list({ limit: 500, offset: 0, sort: 'timestamp', order: 'desc' }),
         staleTime: 30000,
     });
 
@@ -52,10 +52,30 @@ export default function ContextPolicies() {
         () => (agentsData?.data ?? []).map(a => ({ value: a.id, label: `${a.hostname} (${a.id})` })),
         [agentsData]
     );
-    const userOptions = useMemo(
-        () => (usersData?.data ?? []).map(u => ({ value: u.username, label: `${u.username}${u.full_name ? ` (${u.full_name})` : ''}` })),
-        [usersData]
-    );
+    const userOptions = useMemo(() => {
+        const hostnameByAgentId = new Map((agentsData?.data ?? []).map(a => [a.id, a.hostname] as const));
+        const entries = (endpointUsersData?.alerts ?? [])
+            .map((a) => {
+                const user = a.context_snapshot?.user_name?.trim();
+                if (!user) return null;
+                const host = (hostnameByAgentId.get(a.agent_id) || a.agent_id || 'unknown-host').trim();
+                return {
+                    value: user,
+                    label: `${host}/${user}`,
+                };
+            })
+            .filter((v): v is { value: string; label: string } => Boolean(v));
+
+        // Deduplicate by user value (scope_value remains user account), keep first recent host/user label.
+        const seen = new Set<string>();
+        const unique: { value: string; label: string }[] = [];
+        for (const e of entries) {
+            if (seen.has(e.value)) continue;
+            seen.add(e.value);
+            unique.push(e);
+        }
+        return unique;
+    }, [endpointUsersData, agentsData]);
 
     const matchingScope = useMemo(
         () => items.find(i => i.scope_type === draft.scope_type && i.scope_value === (draft.scope_type === 'global' ? '*' : draft.scope_value.trim())),
@@ -201,13 +221,13 @@ export default function ContextPolicies() {
                             <select
                                 className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900"
                                 value={draft.scope_value}
-                                disabled={draft.scope_type === 'agent' ? isAgentsLoading : isUsersLoading}
+                                disabled={draft.scope_type === 'agent' ? isAgentsLoading : isEndpointUsersLoading}
                                 onChange={(e) => setDraft({ ...draft, scope_value: e.target.value })}
                             >
                                 <option value="">
                                     {draft.scope_type === 'agent'
                                         ? (isAgentsLoading ? 'Loading agents...' : 'Select agent...')
-                                        : (isUsersLoading ? 'Loading users...' : 'Select user...')}
+                                        : (isEndpointUsersLoading ? 'Loading endpoint users...' : 'Select endpoint user...')}
                                 </option>
                                 {(draft.scope_type === 'agent' ? agentOptions : userOptions).map((opt) => (
                                     <option key={opt.value} value={opt.value}>{opt.label}</option>
@@ -228,13 +248,13 @@ export default function ContextPolicies() {
                         )}
                         {draft.scope_type === 'user' && (
                             <div className="mt-2 flex items-center justify-between text-xs text-gray-500 dark:text-gray-400">
-                                <span>{userOptions.length === 0 && !isUsersLoading ? 'No users found yet.' : `${userOptions.length} users available`}</span>
+                                <span>{userOptions.length === 0 && !isEndpointUsersLoading ? 'No endpoint users found yet.' : `${userOptions.length} endpoint users available`}</span>
                                 <button
                                     type="button"
                                     className="underline hover:text-gray-700 dark:hover:text-gray-200"
-                                    onClick={() => refetchUsers()}
+                                    onClick={() => refetchEndpointUsers()}
                                 >
-                                    Refresh users
+                                    Refresh endpoint users
                                 </button>
                             </div>
                         )}

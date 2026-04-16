@@ -5,7 +5,7 @@ import {
     AlertTriangle, Clock, CheckCircle, XCircle, Shield, ArrowUpDown,
     GitBranch, Activity, TrendingUp, Cpu, Zap, Info, ChevronDown, ChevronUp
 } from 'lucide-react';
-import { alertsApi, authApi, createAlertStream, type Alert, type ContextSnapshot, type ScoreBreakdown, type AncestorEntry } from '../api/client';
+import { alertsApi, agentsApi, authApi, createAlertStream, type Alert, type ContextSnapshot, type ScoreBreakdown, type AncestorEntry } from '../api/client';
 import {
     Modal, MultiSelect, DateRangePicker, type DateRange, type MultiSelectOption,
     useToast, SkeletonTable
@@ -47,6 +47,15 @@ const statusColors: Record<string, string> = {
     resolved: 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20',
     false_positive: 'bg-slate-500/10 text-slate-700 dark:text-slate-400 border border-slate-500/20',
     closed: 'bg-slate-500/10 text-slate-700 dark:text-slate-400 border border-slate-500/20',
+};
+
+// Severity left-border stripe colour
+const severityStripe: Record<string, string> = {
+    critical: 'border-l-rose-500',
+    high:     'border-l-orange-500',
+    medium:   'border-l-amber-400',
+    low:      'border-l-indigo-400',
+    informational: 'border-l-cyan-400',
 };
 
 // Status icons
@@ -516,12 +525,14 @@ function AlertDetailModal({
     alert,
     isOpen,
     onClose,
-    onStatusChange
+    onStatusChange,
+    inlineMode = false,
 }: {
     alert: Alert | null;
     isOpen: boolean;
     onClose: () => void;
     onStatusChange: (id: string, status: string) => void;
+    inlineMode?: boolean;
 }) {
     const [activeTab, setActiveTab] = useState<'summary' | 'context' | 'event' | 'mitre' | 'actions'>('summary');
 
@@ -539,15 +550,15 @@ function AlertDetailModal({
         ...(authApi.canWriteAlerts() ? [{ id: 'actions', label: 'Actions' }] : []),
     ];
 
-    return (
-        <Modal isOpen={isOpen} onClose={onClose} title="Alert Details" size="lg">
+    const innerContent = (
+        <>
             {/* Tabs */}
-            <div className="flex border-b border-gray-200 dark:border-gray-700 -mx-6 px-6 mb-4">
+            <div className="flex border-b border-gray-200 dark:border-gray-700 px-4 mb-0 overflow-x-auto">
                 {tabs.map((tab) => (
                     <button
                         key={tab.id}
                         onClick={() => setActiveTab(tab.id as typeof activeTab)}
-                        className={`tab ${activeTab === tab.id ? 'tab-active' : ''} ${tab.highlight ? 'relative' : ''}`}
+                        className={`tab whitespace-nowrap ${activeTab === tab.id ? 'tab-active' : ''} ${tab.highlight ? 'relative' : ''}`}
                     >
                         {tab.label}
                         {tab.highlight && activeTab !== tab.id && (
@@ -556,6 +567,7 @@ function AlertDetailModal({
                     </button>
                 ))}
             </div>
+            <div className="p-4">
 
             {/* Summary Tab */}
             {activeTab === 'summary' && (
@@ -792,9 +804,19 @@ function AlertDetailModal({
                     </div>
                 </div>
             )}
+            </div>
+        </>
+    );
+
+    if (inlineMode) return innerContent;
+
+    return (
+        <Modal isOpen={isOpen} onClose={onClose} title="Alert Details" size="lg">
+            {innerContent}
         </Modal>
     );
 }
+
 
 // =============================================================================
 // Bulk Actions Toolbar
@@ -915,7 +937,6 @@ export default function Alerts() {
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
     const [page, setPage] = useState(1);
     const [pageSize, setPageSize] = useState(50);
-    // Default sort: risk_score descending (highest-risk first for SOC triage)
     const [sortBy, setSortBy] = useState<SortField>('risk_score');
     const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
 
@@ -930,6 +951,26 @@ export default function Alerts() {
     });
 
     const debouncedSearch = useDebounce(filters.search, 300);
+
+    // Agent hostname lookup map
+    const { data: agentListData } = useQuery({
+        queryKey: ['agentsForAlerts'],
+        queryFn: () => agentsApi.list({ limit: 500 }),
+        staleTime: 120000,
+        refetchInterval: 120000,
+    });
+    const agentHostnameMap = React.useMemo(() => {
+        const m: Record<string, string> = {};
+        (agentListData?.data || []).forEach(a => { m[a.id] = a.hostname; });
+        return m;
+    }, [agentListData]);
+
+    // Close drawer on Escape
+    useEffect(() => {
+        const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') setSelectedAlert(null); };
+        window.addEventListener('keydown', handler);
+        return () => window.removeEventListener('keydown', handler);
+    }, []);
 
     // Fetch alerts with risk_score sort default
     const { data, isLoading, error } = useQuery({
@@ -1131,8 +1172,9 @@ export default function Alerts() {
                     onClear={() => setSelectedIds(new Set())}
                 />
 
-                {/* Alerts Table */}
-                <div className="relative z-10 flex-1 flex flex-col min-h-0 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700/50 rounded-2xl shadow-lg overflow-hidden">
+                {/* Split-pane: Table + Slide-over drawer */}
+                <div className="relative z-10 flex-1 flex min-h-0 gap-4 overflow-hidden">
+                <div className={`flex flex-col min-h-0 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700/50 rounded-2xl shadow-lg overflow-hidden transition-all duration-300 ${ selectedAlert ? 'w-full lg:w-[58%] xl:w-[62%]' : 'w-full' }`}>
                     {isLoading ? (
                         <div className="p-4 flex-1 overflow-auto">
                             <SkeletonTable rows={10} columns={8} />
@@ -1200,15 +1242,23 @@ export default function Alerts() {
                                         const StatusIcon = statusIcons[alert.status] || AlertTriangle;
                                         const hasContext = !!alert.context_snapshot;
                                         const uebaSignal = alert.score_breakdown?.ueba_signal || alert.context_snapshot?.score_breakdown?.ueba_signal;
+                                        const isSelected = selectedAlert?.id === alert.id;
+                                        const hostname = agentHostnameMap[alert.agent_id || ''] || alert.agent_id?.slice(0, 12) + '…';
                                         return (
                                             <tr
                                                 key={alert.id}
-                                                className={`border-b border-slate-100 dark:border-slate-800/60 transition-all duration-200 ${selectedIds.has(alert.id)
-                                                    ? 'bg-primary-50 dark:bg-primary-900/20'
-                                                    : 'hover:bg-slate-50 dark:hover:bg-slate-800/40'
-                                                    }`}
+                                                onClick={() => setSelectedAlert(isSelected ? null : alert)}
+                                                className={`border-b border-slate-100 dark:border-slate-800/60 transition-all duration-200 cursor-pointer border-l-4 ${
+                                                    severityStripe[alert.severity] || 'border-l-slate-300'
+                                                } ${
+                                                    isSelected
+                                                        ? 'bg-primary-50 dark:bg-primary-900/20 ring-1 ring-inset ring-primary-400/30'
+                                                        : selectedIds.has(alert.id)
+                                                        ? 'bg-primary-50/50 dark:bg-primary-900/10'
+                                                        : 'hover:bg-slate-50 dark:hover:bg-slate-800/40'
+                                                }`}
                                             >
-                                                <td className="py-4 px-4">
+                                                <td className="py-3 px-3" onClick={e => e.stopPropagation()}>
                                                     <input
                                                         type="checkbox"
                                                         checked={selectedIds.has(alert.id)}
@@ -1216,63 +1266,56 @@ export default function Alerts() {
                                                         className="rounded"
                                                     />
                                                 </td>
-                                                {/* Risk Score cell */}
-                                                <td className="py-4 px-4">
+                                                {/* Risk Score */}
+                                                <td className="py-3 px-3">
                                                     <div className="flex items-center gap-1.5">
                                                         <RiskScoreBadge score={alert.risk_score} riskLevel={alert.risk_level} />
-                                                        {uebaSignal === 'anomaly' && (
-                                                            <span title="Baseline Anomaly">
-                                                                <Zap className="w-3 h-3 text-red-500" />
-                                                            </span>
-                                                        )}
-                                                        {uebaSignal === 'normal' && (
-                                                            <span title="Normalcy Discount">
-                                                                <CheckCircle className="w-3 h-3 text-green-500" />
-                                                            </span>
-                                                        )}
+                                                        {uebaSignal === 'anomaly' && <span title="Baseline Anomaly"><Zap className="w-3 h-3 text-red-500" /></span>}
+                                                        {uebaSignal === 'normal' && <span title="Normalcy Discount"><CheckCircle className="w-3 h-3 text-green-500" /></span>}
                                                     </div>
                                                 </td>
-                                                <td className="whitespace-nowrap text-sm py-4 px-4">
+                                                <td className="whitespace-nowrap text-sm py-3 px-3 text-slate-500 dark:text-slate-400">
                                                     {new Date(alert.timestamp).toLocaleString()}
                                                 </td>
-                                                <td className="py-4 px-4">
-                                                    <div className="max-w-xs">
-                                                        <p className="font-medium text-slate-800 dark:text-slate-200 truncate whitespace-normal">
+                                                <td className="py-3 px-3">
+                                                    <div className="max-w-[220px]">
+                                                        <p className="font-semibold text-slate-800 dark:text-slate-200 truncate text-sm">
                                                             {alert.rule_title}
                                                         </p>
-                                                        <div className="flex items-center gap-1.5 mt-0.5">
-                                                            {alert.mitre_techniques?.[0] && (
-                                                                <p className="text-xs text-primary-600 dark:text-primary-400">
-                                                                    {alert.mitre_techniques[0]}
-                                                                </p>
-                                                            )}
-                                                            {hasContext && (
-                                                                <span className="text-xs text-slate-400" title="Context snapshot available">
-                                                                    <GitBranch className="w-3 h-3 inline" />
+                                                        <div className="flex flex-wrap items-center gap-1 mt-1">
+                                                            {(alert.mitre_tactics || []).slice(0, 2).map(t => (
+                                                                <span key={t} className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-purple-500/10 text-purple-600 dark:text-purple-300 border border-purple-500/20">
+                                                                    {t}
                                                                 </span>
-                                                            )}
+                                                            ))}
+                                                            {(alert.mitre_techniques || []).slice(0, 1).map(t => (
+                                                                <span key={t} className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-mono bg-slate-500/10 text-slate-500 dark:text-slate-400 border border-slate-500/20">
+                                                                    {t}
+                                                                </span>
+                                                            ))}
+                                                            {hasContext && <span title="Context snapshot available"><GitBranch className="w-3 h-3 text-slate-400" /></span>}
                                                         </div>
                                                     </div>
                                                 </td>
-                                                <td className="py-4 px-4">
-                                                    <span className={`badge px-2.5 py-1 ${severityColors[alert.severity]}`}>
+                                                <td className="py-3 px-3">
+                                                    <span className={`badge px-2 py-0.5 text-[11px] font-bold ${severityColors[alert.severity]}`}>
                                                         {alert.severity.toUpperCase()}
                                                     </span>
                                                 </td>
-                                                <td className="py-4 px-4">
-                                                    <span className={`badge px-2.5 py-1 ${statusColors[alert.status]} flex items-center gap-1.5 w-fit font-medium`}>
-                                                        <StatusIcon className="w-3.5 h-3.5" />
+                                                <td className="py-3 px-3">
+                                                    <span className={`badge px-2 py-0.5 text-[11px] ${statusColors[alert.status]} flex items-center gap-1 w-fit font-medium`}>
+                                                        <StatusIcon className="w-3 h-3" />
                                                         {alert.status.replace('_', ' ')}
                                                     </span>
                                                 </td>
-                                                <td className="text-sm text-slate-500 dark:text-slate-400 font-mono py-4 px-4">
-                                                    {alert.agent_id?.slice(0, 12)}...
+                                                <td className="py-3 px-3">
+                                                    <div className="text-sm font-medium text-slate-700 dark:text-slate-300">{hostname}</div>
                                                 </td>
-                                                <td className="py-4 px-4">
+                                                <td className="py-3 px-3" onClick={e => e.stopPropagation()}>
                                                     <div className="flex gap-1">
                                                         <button
-                                                            onClick={() => setSelectedAlert(alert)}
-                                                            className="p-1.5 text-slate-400 hover:text-primary-600 hover:bg-slate-100 dark:hover:bg-slate-700/50 rounded transition-colors"
+                                                            onClick={() => setSelectedAlert(isSelected ? null : alert)}
+                                                            className={`p-1.5 rounded transition-colors ${ isSelected ? 'text-primary-600 bg-primary-100 dark:bg-primary-900/40' : 'text-slate-400 hover:text-primary-600 hover:bg-slate-100 dark:hover:bg-slate-700/50' }`}
                                                             title="View Details"
                                                         >
                                                             <Eye className="w-4 h-4" />
@@ -1312,12 +1355,42 @@ export default function Alerts() {
                     </div>
                 </div>
 
-                <AlertDetailModal
-                    alert={selectedAlert}
-                    isOpen={!!selectedAlert}
-                    onClose={() => setSelectedAlert(null)}
-                    onStatusChange={handleStatusChange}
-                />
+                {/* Slide-over detail panel */}
+                {selectedAlert && (
+                    <div className="hidden lg:flex flex-col min-h-0 w-full lg:w-[42%] xl:w-[38%] bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700/50 rounded-2xl shadow-xl overflow-hidden" style={{ animation: 'slideInRight 0.2s ease-out' }}>
+                        {/* Panel header */}
+                        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-200 dark:border-slate-700/50 shrink-0 bg-slate-50/80 dark:bg-slate-900/60">
+                            <div className="flex items-center gap-2">
+                                <span className={`w-2.5 h-2.5 rounded-full ${ selectedAlert.severity === 'critical' ? 'bg-rose-500' : selectedAlert.severity === 'high' ? 'bg-orange-500' : selectedAlert.severity === 'medium' ? 'bg-amber-400' : 'bg-slate-400' }`} />
+                                <span className="text-sm font-bold text-slate-800 dark:text-white truncate max-w-[200px]">{selectedAlert.rule_title}</span>
+                            </div>
+                            <button onClick={() => setSelectedAlert(null)} className="p-1.5 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition-colors">
+                                <X className="w-4 h-4" />
+                            </button>
+                        </div>
+                        {/* Panel body — reuse existing modal body by opening modal on mobile, using panel here */}
+                        <div className="flex-1 overflow-auto custom-scrollbar">
+                            <AlertDetailModal
+                                alert={selectedAlert}
+                                isOpen={false}
+                                onClose={() => setSelectedAlert(null)}
+                                onStatusChange={handleStatusChange}
+                                inlineMode
+                            />
+                        </div>
+                    </div>
+                )}
+
+                {/* Mobile: keep modal for small screens */}
+                <div className="lg:hidden">
+                    <AlertDetailModal
+                        alert={selectedAlert}
+                        isOpen={!!selectedAlert}
+                        onClose={() => setSelectedAlert(null)}
+                        onStatusChange={handleStatusChange}
+                    />
+                </div>
+                </div>
             </div>
         </div>
     );

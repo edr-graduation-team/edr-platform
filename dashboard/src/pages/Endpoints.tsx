@@ -4,7 +4,8 @@ import React, { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import {
     Search, Monitor, Wifi, WifiOff, AlertTriangle, ChevronDown,
-    Play, Shield, FileX, Folder, RefreshCw, X, Check, Clock, Loader2, Power, ShieldAlert, Square, Zap
+    Play, Shield, FileX, Folder, RefreshCw, X, Check, Clock, Loader2, Power, ShieldAlert, Square, Zap,
+    LayoutGrid, List
 } from 'lucide-react';
 import {
     agentsApi,
@@ -975,6 +976,8 @@ export default function Endpoints() {
         os_type: '',
         search: '',
     });
+    const [viewMode, setViewMode] = useState<'table' | 'grid'>('table');
+
 
     const debouncedSearch = useDebounce(filters.search, 300);
 
@@ -1124,25 +1127,82 @@ export default function Endpoints() {
                 </div>
             </div>
 
-            {/* Agents Table */}
-            <div className="relative z-10 flex-1 flex flex-col min-h-0 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700/50 rounded-2xl shadow-lg overflow-hidden">
-                {isLoading ? (
-                    <div className="p-4 flex-1 overflow-auto">
-                        <SkeletonTable rows={8} columns={7} />
+            {/* View toggle */}
+            <div className="flex items-center justify-end gap-2 shrink-0">
+                <button
+                    onClick={() => setViewMode('table')}
+                    className={`p-2 rounded-lg transition-all ${ viewMode === 'table' ? 'bg-cyan-500/20 text-cyan-400' : 'text-slate-400 hover:bg-slate-800/40 hover:text-slate-200' }`}
+                    title="Table View"
+                ><List className="w-4 h-4" /></button>
+                <button
+                    onClick={() => setViewMode('grid')}
+                    className={`p-2 rounded-lg transition-all ${ viewMode === 'grid' ? 'bg-cyan-500/20 text-cyan-400' : 'text-slate-400 hover:bg-slate-800/40 hover:text-slate-200' }`}
+                    title="Card Grid View"
+                ><LayoutGrid className="w-4 h-4" /></button>
+            </div>
+
+
+            {/* Agents View */}
+            <div className="relative z-10 flex-1 flex flex-col min-h-0 overflow-hidden">
+            {isLoading ? (
+                <div className="p-4 bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700/50">
+                    <SkeletonTable rows={8} columns={7} />
+                </div>
+            ) : agents.length === 0 ? (
+                <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700/50 flex flex-col items-center justify-center text-center py-16">
+                    <Monitor className="w-12 h-12 text-blue-400 mx-auto mb-4 opacity-50" />
+                    <h3 className="text-lg font-medium text-slate-900 dark:text-white mb-2">No Endpoints Found</h3>
+                    <p className="text-slate-500">{filters.search || filters.status || filters.os_type ? 'Try adjusting your filters' : 'No agents have registered yet'}</p>
+                </div>
+            ) : viewMode === 'grid' ? (
+                /* Card Grid View */
+                <div className="flex-1 overflow-auto custom-scrollbar">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-4 pb-4">
+                        {agents.map(agent => {
+                            const eff = getEffectiveStatus(agent);
+                            const pulseCls = eff === 'online' ? 'bg-emerald-500 status-pulse-online' : eff === 'degraded' ? 'bg-amber-400 status-pulse-degraded' : 'bg-slate-400 status-pulse-offline';
+                            const health = agent.health_score ?? 0;
+                            const healthClr = health >= 80 ? 'bg-emerald-500' : health >= 50 ? 'bg-amber-400' : 'bg-rose-500';
+                            const osIcon = agent.os_type === 'windows' ? '⊞' : agent.os_type === 'linux' ? '🐧' : '🍎';
+                            return (
+                                <div key={agent.id} className="agent-card bg-white dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700/50 rounded-xl p-4 flex flex-col gap-3 shadow-sm" style={{ animation: 'slideInRight 0.15s ease-out' }}>
+                                    {/* Card Header */}
+                                    <div className="flex items-center gap-3">
+                                        <span className={`w-3 h-3 rounded-full shrink-0 ${pulseCls}`} />
+                                        <span className="font-bold text-slate-800 dark:text-white text-sm truncate flex-1">{agent.hostname}</span>
+                                        <span className="text-lg" title={agent.os_type}>{osIcon}</span>
+                                    </div>
+                                    {/* Health bar */}
+                                    <div>
+                                        <div className="flex justify-between text-[11px] text-slate-500 mb-1">
+                                            <span>Health</span><span className="font-semibold">{health}%</span>
+                                        </div>
+                                        <div className="h-1.5 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
+                                            <div className={`h-full rounded-full transition-all ${healthClr}`} style={{ width: `${health}%` }} />
+                                        </div>
+                                    </div>
+                                    {/* Meta */}
+                                    <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400">
+                                        <span className="font-mono truncate max-w-[120px]" title={(agent.ip_addresses || [])[0] || ''}>{(agent.ip_addresses || [])[0] || '—'}</span>
+                                        <span className="flex items-center gap-1"><Clock className="w-3 h-3" />{agent.last_seen ? new Date(agent.last_seen).toLocaleTimeString() : '—'}</span>
+                                    </div>
+                                    {/* Actions */}
+                                    <div className="flex gap-2 pt-1 border-t border-slate-100 dark:border-slate-800">
+                                        {authApi.canViewResponses() && (
+                                            <>
+                                                <button onClick={() => handleCommand(agent, 'isolate_network')} className="flex-1 py-1.5 rounded-lg text-[11px] font-semibold bg-rose-500/10 text-rose-600 dark:text-rose-400 hover:bg-rose-500/20 transition-colors border border-rose-500/20" title="Isolate Network">Isolate</button>
+                                                <button onClick={() => handleCommand(agent, 'collect_logs')} className="flex-1 py-1.5 rounded-lg text-[11px] font-semibold bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 hover:bg-cyan-500/20 transition-colors border border-cyan-500/20" title="Collect Logs">Collect</button>
+                                            </>
+                                        )}
+                                        <button onClick={() => setExpandedAgentId(expandedAgentId === agent.id ? null : agent.id)} className="flex-1 py-1.5 rounded-lg text-[11px] font-semibold bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors">{expandedAgentId === agent.id ? 'Less' : 'Details'}</button>
+                                    </div>
+                                </div>
+                            );
+                        })}
                     </div>
-                ) : agents.length === 0 ? (
-                    <div className="flex-1 flex flex-col items-center justify-center text-center py-12">
-                        <Monitor className="w-12 h-12 text-blue-400 mx-auto mb-4 opacity-50" />
-                        <h3 className="text-lg font-medium text-slate-900 dark:text-white mb-2">
-                            No Endpoints Found
-                        </h3>
-                        <p className="text-slate-500">
-                            {filters.search || filters.status || filters.os_type
-                                ? 'Try adjusting your filters'
-                                : 'No agents have registered yet'}
-                        </p>
-                    </div>
-                ) : (
+                </div>
+            ) : (
+                <div className="flex-1 flex flex-col min-h-0 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700/50 rounded-2xl shadow-lg overflow-hidden">
                     <div className="flex-1 overflow-auto custom-scrollbar transform-gpu">
                         <table className="w-full text-left text-sm whitespace-nowrap">
                             <thead className="sticky top-0 z-10 bg-slate-100 dark:bg-slate-800 border-b-2 border-slate-200 dark:border-slate-700/80 text-xs uppercase tracking-wider text-slate-600 dark:text-slate-300 font-bold shadow-sm">
@@ -1223,12 +1283,12 @@ export default function Endpoints() {
                             </tbody>
                         </table>
                     </div>
-                )}
-
-                {/* Footer with count */}
-                <div className="shrink-0 px-4 py-3 bg-slate-50/50 dark:bg-slate-900/40 border-t border-slate-200 dark:border-slate-700/60 text-sm text-slate-500 rounded-b-2xl">
-                    Showing {agents.length} of {total} endpoints
+                    {/* Footer */}
+                    <div className="shrink-0 px-4 py-3 bg-slate-50/50 dark:bg-slate-900/40 border-t border-slate-200 dark:border-slate-700/60 text-sm text-slate-500">
+                        Showing {agents.length} of {total} endpoints
+                    </div>
                 </div>
+            )}
             </div>
 
             <CommandExecutionModal

@@ -87,6 +87,7 @@ type DefaultRiskScorer struct {
 	matrix           *SuspicionMatrix
 	baselineProvider baselines.BaselineProvider
 	contextProvider  ContextPolicyProvider
+	cfg              RiskScoringConfig
 }
 
 // NewDefaultRiskScorer constructs the production risk scorer.
@@ -96,12 +97,26 @@ func NewDefaultRiskScorer(
 	burstTracker BurstTracker,
 	baselineProvider baselines.BaselineProvider,
 ) *DefaultRiskScorer {
+	return NewDefaultRiskScorerWithConfig(lineageCache, burstTracker, baselineProvider, DefaultRiskScoringConfig())
+}
+
+// NewDefaultRiskScorerWithConfig constructs the production risk scorer with an
+// explicit tuning config (loaded from YAML). This is the preferred constructor
+// for production so all constants are centrally managed.
+func NewDefaultRiskScorerWithConfig(
+	lineageCache infracache.LineageCache,
+	burstTracker BurstTracker,
+	baselineProvider baselines.BaselineProvider,
+	cfg RiskScoringConfig,
+) *DefaultRiskScorer {
+	cfg.ValidateAndSetDefaults()
 	return &DefaultRiskScorer{
 		lineageCache:     lineageCache,
 		burstTracker:     burstTracker,
 		matrix:           NewSuspicionMatrix(),
 		baselineProvider: baselineProvider,
 		contextProvider:  NoopContextPolicyProvider{},
+		cfg:              cfg,
 	}
 }
 
@@ -140,7 +155,7 @@ func (rs *DefaultRiskScorer) Score(ctx context.Context, input ScoringInput) (*Sc
 	}
 
 	matchCount := input.MatchResult.MatchCount()
-	baseScore := computeBaseScore(primary.Rule.Severity(), matchCount)
+	baseScore := computeBaseScore(primary.Rule.Severity(), matchCount, rs.cfg.BaseScore)
 
 	// ── Step 2: Lineage Bonus ─────────────────────────────────────────────────
 	pid := extractInt64(input.Event.RawData, "pid")
@@ -164,7 +179,7 @@ func (rs *DefaultRiskScorer) Score(ctx context.Context, input ScoringInput) (*Sc
 	lineageBonus, lineageSuspicion := rs.matrix.ComputeBonus(lineageChain)
 
 	// ── Step 3: Privilege Bonus ───────────────────────────────────────────────
-	privilegeBonus := computePrivilegeBonus(input.Event.RawData)
+	privilegeBonus := computePrivilegeBonus(input.Event.RawData, rs.cfg.Privilege)
 
 	// ── Step 4: Temporal Burst Bonus ─────────────────────────────────────────
 	ruleCategory := categoryKey(primary.Rule)
@@ -172,13 +187,13 @@ func (rs *DefaultRiskScorer) Score(ctx context.Context, input ScoringInput) (*Sc
 	if burstErr != nil {
 		burstErr = fmt.Errorf("burst tracker: %w", burstErr)
 	}
-	burstBonus := computeBurstBonus(burstCount)
+	burstBonus := computeBurstBonus(burstCount, rs.cfg.Burst)
 
 	// ── Step 5: False-Positive Discount ──────────────────────────────────────
 	sigStatus := extractString(input.Event.RawData, "signature_status")
 	executable := extractString(input.Event.RawData, "executable")
-	fpDiscount := computeFPDiscount(sigStatus, executable)
-	fpRisk := computeFPRisk(sigStatus, executable)
+	fpDiscount := computeFPDiscount(sigStatus, executable, rs.cfg.FalsePositive)
+	fpRisk := computeFPRisk(sigStatus, executable, rs.cfg.FalsePositive)
 
 	// ── Step 5.5: UEBA Behavioral Baseline Adjustment ────────────────────────
 	// Query the in-memory baseline cache to determine if this process is:
@@ -199,7 +214,7 @@ func (rs *DefaultRiskScorer) Score(ctx context.Context, input ScoringInput) (*Sc
 	// contextual signals co-occur, the combined risk is greater than the sum
 	// of its parts. This captures cross-dimensional attack patterns that no
 	// single signal alone would warrant escalation.
-	interactionBonus := computeInteractionBonus(lineageBonus, privilegeBonus, uebaBonus, burstBonus)
+	interactionBonus := computeInteractionBonus(lineageBonus, privilegeBonus, uebaBonus, burstBonus, rs.cfg.Interaction)
 
 	// ── Step 5.7: Hybrid Context Policy Factors (user/device/network) ───────
 	userName := extractString(input.Event.RawData, "user_name")
@@ -218,11 +233,11 @@ func (rs *DefaultRiskScorer) Score(ctx context.Context, input ScoringInput) (*Sc
 	// overconfident scoring by applying a bounded quality factor.
 	contextQualityScore := extractFloat64(input.Event.RawData, "context_quality_score")
 	missingFields := extractStringSlice(input.Event.RawData, "missing_context_fields")
-	qualityFactor := computeContextQualityFactor(contextQualityScore, len(missingFields))
+	qualityFactor := computeContextQualityFactor(contextQualityScore, len(missingFields), rs.cfg.Quality)
 
 	// ── Step 6: Final Score ───────────────────────────────────────────────────
 	raw := baseScore + lineageBonus + privilegeBonus + burstBonus + uebaBonus + interactionBonus - fpDiscount - uebaDiscount
-	contextAdjusted := int(math.Round(float64(raw) * contextFactors.Multiplier() * qualityFactor))
+	contextAdjusted := int(math.Round(float64(raw) * contextFactors.Multiplier(rs.cfg.ContextPolicy) * qualityFactor))
 	finalScore := clamp(contextAdjusted, 0, 100)
 
 	breakdown := ScoreBreakdown{
@@ -238,7 +253,7 @@ func (rs *DefaultRiskScorer) Score(ctx context.Context, input ScoringInput) (*Sc
 		UserRoleWeight:          contextFactors.UserRoleWeight,
 		DeviceCriticalityWeight: contextFactors.DeviceCriticalityWeight,
 		NetworkAnomalyFactor:    contextFactors.NetworkAnomalyFactor,
-		ContextMultiplier:       contextFactors.Multiplier(),
+		ContextMultiplier:       contextFactors.Multiplier(rs.cfg.ContextPolicy),
 		ContextQualityScore:     contextQualityScore,
 		QualityFactor:           qualityFactor,
 		ContextAdjustedScore:    contextAdjusted,
@@ -247,7 +262,7 @@ func (rs *DefaultRiskScorer) Score(ctx context.Context, input ScoringInput) (*Sc
 	}
 
 	// ── Step 7: Build Context Snapshot ───────────────────────────────────────
-	snapshot := buildContextSnapshot(input, lineageChain, lineageSuspicion, burstCount, breakdown)
+	snapshot := buildContextSnapshot(input, lineageChain, lineageSuspicion, burstCount, rs.cfg.Burst.WindowSec, breakdown)
 
 	// Merge non-fatal errors into the snapshot (evidence of degraded context)
 	if lineageErr != nil {
@@ -266,7 +281,7 @@ func (rs *DefaultRiskScorer) Score(ctx context.Context, input ScoringInput) (*Sc
 	snapshot.UserRoleWeight = contextFactors.UserRoleWeight
 	snapshot.DeviceCriticalityWeight = contextFactors.DeviceCriticalityWeight
 	snapshot.NetworkAnomalyFactor = contextFactors.NetworkAnomalyFactor
-	snapshot.ContextMultiplier = contextFactors.Multiplier()
+	snapshot.ContextMultiplier = contextFactors.Multiplier(rs.cfg.ContextPolicy)
 	snapshot.ContextQualityScore = contextQualityScore
 	snapshot.QualityFactor = qualityFactor
 	snapshot.MissingContextFields = missingFields
@@ -316,9 +331,9 @@ func (rs *DefaultRiskScorer) computeUEBA(
 		return 0, 0, UEBASignalNone, nil
 	}
 
-	// Confidence gate: require ≥ 0.30 (≈ 3 days of observations)
+	// Confidence gate: require ≥ configured threshold (default 0.30)
 	// below this threshold the EMA hasn't converged and would produce noise
-	if baseline.ConfidenceScore < 0.30 {
+	if baseline.ConfidenceScore < rs.cfg.UEBA.ConfidenceGate {
 		return 0, 0, UEBASignalNone, nil
 	}
 
@@ -328,8 +343,8 @@ func (rs *DefaultRiskScorer) computeUEBA(
 	// ── Anomaly detection (industry-standard Z-score method) ─────────────────
 	// Case A: Process has NEVER run at this hour — strongest anomaly signal.
 	// ObservationDays==0 or near-zero avg indicates no historical precedent.
-	if baseline.ObservationDays == 0 || avg < 0.05 {
-		return 15, 0, UEBASignalAnomaly, nil
+	if baseline.ObservationDays == 0 || avg < rs.cfg.UEBA.FirstSeenHourAvgFloor {
+		return rs.cfg.UEBA.AnomalyBonus, 0, UEBASignalAnomaly, nil
 	}
 
 	// Case B: Z-score based anomaly detection.
@@ -343,8 +358,8 @@ func (rs *DefaultRiskScorer) computeUEBA(
 	// Reference: NIST SP 800-92 (Guide to Computer Security Log Management)
 	if stddev > 0 {
 		zScore := (1.0 - avg) / stddev
-		if zScore > 3.0 && !math.IsInf(zScore, 1) {
-			return 15, 0, UEBASignalAnomaly, nil
+		if zScore > rs.cfg.UEBA.ZScoreAnomalyThreshold && !math.IsInf(zScore, 1) {
+			return rs.cfg.UEBA.AnomalyBonus, 0, UEBASignalAnomaly, nil
 		}
 	}
 
@@ -355,12 +370,12 @@ func (rs *DefaultRiskScorer) computeUEBA(
 	if stddev == 0 {
 		// Zero variance means perfectly consistent — if avg >= 0.5, this
 		// process routinely runs at this hour.
-		if avg >= 0.5 {
-			return 0, 10, UEBASignalNormal, nil
+		if avg >= rs.cfg.UEBA.NormalAvgThreshold {
+			return 0, rs.cfg.UEBA.NormalDiscount, UEBASignalNormal, nil
 		}
 	} else {
 		if math.Abs(1.0-avg) <= stddev {
-			return 0, 10, UEBASignalNormal, nil
+			return 0, rs.cfg.UEBA.NormalDiscount, UEBASignalNormal, nil
 		}
 	}
 
@@ -390,28 +405,28 @@ func (rs *DefaultRiskScorer) computeUEBA(
 //	Critical:  9.5/10 × 100 = 95, set to 85 (leaves +15 for worst-case enrichment)
 //
 // Reference: NIST NVD CVSS v3.1 Specification §5 (Qualitative Severity Rating)
-func computeBaseScore(severity domain.Severity, matchCount int) int {
+func computeBaseScore(severity domain.Severity, matchCount int, cfg BaseScoreConfig) int {
 	var base int
 	switch severity {
 	case domain.SeverityInformational:
-		base = 10
+		base = cfg.Informational
 	case domain.SeverityLow:
-		base = 25
+		base = cfg.Low
 	case domain.SeverityMedium:
-		base = 45
+		base = cfg.Medium
 	case domain.SeverityHigh:
-		base = 65
+		base = cfg.High
 	case domain.SeverityCritical:
-		base = 85
+		base = cfg.Critical
 	default:
-		base = 35 // unknown severity → default to above low
+		base = cfg.Unknown // unknown severity → configurable default
 	}
 
 	// Multi-rule correlation bonus: +5 per additional matched rule, capped at +15
 	if matchCount > 1 {
-		bonus := (matchCount - 1) * 5
-		if bonus > 15 {
-			bonus = 15
+		bonus := (matchCount - 1) * cfg.MatchCorrelationBonusPerRule
+		if bonus > cfg.MatchCorrelationBonusCap {
+			bonus = cfg.MatchCorrelationBonusCap
 		}
 		base += bonus
 	}
@@ -434,7 +449,7 @@ func computeBaseScore(severity domain.Severity, matchCount int) int {
 //   - Elevated token:   +10 (running above standard user)
 //   - Unsigned binary:  +15 (no code-signing — highest abuse risk)
 //   - Unknown signature: +8 (telemetry gap — moderate concern)
-func computePrivilegeBonus(eventData map[string]interface{}) int {
+func computePrivilegeBonus(eventData map[string]interface{}, cfg PrivilegeConfig) int {
 	bonus := 0
 
 	userSID := extractString(eventData, "user_sid")
@@ -446,24 +461,24 @@ func computePrivilegeBonus(eventData map[string]interface{}) int {
 	// SYSTEM account (Local System SID) — strongest signal
 	// Legitimate processes rarely initiate suspicious activity as SYSTEM.
 	if strings.HasPrefix(userSID, "S-1-5-18") { // NT AUTHORITY\SYSTEM
-		bonus += 20
+		bonus += cfg.BonusSystemSID
 	} else if strings.HasSuffix(userSID, "-500") { // Built-in Administrator
-		bonus += 15
+		bonus += cfg.BonusAdminRID500
 	}
 
 	// Integrity level signals
 	switch integrityLevel {
 	case "system":
-		bonus += 15 // rare for non-service processes
+		bonus += cfg.BonusIntegritySys // rare for non-service processes
 	case "high":
 		if isElevated {
-			bonus += 10 // elevated admin doing something suspicious
+			bonus += cfg.BonusHighElevated // elevated admin doing something suspicious
 		}
 	}
 
 	// Elevated token (applies even when integrity level is not "system")
 	if isElevated && integrityLevel != "system" {
-		bonus += 10
+		bonus += cfg.BonusElevatedToken
 	}
 
 	// FIX ISSUE-02: Operator precedence bug.
@@ -474,15 +489,15 @@ func computePrivilegeBonus(eventData map[string]interface{}) int {
 	//   - "unsigned": confirmed unsigned binary → +15 (strong abuse indicator)
 	//   - ""/unknown: telemetry gap, not the same as unsigned → +8 (moderate)
 	if sigStatus == "unsigned" {
-		bonus += 15 // Confirmed unsigned — high abuse risk
+		bonus += cfg.BonusUnsignedBinary // Confirmed unsigned — high abuse risk
 	} else if sigStatus == "" && executable != "" {
-		bonus += 8 // Unknown/missing status — telemetry gap, moderate concern
+		bonus += cfg.BonusUnknownSig // Unknown/missing status — telemetry gap, moderate concern
 	}
 
 	// Cap privilege bonus to prevent over-weighting
 	// Industry standard: no single dimension should dominate >40% of the score range.
-	if bonus > 40 {
-		bonus = 40
+	if cfg.Cap > 0 && bonus > cfg.Cap {
+		bonus = cfg.Cap
 	}
 
 	return bonus
@@ -490,14 +505,14 @@ func computePrivilegeBonus(eventData map[string]interface{}) int {
 
 // computeBurstBonus returns a bonus based on how many times the same rule
 // category has fired in the last 5-minute window.
-func computeBurstBonus(count int64) int {
+func computeBurstBonus(count int64, cfg BurstConfig) int {
 	switch {
-	case count >= 30:
-		return 30
-	case count >= 10:
-		return 20
-	case count >= 3:
-		return 10
+	case count >= cfg.ThresholdHigh:
+		return cfg.BonusHigh
+	case count >= cfg.ThresholdMed:
+		return cfg.BonusMed
+	case count >= cfg.ThresholdLow:
+		return cfg.BonusLow
 	default:
 		return 0
 	}
@@ -510,7 +525,7 @@ func computeBurstBonus(count int64) int {
 // Industry alignment: Microsoft WDAC (Windows Defender Application Control)
 // trust hierarchy — Microsoft-signed System32 binaries represent the highest
 // trust level; third-party code-signed binaries are secondary.
-func computeFPDiscount(sigStatus, executablePath string) int {
+func computeFPDiscount(sigStatus, executablePath string, cfg FalsePositiveConfig) int {
 	sig := strings.ToLower(sigStatus)
 	exe := strings.ToLower(executablePath)
 
@@ -518,7 +533,7 @@ func computeFPDiscount(sigStatus, executablePath string) int {
 
 	// Microsoft-signed binary: trusted publisher
 	if sig == "microsoft" {
-		discount += 15
+		discount += cfg.DiscountMicrosoft
 
 		// Additional discount for canonical system paths
 		// These binaries are expected to run and are low-FP when not spawned suspiciously.
@@ -529,18 +544,18 @@ func computeFPDiscount(sigStatus, executablePath string) int {
 		}
 		for _, path := range systemPaths {
 			if strings.Contains(exe, path) {
-				discount += 10
+				discount += cfg.DiscountMicrosoftSystemPath
 				break
 			}
 		}
 	} else if sig == "trusted" {
 		// Third-party vendor with a valid signing certificate
-		discount += 8
+		discount += cfg.DiscountTrustedThirdParty
 	}
 
 	// Cap discount to prevent score from going very negative before clamp
-	if discount > 30 {
-		discount = 30
+	if cfg.DiscountCap > 0 && discount > cfg.DiscountCap {
+		discount = cfg.DiscountCap
 	}
 
 	return discount
@@ -564,7 +579,7 @@ func computeFPDiscount(sigStatus, executablePath string) int {
 //   - Trusted (3rd party signed): 0.30 → lower FP, still plausible
 //   - Unknown/missing signature: 0.15 → telemetry gap, somewhat suspicious
 //   - Unsigned: 0.05 → very unlikely to be FP
-func computeFPRisk(sigStatus, executablePath string) float64 {
+func computeFPRisk(sigStatus, executablePath string, cfg FalsePositiveConfig) float64 {
 	sig := strings.ToLower(sigStatus)
 	exe := strings.ToLower(executablePath)
 
@@ -574,15 +589,15 @@ func computeFPRisk(sigStatus, executablePath string) float64 {
 	switch sig {
 	case "microsoft":
 		if isSystemPath {
-			return 0.70 // High FP probability: routine OS activity
+			return cfg.RiskMicrosoftSystemPath
 		}
-		return 0.45 // Moderate FP probability: MS-signed but unusual path
+		return cfg.RiskMicrosoftOtherPath
 	case "trusted":
-		return 0.30 // Lower FP: third-party signed, but could be legitimate
+		return cfg.RiskTrustedThirdParty
 	case "unsigned":
-		return 0.05 // Very low FP probability: unsigned binary is highly suspicious
+		return cfg.RiskUnsigned
 	default:
-		return 0.15 // Unknown/missing: telemetry gap
+		return cfg.RiskUnknownOrMissingSig
 	}
 }
 
@@ -599,27 +614,27 @@ func computeFPRisk(sigStatus, executablePath string) float64 {
 //   - 2 high signals co-occurring: +10 (notable convergence)
 //   - 3+ high signals co-occurring: +15 (strong attack pattern)
 //   - Cap: +15 (prevents runaway scores when combined with existing bonuses)
-func computeInteractionBonus(lineageBonus, privilegeBonus, uebaBonus, burstBonus int) int {
+func computeInteractionBonus(lineageBonus, privilegeBonus, uebaBonus, burstBonus int, cfg InteractionConfig) int {
 	// Count how many dimensions are contributing significant signal
 	highSignals := 0
-	if lineageBonus >= 20 {
+	if lineageBonus >= cfg.LineageHighThreshold {
 		highSignals++ // Suspicious parent-child chain
 	}
-	if privilegeBonus >= 15 {
+	if privilegeBonus >= cfg.PrivilegeHighThreshold {
 		highSignals++ // Elevated/SYSTEM context
 	}
 	if uebaBonus > 0 {
 		highSignals++ // Behavioral anomaly detected
 	}
-	if burstBonus >= 20 {
+	if burstBonus >= cfg.BurstHighThreshold {
 		highSignals++ // Rapid-fire temporal burst
 	}
 
 	switch {
 	case highSignals >= 3:
-		return 15 // Strong multi-dimensional attack pattern
+		return minInt(cfg.BonusThreeSignals, cfg.Cap) // Strong multi-dimensional attack pattern
 	case highSignals == 2:
-		return 10 // Notable signal convergence
+		return minInt(cfg.BonusTwoSignals, cfg.Cap) // Notable signal convergence
 	default:
 		return 0
 	}
@@ -740,22 +755,32 @@ func extractStringSlice(data map[string]interface{}, key string) []string {
 // computeContextQualityFactor converts context quality score [0..100] into a
 // bounded multiplier [0.85..1.0]. This avoids overconfident scoring when key
 // context fields are missing while still preserving signal continuity.
-func computeContextQualityFactor(score float64, missingCount int) float64 {
+func computeContextQualityFactor(score float64, missingCount int, cfg QualityConfig) float64 {
 	switch {
 	case score >= 80:
-		return 1.00
+		return cfg.ScoreGE80
 	case score >= 60:
-		return 0.97
+		return cfg.ScoreGE60
 	case score >= 40:
-		return 0.93
+		return cfg.ScoreGE40
 	case score > 0:
-		return 0.90
+		return cfg.ScoreGT0
 	default:
 		if missingCount == 0 {
-			return 1.00
+			return cfg.ScoreGE80
 		}
-		return 0.85
+		return cfg.ScoreEQ0Missing
 	}
+}
+
+func minInt(a, cap int) int {
+	if cap <= 0 {
+		return a
+	}
+	if a > cap {
+		return cap
+	}
+	return a
 }
 
 // resolveField retrieves a value from a flat map[string]interface{} by checking
@@ -799,13 +824,14 @@ func buildContextSnapshot(
 	chain []*infracache.ProcessLineageEntry,
 	lineageSuspicion string,
 	burstCount int64,
+	burstWindowSec int,
 	breakdown ScoreBreakdown,
 ) *ContextSnapshot {
 	snap := &ContextSnapshot{
 		ScoredAt:         time.Now().UTC(),
 		LineageSuspicion: lineageSuspicion,
 		BurstCount:       int(burstCount),
-		BurstWindowSec:   300, // 5-minute window
+		BurstWindowSec:   burstWindowSec,
 		ScoreBreakdown:   breakdown,
 	}
 

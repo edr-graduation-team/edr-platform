@@ -153,6 +153,7 @@ export interface Alert {
     confidence: number;
     // Sprint 3+ risk scoring
     risk_score?: number;
+    risk_level?: 'low' | 'medium' | 'high' | 'critical' | string;
     false_positive_risk?: number;
     context_snapshot?: ContextSnapshot;
     score_breakdown?: ScoreBreakdown;

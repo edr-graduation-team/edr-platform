@@ -41,6 +41,11 @@ func validateContextPolicyInput(req *contextPolicyRequest) error {
 	if strings.TrimSpace(req.ScopeValue) == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "scope_value is required")
 	}
+	// Hardening: global scope must always use "*" (single effective global policy).
+	// The DB seeds this row and enforces uniqueness by (scope_type, scope_value).
+	if req.ScopeType == "global" && strings.TrimSpace(req.ScopeValue) != "*" {
+		return echo.NewHTTPError(http.StatusBadRequest, "global scope_value must be '*'")
+	}
 	if req.UserRoleWeight <= 0 || req.DeviceCriticalityWeight <= 0 || req.NetworkAnomalyFactor <= 0 {
 		return echo.NewHTTPError(http.StatusBadRequest, "all weights/factors must be > 0")
 	}

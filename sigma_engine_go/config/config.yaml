@@ -120,3 +120,83 @@ rules:
     - "test"
   skip_experimental: true
 
+# Context-Aware Risk Scoring configuration (single source of truth for all constants)
+# Defaults here match the algorithm's built-in defaults (backward compatible).
+risk_scoring:
+  base_score:
+    informational: 10
+    low: 25
+    medium: 45
+    high: 65
+    critical: 85
+    unknown: 35
+    match_correlation_bonus_per_rule: 5
+    match_correlation_bonus_cap: 15
+
+  burst:
+    window_sec: 300
+    threshold_low: 3
+    threshold_med: 10
+    threshold_high: 30
+    bonus_low: 10
+    bonus_med: 20
+    bonus_high: 30
+
+  privilege:
+    bonus_system_sid: 20
+    bonus_admin_rid_500: 15
+    bonus_integrity_system: 15
+    bonus_high_elevated: 10
+    bonus_elevated_token: 10
+    bonus_unsigned_binary: 15
+    bonus_unknown_signature: 8
+    cap: 40
+
+  false_positive:
+    discount_microsoft: 15
+    discount_microsoft_system_path: 10
+    discount_trusted_third_party: 8
+    discount_cap: 30
+    risk_microsoft_system_path: 0.70
+    risk_microsoft_other_path: 0.45
+    risk_trusted_third_party: 0.30
+    risk_unknown_or_missing_signature: 0.15
+    risk_unsigned: 0.05
+
+  ueba:
+    confidence_gate: 0.30
+    anomaly_bonus: 15
+    normal_discount: 10
+    zscore_anomaly_threshold: 3.0
+    first_seen_hour_avg_floor: 0.05
+    normal_avg_threshold: 0.5
+
+  interaction:
+    lineage_high_threshold: 20
+    privilege_high_threshold: 15
+    burst_high_threshold: 20
+    bonus_two_signals: 10
+    bonus_three_signals: 15
+    cap: 15
+
+  context_policy:
+    per_factor_clamp_min: 0.5
+    per_factor_clamp_max: 2.0
+    multiplier_clamp_min: 0.25
+    multiplier_clamp_max: 4.0
+    trusted_network_multiplier: 0.9
+    untrusted_network_multiplier: 1.1
+
+  quality:
+    score_ge_80: 1.00
+    score_ge_60: 0.97
+    score_ge_40: 0.93
+    score_gt_0: 0.90
+    score_eq_0_missing: 0.85
+
+  risk_levels:
+    low_max: 39
+    medium_max: 69
+    high_max: 89
+    critical_min: 90
+

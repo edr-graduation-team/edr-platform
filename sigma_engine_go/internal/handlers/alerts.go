@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/edr-platform/sigma-engine/internal/application/scoring"
 	"github.com/edr-platform/sigma-engine/internal/infrastructure/database"
 	"github.com/edr-platform/sigma-engine/internal/infrastructure/logger"
 	"github.com/gorilla/mux"
@@ -17,11 +18,12 @@ import (
 type AlertHandler struct {
 	repo        database.AlertRepository
 	auditLogger *database.AuditLogger
+	riskLevels  scoring.RiskLevelsConfig
 }
 
 // NewAlertHandler creates a new alert handler.
-func NewAlertHandler(repo database.AlertRepository, auditLogger *database.AuditLogger) *AlertHandler {
-	return &AlertHandler{repo: repo, auditLogger: auditLogger}
+func NewAlertHandler(repo database.AlertRepository, auditLogger *database.AuditLogger, riskLevels scoring.RiskLevelsConfig) *AlertHandler {
+	return &AlertHandler{repo: repo, auditLogger: auditLogger, riskLevels: riskLevels}
 }
 
 // getAuditContext extracts common audit fields.
@@ -84,6 +86,7 @@ type AlertResponse struct {
 	// These fields are computed by RiskScorer and persisted as JSONB in the DB.
 	// They were previously omitted from this struct, causing an empty Context tab.
 	RiskScore       int                    `json:"risk_score"`
+	RiskLevel       string                 `json:"risk_level,omitempty"`
 	ContextSnapshot map[string]interface{} `json:"context_snapshot,omitempty"`
 	ScoreBreakdown  map[string]interface{} `json:"score_breakdown,omitempty"`
 
@@ -177,7 +180,7 @@ func (h *AlertHandler) QueryAlerts(w http.ResponseWriter, r *http.Request) {
 	}
 
 	for _, alert := range alerts {
-		response.Alerts = append(response.Alerts, toAlertResponse(alert))
+		response.Alerts = append(response.Alerts, h.toAlertResponse(alert))
 	}
 
 	writeJSON(w, http.StatusOK, response)
@@ -200,7 +203,7 @@ func (h *AlertHandler) GetAlert(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, toAlertResponse(alert))
+	writeJSON(w, http.StatusOK, h.toAlertResponse(alert))
 }
 
 // UpdateStatusRequest is the request for updating alert status.
@@ -255,7 +258,7 @@ func (h *AlertHandler) UpdateAlertStatus(w http.ResponseWriter, r *http.Request)
 
 	existing.Status = req.Status
 	existing.ResolutionNotes = req.Notes
-	writeJSON(w, http.StatusOK, toAlertResponse(existing))
+	writeJSON(w, http.StatusOK, h.toAlertResponse(existing))
 }
 
 // AcknowledgeAlert handles POST /api/v1/sigma/alerts/{alert_id}/acknowledge
@@ -283,7 +286,7 @@ func (h *AlertHandler) AcknowledgeAlert(w http.ResponseWriter, r *http.Request) 
 	}
 
 	existing.Status = "acknowledged"
-	writeJSON(w, http.StatusOK, toAlertResponse(existing))
+	writeJSON(w, http.StatusOK, h.toAlertResponse(existing))
 }
 
 // DeleteAlert handles DELETE /api/v1/sigma/alerts/{alert_id}
@@ -318,7 +321,7 @@ func (h *AlertHandler) DeleteAlert(w http.ResponseWriter, r *http.Request) {
 // Previously risk_score, context_snapshot, score_breakdown were stored in the
 // DB but silently dropped at this conversion step, causing the empty Context
 // tab on the dashboard. All fields are now forwarded.
-func toAlertResponse(alert *database.Alert) *AlertResponse {
+func (h *AlertHandler) toAlertResponse(alert *database.Alert) *AlertResponse {
 	return &AlertResponse{
 		ID:                alert.ID,
 		Timestamp:         alert.Timestamp,
@@ -342,6 +345,7 @@ func toAlertResponse(alert *database.Alert) *AlertResponse {
 		UpdatedAt:         alert.UpdatedAt,
 		// Context-Aware Risk Scoring — previously missing, causing empty Context tab
 		RiskScore:          alert.RiskScore,
+		RiskLevel:          scoring.RiskLevelFromScore(alert.RiskScore, h.riskLevels),
 		ContextSnapshot:    alert.ContextSnapshot,
 		ScoreBreakdown:     alert.ScoreBreakdown,
 		// Aggregation metadata

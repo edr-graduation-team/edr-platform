@@ -81,6 +81,12 @@ func (r *PostgresContextPolicyRepository) GetByID(ctx context.Context, id int64)
 
 func (r *PostgresContextPolicyRepository) Create(ctx context.Context, policy *models.ContextPolicy) error {
 	trusted, _ := json.Marshal(policy.TrustedNetworks)
+	// One-policy-per-scope hardening:
+	// If a policy already exists for (scope_type, scope_value), we REPLACE it by
+	// updating fields. This matches the UNIQUE constraint created by migration 017.
+	//
+	// This makes Create idempotent for clients and avoids ambiguous “stacking”
+	// semantics that would multiply factors in unexpected ways.
 	return r.db.QueryRow(ctx, `
 		INSERT INTO context_policies (
 			name, scope_type, scope_value, enabled,
@@ -90,6 +96,15 @@ func (r *PostgresContextPolicyRepository) Create(ctx context.Context, policy *mo
 			$1, $2, $3, $4,
 			$5, $6, $7, $8::jsonb, $9
 		)
+		ON CONFLICT (scope_type, scope_value) DO UPDATE SET
+		    name = EXCLUDED.name,
+		    enabled = EXCLUDED.enabled,
+		    user_role_weight = EXCLUDED.user_role_weight,
+		    device_criticality_weight = EXCLUDED.device_criticality_weight,
+		    network_anomaly_factor = EXCLUDED.network_anomaly_factor,
+		    trusted_networks = EXCLUDED.trusted_networks,
+		    notes = EXCLUDED.notes,
+		    updated_at = NOW()
 		RETURNING id, created_at, updated_at`,
 		policy.Name, policy.ScopeType, policy.ScopeValue, policy.Enabled,
 		policy.UserRoleWeight, policy.DeviceCriticalityWeight, policy.NetworkAnomalyFactor,

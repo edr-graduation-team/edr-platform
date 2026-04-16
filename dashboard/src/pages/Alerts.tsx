@@ -63,18 +63,25 @@ const statusIcons: Record<string, typeof AlertTriangle> = {
 // Risk Score Badge
 // =============================================================================
 
-function getRiskScoreStyle(score: number): { bg: string; text: string; label: string; ring: string, shadow: string } {
+function getRiskScoreStyle(score: number, riskLevel?: string): { bg: string; text: string; label: string; ring: string, shadow: string } {
+    const lvl = (riskLevel || '').toLowerCase();
+    if (lvl === 'critical') return { bg: 'bg-rose-500/10 dark:bg-rose-500/20', text: 'text-rose-600 dark:text-rose-400', label: 'CRITICAL', ring: 'border border-rose-500/30', shadow: 'shadow-[0_0_10px_rgba(244,63,94,0.2)]' };
+    if (lvl === 'high') return { bg: 'bg-orange-500/10 dark:bg-orange-500/20', text: 'text-orange-600 dark:text-orange-400', label: 'HIGH', ring: 'border border-orange-500/30', shadow: 'shadow-[0_0_10px_rgba(249,115,22,0.2)]' };
+    if (lvl === 'medium') return { bg: 'bg-amber-500/10 dark:bg-amber-500/20', text: 'text-amber-600 dark:text-amber-400', label: 'MEDIUM', ring: 'border border-amber-500/30', shadow: 'shadow-[0_0_10px_rgba(245,158,11,0.2)]' };
+    if (lvl === 'low') return { bg: 'bg-emerald-500/10 dark:bg-emerald-500/20', text: 'text-emerald-600 dark:text-emerald-400', label: 'LOW', ring: 'border border-emerald-500/30', shadow: 'shadow-[0_0_10px_rgba(16,185,129,0.2)]' };
+
+    // Fallback (older backend responses): derive level from score thresholds.
     if (score >= 90) return { bg: 'bg-rose-500/10 dark:bg-rose-500/20', text: 'text-rose-600 dark:text-rose-400', label: 'CRITICAL', ring: 'border border-rose-500/30', shadow: 'shadow-[0_0_10px_rgba(244,63,94,0.2)]' };
     if (score >= 70) return { bg: 'bg-orange-500/10 dark:bg-orange-500/20', text: 'text-orange-600 dark:text-orange-400', label: 'HIGH', ring: 'border border-orange-500/30', shadow: 'shadow-[0_0_10px_rgba(249,115,22,0.2)]' };
     if (score >= 40) return { bg: 'bg-amber-500/10 dark:bg-amber-500/20', text: 'text-amber-600 dark:text-amber-400', label: 'MEDIUM', ring: 'border border-amber-500/30', shadow: 'shadow-[0_0_10px_rgba(245,158,11,0.2)]' };
     return { bg: 'bg-emerald-500/10 dark:bg-emerald-500/20', text: 'text-emerald-600 dark:text-emerald-400', label: 'LOW', ring: 'border border-emerald-500/30', shadow: 'shadow-[0_0_10px_rgba(16,185,129,0.2)]' };
 }
 
-const RiskScoreBadge = React.memo(function RiskScoreBadge({ score }: { score?: number }) {
+const RiskScoreBadge = React.memo(function RiskScoreBadge({ score, riskLevel }: { score?: number; riskLevel?: string }) {
     if (score === undefined || score === null) {
         return <span className="text-xs text-gray-400 font-mono">—</span>;
     }
-    const style = getRiskScoreStyle(score);
+    const style = getRiskScoreStyle(score, riskLevel);
     return (
         <div className="flex items-center gap-1.5">
             <span
@@ -564,7 +571,7 @@ function AlertDetailModal({
                                         : 'bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-800'
                             }`}>
                             <div className="shrink-0">
-                                <RiskScoreBadge score={alert.risk_score} />
+                                <RiskScoreBadge score={alert.risk_score} riskLevel={alert.risk_level} />
                             </div>
                             <div>
                                 <p className="text-sm font-semibold text-gray-800 dark:text-gray-100">
@@ -1212,7 +1219,7 @@ export default function Alerts() {
                                                 {/* Risk Score cell */}
                                                 <td className="py-4 px-4">
                                                     <div className="flex items-center gap-1.5">
-                                                        <RiskScoreBadge score={alert.risk_score} />
+                                                        <RiskScoreBadge score={alert.risk_score} riskLevel={alert.risk_level} />
                                                         {uebaSignal === 'anomaly' && (
                                                             <span title="Baseline Anomaly">
                                                                 <Zap className="w-3 h-3 text-red-500" />

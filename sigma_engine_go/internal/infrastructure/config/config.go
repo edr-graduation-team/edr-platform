@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/edr-platform/sigma-engine/internal/application/scoring"
 	"github.com/edr-platform/sigma-engine/internal/infrastructure/logger"
 	"gopkg.in/yaml.v3"
 )
@@ -20,6 +21,7 @@ type Config struct {
 	Filtering      FilteringConfig      `yaml:"filtering"`
 	Output         OutputConfig         `yaml:"output"`
 	Rules          RulesConfig          `yaml:"rules"`
+	RiskScoring    scoring.RiskScoringConfig `yaml:"risk_scoring"`
 }
 
 // FileMonitoringConfig configures file monitoring.
@@ -267,6 +269,9 @@ func (c *Config) ValidateAndSetDefaults() {
 		v := true
 		c.Rules.SkipExperimental = &v
 	}
+
+	// Risk scoring defaults (context-aware scoring / V2 tuning knobs)
+	c.RiskScoring.ValidateAndSetDefaults()
 }
 
 // DefaultConfig returns a default configuration.
@@ -324,6 +329,7 @@ func DefaultConfig() *Config {
 			AllowedStatus:    []string{"stable", "test"},
 			SkipExperimental: &skipExperimental,
 		},
+		RiskScoring: scoring.DefaultRiskScoringConfig(),
 	}
 }
 

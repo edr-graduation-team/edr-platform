@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/edr-platform/sigma-engine/internal/application/scoring"
 	"github.com/edr-platform/sigma-engine/internal/infrastructure/database"
 	"github.com/edr-platform/sigma-engine/internal/infrastructure/logger"
 	"github.com/gorilla/mux"
@@ -56,6 +57,7 @@ func NewServer(
 	ruleRepo database.RuleRepository,
 	alertRepo database.AlertRepository,
 	auditLogger *database.AuditLogger,
+	riskLevels scoring.RiskLevelsConfig,
 ) *Server {
 	router := mux.NewRouter()
 
@@ -101,7 +103,7 @@ func NewServer(
 		config:       config,
 		router:       router,
 		ruleHandler:  NewRuleHandler(ruleRepo, auditLogger),
-		alertHandler: NewAlertHandler(alertRepo, auditLogger),
+		alertHandler: NewAlertHandler(alertRepo, auditLogger, riskLevels),
 		statsHandler: NewStatsHandler(alertRepo, ruleRepo),
 		wsServer:     NewWebSocketServer(),
 		tokenAuth:    tokenAuth,

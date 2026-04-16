@@ -12,6 +12,13 @@ import {
 } from '../components';
 import { useDebounce } from '../hooks/useDebounce';
 
+// Safe stringify for any field value
+const json_safe = (val: unknown): string => {
+    if (val === null || val === undefined) return '—';
+    if (typeof val === 'string') return val;
+    return JSON.stringify(val);
+};
+
 // Severity options with counts
 const SEVERITY_OPTIONS: MultiSelectOption[] = [
     { value: 'critical', label: 'Critical', color: '#ef4444' },
@@ -534,7 +541,7 @@ function AlertDetailModal({
     onStatusChange: (id: string, status: string) => void;
     inlineMode?: boolean;
 }) {
-    const [activeTab, setActiveTab] = useState<'summary' | 'context' | 'event' | 'mitre' | 'actions'>('summary');
+    const [activeTab, setActiveTab] = useState<'summary' | 'context' | 'event' | 'mitre' | 'aggregation' | 'actions'>('summary');
 
     if (!alert) return null;
 
@@ -542,11 +549,13 @@ function AlertDetailModal({
     const snapshot = alert.context_snapshot;
     const breakdown = alert.score_breakdown || snapshot?.score_breakdown;
 
+    const hasAggregation = !!(alert as Alert & { match_count?: number }).match_count || !!(alert as Alert & { related_rules?: string[] }).related_rules?.length;
     const tabs = [
         { id: 'summary', label: 'Summary' },
         { id: 'context', label: '⚡ Context', highlight: hasContext },
-        { id: 'event', label: 'Event Details' },
-        { id: 'mitre', label: 'MITRE ATT&CK' },
+        { id: 'event', label: 'Events' },
+        { id: 'mitre', label: 'MITRE' },
+        ...(hasAggregation ? [{ id: 'aggregation', label: '🔗 Aggreg.' }] : []),
         ...(authApi.canWriteAlerts() ? [{ id: 'actions', label: 'Actions' }] : []),
     ];
 
@@ -621,45 +630,88 @@ function AlertDetailModal({
                         </div>
                     )}
 
-                    <div className="grid grid-cols-2 gap-4">
-                        <div>
-                            <label className="text-xs text-gray-500 uppercase tracking-wider">Rule</label>
-                            <p className="font-medium text-gray-900 dark:text-white">{alert.rule_title}</p>
+                    {/* Core fields grid */}
+                    <div className="grid grid-cols-2 gap-x-6 gap-y-3">
+                        <div className="col-span-2">
+                            <label className="text-[10px] text-gray-400 uppercase tracking-wider font-bold">Rule</label>
+                            <p className="font-semibold text-gray-900 dark:text-white text-sm mt-0.5">{alert.rule_title}</p>
+                            {alert.rule_id && <p className="font-mono text-[10px] text-gray-400 mt-0.5 truncate" title={alert.rule_id}>{alert.rule_id}</p>}
                         </div>
                         <div>
-                            <label className="text-xs text-gray-500 uppercase tracking-wider">Category</label>
-                            <p className="text-gray-700 dark:text-gray-300">{alert.category || 'N/A'}</p>
+                            <label className="text-[10px] text-gray-400 uppercase tracking-wider font-bold">Category</label>
+                            <p className="text-gray-700 dark:text-gray-300 text-sm mt-0.5">{alert.category || '—'}</p>
                         </div>
                         <div>
-                            <label className="text-xs text-gray-500 uppercase tracking-wider">Agent ID</label>
-                            <p className="font-mono text-sm text-gray-700 dark:text-gray-300">{alert.agent_id}</p>
+                            <label className="text-[10px] text-gray-400 uppercase tracking-wider font-bold">Severity</label>
+                            <p className="mt-0.5"><span className={`badge text-[11px] font-bold ${severityColors[alert.severity]}`}>{alert.severity.toUpperCase()}</span></p>
                         </div>
                         <div>
-                            <label className="text-xs text-gray-500 uppercase tracking-wider">Severity</label>
-                            <p><span className={`badge ${severityColors[alert.severity]}`}>{alert.severity.toUpperCase()}</span></p>
+                            <label className="text-[10px] text-gray-400 uppercase tracking-wider font-bold">Status</label>
+                            <p className="mt-0.5"><span className={`badge text-[11px] ${statusColors[alert.status]}`}>{alert.status.replace(/_/g, ' ')}</span></p>
                         </div>
                         <div>
-                            <label className="text-xs text-gray-500 uppercase tracking-wider">Status</label>
-                            <p><span className={`badge ${statusColors[alert.status]}`}>{alert.status.replace('_', ' ')}</span></p>
+                            <label className="text-[10px] text-gray-400 uppercase tracking-wider font-bold">Confidence</label>
+                            <p className="text-gray-700 dark:text-gray-300 text-sm mt-0.5 font-semibold">{alert.confidence !== undefined ? `${(alert.confidence * 100).toFixed(1)}%` : '—'}</p>
                         </div>
                         <div>
-                            <label className="text-xs text-gray-500 uppercase tracking-wider">Confidence</label>
-                            <p className="text-gray-700 dark:text-gray-300">{(alert.confidence * 100).toFixed(1)}%</p>
+                            <label className="text-[10px] text-gray-400 uppercase tracking-wider font-bold">Event Count</label>
+                            <p className="text-gray-700 dark:text-gray-300 text-sm mt-0.5 font-semibold">{alert.event_count}</p>
                         </div>
                         <div>
-                            <label className="text-xs text-gray-500 uppercase tracking-wider">Event Count</label>
-                            <p className="text-gray-700 dark:text-gray-300">{alert.event_count}</p>
+                            <label className="text-[10px] text-gray-400 uppercase tracking-wider font-bold">Detected At</label>
+                            <p className="text-gray-700 dark:text-gray-300 text-sm mt-0.5">{new Date(alert.timestamp).toLocaleString()}</p>
+                        </div>
+                        <div className="col-span-2">
+                            <label className="text-[10px] text-gray-400 uppercase tracking-wider font-bold">Agent ID</label>
+                            <p className="font-mono text-xs text-gray-600 dark:text-gray-300 mt-0.5 break-all">{alert.agent_id}</p>
+                        </div>
+                        {alert.assigned_to && (
+                            <div>
+                                <label className="text-[10px] text-gray-400 uppercase tracking-wider font-bold">Assigned To</label>
+                                <p className="text-gray-700 dark:text-gray-300 text-sm mt-0.5">{alert.assigned_to}</p>
+                            </div>
+                        )}
+                        {alert.acknowledged_at && (
+                            <div>
+                                <label className="text-[10px] text-gray-400 uppercase tracking-wider font-bold">Acknowledged At</label>
+                                <p className="text-gray-700 dark:text-gray-300 text-sm mt-0.5">{new Date(alert.acknowledged_at).toLocaleString()}</p>
+                            </div>
+                        )}
+                        {alert.resolved_at && (
+                            <div>
+                                <label className="text-[10px] text-gray-400 uppercase tracking-wider font-bold">Resolved At</label>
+                                <p className="text-gray-700 dark:text-gray-300 text-sm mt-0.5">{new Date(alert.resolved_at).toLocaleString()}</p>
+                            </div>
+                        )}
+                        <div>
+                            <label className="text-[10px] text-gray-400 uppercase tracking-wider font-bold">Created</label>
+                            <p className="text-gray-700 dark:text-gray-300 text-sm mt-0.5">{new Date(alert.created_at).toLocaleString()}</p>
                         </div>
                         <div>
-                            <label className="text-xs text-gray-500 uppercase tracking-wider">Detected At</label>
-                            <p className="text-gray-700 dark:text-gray-300">{new Date(alert.timestamp).toLocaleString()}</p>
+                            <label className="text-[10px] text-gray-400 uppercase tracking-wider font-bold">Updated</label>
+                            <p className="text-gray-700 dark:text-gray-300 text-sm mt-0.5">{new Date(alert.updated_at).toLocaleString()}</p>
                         </div>
                     </div>
 
-                    {alert.notes && (
+                    {/* Tags */}
+                    {alert.tags && Object.keys(alert.tags).length > 0 && (
                         <div>
-                            <label className="text-xs text-gray-500 uppercase tracking-wider">Notes</label>
-                            <p className="text-gray-700 dark:text-gray-300 mt-1">{alert.notes}</p>
+                            <label className="text-[10px] text-gray-400 uppercase tracking-wider font-bold block mb-1.5">Tags</label>
+                            <div className="flex flex-wrap gap-1.5">
+                                {Object.entries(alert.tags).map(([k, v]) => (
+                                    <span key={k} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300">
+                                        <span className="text-slate-400">{k}:</span>{v}
+                                    </span>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Notes */}
+                    {alert.notes && (
+                        <div className="rounded-lg border border-amber-200 dark:border-amber-800/50 bg-amber-50 dark:bg-amber-900/10 p-3">
+                            <label className="text-[10px] text-amber-600 dark:text-amber-400 uppercase tracking-wider font-bold block mb-1">Analyst Notes</label>
+                            <p className="text-sm text-gray-700 dark:text-gray-300">{alert.notes}</p>
                         </div>
                     )}
                 </div>
@@ -678,6 +730,14 @@ function AlertDetailModal({
                         </div>
                     ) : (
                         <>
+                            {/* Process Command Line */}
+                            {snapshot!.process_cmd_line && (
+                                <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-900 p-3">
+                                    <label className="text-[10px] text-slate-400 uppercase tracking-wider font-bold block mb-1.5">Command Line</label>
+                                    <code className="text-xs text-emerald-400 font-mono break-all whitespace-pre-wrap">{snapshot!.process_cmd_line}</code>
+                                </div>
+                            )}
+
                             {/* Process Lineage */}
                             <div className="rounded-xl border border-gray-200 dark:border-gray-700 p-4">
                                 <LineageTree snapshot={snapshot!} />
@@ -698,6 +758,14 @@ function AlertDetailModal({
                                 </div>
                             )}
 
+                            {/* Missing context fields */}
+                            {snapshot!.missing_context_fields && snapshot!.missing_context_fields.length > 0 && (
+                                <div className="text-xs text-gray-400 border border-slate-200 dark:border-slate-700 rounded-lg p-3">
+                                    <span className="font-bold text-slate-500">Missing context: </span>
+                                    {snapshot!.missing_context_fields.join(', ')}
+                                </div>
+                            )}
+
                             {/* Scored At */}
                             {snapshot?.scored_at && (
                                 <p className="text-xs text-gray-400 text-right">
@@ -711,11 +779,80 @@ function AlertDetailModal({
 
             {/* Event Details Tab */}
             {activeTab === 'event' && (
-                <div>
-                    <label className="text-xs text-gray-500 uppercase tracking-wider">Raw Event Data</label>
-                    <pre className="mt-2 p-4 bg-gray-100 dark:bg-gray-900 rounded-lg overflow-auto max-h-96 text-xs font-mono text-gray-800 dark:text-gray-200">
-                        {JSON.stringify(alert.event_data || alert.matched_fields || {}, null, 2)}
-                    </pre>
+                <div className="space-y-4">
+                    {/* Matched Fields */}
+                    {alert.matched_fields && Object.keys(alert.matched_fields).length > 0 && (
+                        <div>
+                            <label className="text-[10px] text-gray-400 uppercase tracking-wider font-bold block mb-2">Matched Detection Fields</label>
+                            <div className="space-y-1.5">
+                                {Object.entries(alert.matched_fields).map(([key, val]) => (
+                                    <div key={key} className="flex items-start gap-3 p-2 bg-gray-50 dark:bg-gray-800 rounded-lg text-sm">
+                                        <span className="font-mono text-indigo-600 dark:text-indigo-400 text-xs shrink-0 mt-0.5 w-32 truncate" title={key}>{key}</span>
+                                        <span className="font-mono text-gray-700 dark:text-gray-300 text-xs break-all">{json_safe(val)}</span>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+                    {/* Event IDs */}
+                    {(alert as Alert & { event_ids?: string[] }).event_ids?.length! > 0 && (
+                        <div>
+                            <label className="text-[10px] text-gray-400 uppercase tracking-wider font-bold block mb-2">Correlated Event IDs</label>
+                            <div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto">
+                                {(alert as Alert & { event_ids?: string[] }).event_ids!.map(id => (
+                                    <span key={id} className="font-mono text-[10px] bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 px-2 py-0.5 rounded">{id}</span>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+                    {/* Raw event data */}
+                    <div>
+                        <label className="text-[10px] text-gray-400 uppercase tracking-wider font-bold block mb-2">Raw Event Payload</label>
+                        <pre className="p-3 bg-gray-100 dark:bg-gray-900 rounded-lg overflow-auto max-h-64 text-[11px] font-mono text-gray-700 dark:text-gray-300 whitespace-pre-wrap break-all">
+                            {JSON.stringify(alert.event_data || {}, null, 2)}
+                        </pre>
+                    </div>
+                </div>
+            )}
+
+            {/* Aggregation Tab */}
+            {activeTab === 'aggregation' && (
+                <div className="space-y-5">
+                    <div className="grid grid-cols-2 gap-4">
+                        {(alert as Alert & { match_count?: number }).match_count !== undefined && (
+                            <div className="rounded-xl border border-slate-200 dark:border-slate-700 p-4 text-center">
+                                <p className="text-3xl font-extrabold text-indigo-600 dark:text-indigo-400">{(alert as Alert & { match_count?: number }).match_count}</p>
+                                <p className="text-xs text-gray-500 mt-1 uppercase tracking-wider">Rule Matches</p>
+                            </div>
+                        )}
+                        {(alert as Alert & { combined_confidence?: number }).combined_confidence !== undefined && (
+                            <div className="rounded-xl border border-slate-200 dark:border-slate-700 p-4 text-center">
+                                <p className="text-3xl font-extrabold text-emerald-600 dark:text-emerald-400">{((alert as Alert & { combined_confidence?: number }).combined_confidence! * 100).toFixed(0)}%</p>
+                                <p className="text-xs text-gray-500 mt-1 uppercase tracking-wider">Combined Confidence</p>
+                            </div>
+                        )}
+                    </div>
+                    {(alert as Alert & { severity_promoted?: boolean }).severity_promoted && (
+                        <div className="flex items-center gap-3 p-3 rounded-lg bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-800">
+                            <TrendingUp className="w-5 h-5 text-orange-500 shrink-0" />
+                            <div>
+                                <p className="text-sm font-semibold text-orange-700 dark:text-orange-300">Severity Promoted</p>
+                                <p className="text-xs text-orange-600 dark:text-orange-400">
+                                    Original: {(alert as Alert & { original_severity?: string }).original_severity?.toUpperCase() || '—'} → Promoted: {alert.severity.toUpperCase()}
+                                </p>
+                            </div>
+                        </div>
+                    )}
+                    {(alert as Alert & { related_rules?: string[] }).related_rules?.length! > 0 && (
+                        <div>
+                            <label className="text-[10px] text-gray-400 uppercase tracking-wider font-bold block mb-2">Related Rules Detected</label>
+                            <div className="space-y-1.5">
+                                {(alert as Alert & { related_rules?: string[] }).related_rules!.map((r, i) => (
+                                    <div key={i} className="font-mono text-xs bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 px-3 py-1.5 rounded-lg">{r}</div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
                 </div>
             )}
 
@@ -1357,19 +1494,22 @@ export default function Alerts() {
 
                 {/* Slide-over detail panel */}
                 {selectedAlert && (
-                    <div className="hidden lg:flex flex-col min-h-0 w-full lg:w-[42%] xl:w-[38%] bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700/50 rounded-2xl shadow-xl overflow-hidden" style={{ animation: 'slideInRight 0.2s ease-out' }}>
-                        {/* Panel header */}
+                    <div
+                        className="hidden lg:flex flex-col w-full lg:w-[42%] xl:w-[38%] bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700/50 rounded-2xl shadow-xl"
+                        style={{ animation: 'slideInRight 0.2s ease-out', height: '100%', minHeight: 0 }}
+                    >
+                        {/* Panel header — fixed/sticky */}
                         <div className="flex items-center justify-between px-5 py-4 border-b border-slate-200 dark:border-slate-700/50 shrink-0 bg-slate-50/80 dark:bg-slate-900/60">
-                            <div className="flex items-center gap-2">
-                                <span className={`w-2.5 h-2.5 rounded-full ${ selectedAlert.severity === 'critical' ? 'bg-rose-500' : selectedAlert.severity === 'high' ? 'bg-orange-500' : selectedAlert.severity === 'medium' ? 'bg-amber-400' : 'bg-slate-400' }`} />
-                                <span className="text-sm font-bold text-slate-800 dark:text-white truncate max-w-[200px]">{selectedAlert.rule_title}</span>
+                            <div className="flex items-center gap-2 min-w-0">
+                                <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${ selectedAlert.severity === 'critical' ? 'bg-rose-500' : selectedAlert.severity === 'high' ? 'bg-orange-500' : selectedAlert.severity === 'medium' ? 'bg-amber-400' : 'bg-slate-400' }`} />
+                                <span className="text-sm font-bold text-slate-800 dark:text-white truncate">{selectedAlert.rule_title}</span>
                             </div>
-                            <button onClick={() => setSelectedAlert(null)} className="p-1.5 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition-colors">
+                            <button onClick={() => setSelectedAlert(null)} className="p-1.5 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition-colors shrink-0 ml-3">
                                 <X className="w-4 h-4" />
                             </button>
                         </div>
-                        {/* Panel body — reuse existing modal body by opening modal on mobile, using panel here */}
-                        <div className="flex-1 overflow-auto custom-scrollbar">
+                        {/* Panel body — scrollable */}
+                        <div className="flex-1 overflow-y-auto overflow-x-hidden custom-scrollbar">
                             <AlertDetailModal
                                 alert={selectedAlert}
                                 isOpen={false}

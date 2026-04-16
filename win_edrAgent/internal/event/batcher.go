@@ -5,6 +5,9 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"net"
+	"os"
+	"runtime"
 	"sync"
 	"time"
 
@@ -117,6 +120,11 @@ func (b *Batcher) createBatch() *Batch {
 	events := make([]*Event, len(b.events))
 	copy(events, b.events)
 
+	// Fill per-event source metadata so downstream (alerts/context) can be
+	// attributed to a specific endpoint even when the collector payload doesn't
+	// embed host identity.
+	fillEventSource(events)
+
 	// Clear buffer
 	b.events = b.events[:0]
 	b.lastFlush = time.Now()
@@ -166,6 +174,94 @@ func (b *Batcher) createBatch() *Batch {
 	}
 
 	return batch
+}
+
+// fillEventSource populates Event.Source for every event in the batch.
+// This prevents downstream gaps where alerts show an empty `source{}` block.
+func fillEventSource(events []*Event) {
+	hostname := "unknown"
+	if h, err := os.Hostname(); err == nil && h != "" {
+		hostname = h
+	}
+
+	ip := getFirstNonLoopbackIP()
+	if ip == "" {
+		ip = "unknown"
+	}
+
+	// NOTE: os_version is currently unknown in this agent implementation.
+	// We keep it explicit (non-empty) to satisfy production context contracts.
+	osVersion := "unknown"
+
+	agentVersion := "1.0.0"
+	osType := runtime.GOOS
+	if osType == "" {
+		osType = "unknown"
+	}
+
+	for _, evt := range events {
+		if evt == nil {
+			continue
+		}
+		evt.Source = EventSource{
+			Hostname:     hostname,
+			IPAddress:    ip,
+			OSType:       osType,
+			OSVersion:    osVersion,
+			AgentVersion: agentVersion,
+		}
+	}
+}
+
+// getFirstNonLoopbackIP returns the first non-loopback IP string found on
+// active network interfaces.
+func getFirstNonLoopbackIP() string {
+	defer func() {
+		_ = recover()
+	}()
+
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return ""
+	}
+
+	for _, iface := range ifaces {
+		// Skip down or loopback interfaces.
+		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+
+		addrs, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+
+		for _, addr := range addrs {
+			var ip net.IP
+			switch v := addr.(type) {
+			case *net.IPNet:
+				ip = v.IP
+			case *net.IPAddr:
+				ip = v.IP
+			default:
+				continue
+			}
+
+			if ip == nil {
+				continue
+			}
+			// Skip loopback/link-local.
+			if ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
+				continue
+			}
+			if ip.String() == "" {
+				continue
+			}
+			return ip.String()
+		}
+	}
+
+	return ""
 }
 
 // Count returns the number of pending events.

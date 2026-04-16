@@ -627,6 +627,12 @@ func (h *EventHandler) processBatch(ctx context.Context, agentID string, batch *
 		// missing top-level fields can still be recovered from nested payloads.
 		enrichEventContextFields(ev)
 
+		// Ensure required context fields exist for quality scoring.
+		// evaluateEventContextQuality() requires agent_id, but we only injected it
+		// in a later step; this caused systematic quality degradation (P0 gap).
+		ev["agent_id"] = agentID
+		ev["batch_id"] = batch.BatchId
+
 		if err := validateEventSchema(ev); err != nil {
 			logger.WithError(err).WithFields(logrus.Fields{
 				"event_index": i,
@@ -675,12 +681,6 @@ func (h *EventHandler) processBatch(ctx context.Context, agentID string, batch *
 		return nil, nil
 	}
 	events = validEvents
-
-	// 6. Enrich each event with agent_id (and batch_id) for downstream detection engine.
-	for i := range events {
-		events[i]["agent_id"] = agentID
-		events[i]["batch_id"] = batch.BatchId
-	}
 
 	// 7. Publish each event individually to Kafka (agent_id as partition key). Respect context cancellation.
 	if h.kafkaProducer != nil {

@@ -211,7 +211,7 @@ func main() {
 			seedRulesToDB(ctx, dbPool.Pool(), ruleIndex)
 		}
 	}
-	apiServer = handlers.NewServer(apiCfg, ruleRepo, alertRepo, auditLogger)
+	apiServer = handlers.NewServer(apiCfg, ruleRepo, alertRepo, auditLogger, cfg.RiskScoring.RiskLevels)
 	go func() {
 		if err := apiServer.Start(); err != nil && err != http.ErrServerClosed {
 			logger.Warnf("REST API server error: %v", err)
@@ -238,11 +238,15 @@ func main() {
 
 	// BurstTracker: prefer Redis (shared across pods), fallback to in-memory.
 	var burstTracker scoring.BurstTracker
+	burstTTL := time.Duration(cfg.RiskScoring.Burst.WindowSec) * time.Second
+	if burstTTL <= 0 {
+		burstTTL = 5 * time.Minute
+	}
 	if redisErr == nil {
-		burstTracker = scoring.NewRedisBurstTracker(redisClient.Client())
+		burstTracker = scoring.NewRedisBurstTrackerWithTTL(redisClient.Client(), burstTTL)
 		logger.Info("Burst tracker initialised (Redis)")
 	} else {
-		burstTracker = scoring.NewInMemoryBurstTracker(0) // 0 → uses default 5-min TTL
+		burstTracker = scoring.NewInMemoryBurstTracker(burstTTL)
 		logger.Warn("Burst tracker using in-memory fallback (not shared across pods)")
 	}
 
@@ -262,9 +266,14 @@ func main() {
 	}
 
 	// RiskScorer: always constructed — uses the available lineage + burst + baseline impls.
-	riskScorer := scoring.NewDefaultRiskScorer(lineageCache, burstTracker, baselineProvider)
+	// All scoring constants are centrally controlled via cfg.RiskScoring (config.yaml).
+	riskScorer := scoring.NewDefaultRiskScorerWithConfig(lineageCache, burstTracker, baselineProvider, cfg.RiskScoring)
 	if dbPool != nil {
-		riskScorer.SetContextPolicyProvider(scoring.NewPostgresContextPolicyProvider(dbPool.Pool(), 30*time.Second))
+		riskScorer.SetContextPolicyProvider(scoring.NewPostgresContextPolicyProviderWithConfig(
+			dbPool.Pool(),
+			30*time.Second,
+			cfg.RiskScoring.ContextPolicy,
+		))
 		logger.Info("Context policy provider enabled (hybrid user/device/network factors)")
 	}
 	logger.Info("RiskScorer initialised — context-aware scoring + UEBA active")

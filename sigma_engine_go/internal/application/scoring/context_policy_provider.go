@@ -18,8 +18,10 @@ type ContextFactors struct {
 	NetworkAnomalyFactor    float64
 }
 
-func (f ContextFactors) Multiplier() float64 {
-	return clampFloat(f.UserRoleWeight*f.DeviceCriticalityWeight*f.NetworkAnomalyFactor, 0.25, 4.0)
+func (f ContextFactors) Multiplier(cfg ContextPolicyConfig) float64 {
+	cfg = defaultContextPolicyConfig(cfg)
+	return clampFloat(f.UserRoleWeight*f.DeviceCriticalityWeight*f.NetworkAnomalyFactor,
+		cfg.MultiplierClampMin, cfg.MultiplierClampMax)
 }
 
 func DefaultContextFactors() ContextFactors {
@@ -58,15 +60,22 @@ type PostgresContextPolicyProvider struct {
 	cacheTTL  time.Duration
 	cachedAt  time.Time
 	cachedSet []policyRecord
+
+	cfg ContextPolicyConfig
 }
 
 func NewPostgresContextPolicyProvider(pool *pgxpool.Pool, cacheTTL time.Duration) *PostgresContextPolicyProvider {
+	return NewPostgresContextPolicyProviderWithConfig(pool, cacheTTL, ContextPolicyConfig{})
+}
+
+func NewPostgresContextPolicyProviderWithConfig(pool *pgxpool.Pool, cacheTTL time.Duration, cfg ContextPolicyConfig) *PostgresContextPolicyProvider {
 	if cacheTTL <= 0 {
 		cacheTTL = 30 * time.Second
 	}
 	return &PostgresContextPolicyProvider{
 		pool:     pool,
 		cacheTTL: cacheTTL,
+		cfg:      defaultContextPolicyConfig(cfg),
 	}
 }
 
@@ -100,9 +109,9 @@ func (p *PostgresContextPolicyProvider) Resolve(ctx context.Context, agentID, us
 		if !match {
 			continue
 		}
-		factors.UserRoleWeight = clampFloat(factors.UserRoleWeight*r.UserRoleWeight, 0.5, 2.0)
-		factors.DeviceCriticalityWeight = clampFloat(factors.DeviceCriticalityWeight*r.DeviceCriticalityWeight, 0.5, 2.0)
-		factors.NetworkAnomalyFactor = clampFloat(factors.NetworkAnomalyFactor*r.NetworkAnomalyFactor, 0.5, 2.0)
+		factors.UserRoleWeight = clampFloat(factors.UserRoleWeight*r.UserRoleWeight, p.cfg.PerFactorClampMin, p.cfg.PerFactorClampMax)
+		factors.DeviceCriticalityWeight = clampFloat(factors.DeviceCriticalityWeight*r.DeviceCriticalityWeight, p.cfg.PerFactorClampMin, p.cfg.PerFactorClampMax)
+		factors.NetworkAnomalyFactor = clampFloat(factors.NetworkAnomalyFactor*r.NetworkAnomalyFactor, p.cfg.PerFactorClampMin, p.cfg.PerFactorClampMax)
 		if len(r.TrustedNetworks) > 0 {
 			trustedNetworks = append(trustedNetworks, r.TrustedNetworks...)
 		}
@@ -112,13 +121,37 @@ func (p *PostgresContextPolicyProvider) Resolve(ctx context.Context, agentID, us
 
 	if sourceIP != "" {
 		if isIPInTrustedNetworks(sourceIP, trustedNetworks) {
-			factors.NetworkAnomalyFactor = clampFloat(factors.NetworkAnomalyFactor*0.9, 0.5, 2.0)
+			factors.NetworkAnomalyFactor = clampFloat(factors.NetworkAnomalyFactor*p.cfg.TrustedNetworkMultiplier, p.cfg.PerFactorClampMin, p.cfg.PerFactorClampMax)
 		} else {
-			factors.NetworkAnomalyFactor = clampFloat(factors.NetworkAnomalyFactor*1.1, 0.5, 2.0)
+			factors.NetworkAnomalyFactor = clampFloat(factors.NetworkAnomalyFactor*p.cfg.UntrustedNetworkMultiplier, p.cfg.PerFactorClampMin, p.cfg.PerFactorClampMax)
 		}
 	}
 
 	return factors, nil
+}
+
+func defaultContextPolicyConfig(in ContextPolicyConfig) ContextPolicyConfig {
+	def := DefaultRiskScoringConfig().ContextPolicy
+	out := in
+	if out.PerFactorClampMin <= 0 {
+		out.PerFactorClampMin = def.PerFactorClampMin
+	}
+	if out.PerFactorClampMax <= 0 {
+		out.PerFactorClampMax = def.PerFactorClampMax
+	}
+	if out.MultiplierClampMin <= 0 {
+		out.MultiplierClampMin = def.MultiplierClampMin
+	}
+	if out.MultiplierClampMax <= 0 {
+		out.MultiplierClampMax = def.MultiplierClampMax
+	}
+	if out.TrustedNetworkMultiplier <= 0 {
+		out.TrustedNetworkMultiplier = def.TrustedNetworkMultiplier
+	}
+	if out.UntrustedNetworkMultiplier <= 0 {
+		out.UntrustedNetworkMultiplier = def.UntrustedNetworkMultiplier
+	}
+	return out
 }
 
 func (p *PostgresContextPolicyProvider) getPolicies(ctx context.Context) ([]policyRecord, error) {

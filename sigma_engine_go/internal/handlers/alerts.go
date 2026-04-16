@@ -321,7 +321,11 @@ func (h *AlertHandler) DeleteAlert(w http.ResponseWriter, r *http.Request) {
 // Previously risk_score, context_snapshot, score_breakdown were stored in the
 // DB but silently dropped at this conversion step, causing the empty Context
 // tab on the dashboard. All fields are now forwarded.
-func (h *AlertHandler) toAlertResponse(alert *database.Alert) *AlertResponse {
+func toAlertResponse(alert *database.Alert) *AlertResponse {
+	return toAlertResponseWithRiskLevels(alert, scoring.DefaultRiskScoringConfig().RiskLevels)
+}
+
+func toAlertResponseWithRiskLevels(alert *database.Alert, riskLevels scoring.RiskLevelsConfig) *AlertResponse {
 	return &AlertResponse{
 		ID:                alert.ID,
 		Timestamp:         alert.Timestamp,
@@ -345,7 +349,7 @@ func (h *AlertHandler) toAlertResponse(alert *database.Alert) *AlertResponse {
 		UpdatedAt:         alert.UpdatedAt,
 		// Context-Aware Risk Scoring — previously missing, causing empty Context tab
 		RiskScore:          alert.RiskScore,
-		RiskLevel:          scoring.RiskLevelFromScore(alert.RiskScore, h.riskLevels),
+		RiskLevel:          scoring.RiskLevelFromScore(alert.RiskScore, riskLevels),
 		ContextSnapshot:    alert.ContextSnapshot,
 		ScoreBreakdown:     alert.ScoreBreakdown,
 		// Aggregation metadata
@@ -355,6 +359,10 @@ func (h *AlertHandler) toAlertResponse(alert *database.Alert) *AlertResponse {
 		SeverityPromoted:   alert.SeverityPromoted,
 		OriginalSeverity:   alert.OriginalSeverity,
 	}
+}
+
+func (h *AlertHandler) toAlertResponse(alert *database.Alert) *AlertResponse {
+	return toAlertResponseWithRiskLevels(alert, h.riskLevels)
 }
 
 // BulkUpdateRequest is the request for bulk updating alert status.

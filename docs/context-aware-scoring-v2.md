@@ -64,6 +64,9 @@
 | Keep one-policy-per-scope and avoid stacking | Completed | `connection-manager/internal/database/migrations/017_create_context_policies.up.sql` (`UNIQUE(scope_type, scope_value)`), `connection-manager/internal/repository/context_policy_repo.go` (`Create` as UPSERT/replace), `connection-manager/pkg/api/handlers_other.go` (global `scope_value='*'` validation) |
 | Produce formal design doc with formulas/pipeline/rationale | Completed | `docs/context-aware-scoring-v2.md` |
 | Add targeted tests for config-driven behavior | Completed | `sigma_engine_go/internal/application/scoring/risk_level_test.go`, `sigma_engine_go/internal/application/scoring/context_multiplier_test.go` |
+| Phase A — Agent `signature_status` for FP paths | Completed | `win_edrAgent/internal/collectors/etw.go`, `signature_status_windows.go` |
+| Phase A — Correlate alerts on Kafka path + REST | Completed | `kafka/event_loop.go`, `cmd/sigma-engine-kafka/main.go`, `handlers/correlation_api.go`, `handlers/server.go` |
+| Phase A — Optional scoring on parallel processor | Completed | `internal/infrastructure/processor/parallel_processor.go` (`SetRiskScorer`) |
 
 </div>
 
@@ -528,4 +531,68 @@ Provider code:
 ## 7) Rationale and References (for audit)
 
 This design follows widely used security engineering patterns:\n\n- **NIST SP 800-61**: incident triage and prioritization concepts (severity, context, response urgency).\n- **NIST SP 800-92**: log management and statistical anomaly rationale (referenced in UEBA Z-score logic).\n- **UEBA best practices**: confidence gating, baseline-driven anomaly vs normalcy discount.\n\nImplementation rationale:\n- Additive raw score captures independent security signals.\n- Multiplicative context multiplier provides proportional amplification/suppression.\n- Quality factor prevents overconfident scoring under missing context.\n- Risk level tiering provides consistent analyst triage semantics.\n\n</div>
+
+<div dir="rtl">
+
+## 11) Phase A — Context-Aware قبل الاستجابة (Response): إصلاحات التسلسل
+
+هذا القسم يوثّق **تغييرات التنفيذ** التي تربط الـ Agent ومسار Kafka بسلوك الـ scoring والـ FP discount والـ correlation كما في خطة Phase A.
+
+### A1 — تعبئة `signature_status` في `processStart()` (تفعيل FP discount)
+
+**المشكلة:** `RiskScorer.computeFPDiscount` / `computeFPRisk` يقرآن `signature_status` من `event.RawData`. إذا كان الحقل فارغًا، لا يُطبَّق خصم الثقة لـ Microsoft / المسارات الموثوقة بالشكل المقصود.
+
+**الحل:** في وكيل Windows، عند بناء حدث `process_creation` و `snapshot` في `ETWCollector`:
+
+- استدعاء `SignatureTrustClass(executable)` من `win_edrAgent/internal/collectors/signature_status_windows.go`.
+- المنطق: نفس فحص **Security Directory** الخفيف المستخدم في `imageload.go` (`isFileSigned`) — ليس WinVerifyTrust كاملًا؛ ثم تصنيف مسار إلى `microsoft` أو `trusted` أو `unsigned`.
+
+**الملفات:** `win_edrAgent/internal/collectors/etw.go`, `signature_status_windows.go`.
+
+### A2 — ربط `CorrelationManager` في `EventLoop` + REST
+
+**المشكلة:** `analytics.CorrelationManager` كان متوفرًا لكن مسار Kafka لم يستدعِ `CorrelateAlert`، لذا لا تُبنى علاقات `same_rule` / `time_based` أثناء المعالجة الحية.
+
+**الحل:**
+
+1. بعد **RiskScorer** مباشرةً وقبل **suppression**، يستدعي `EventLoop.processOneEvent` `CorrelateAlert(baseAlert)` عندما يكون المدير مُحقونًا.
+2. نفس مثيل `CorrelationManager` يُسجَّل على الـ REST API عبر `Server.WireCorrelationAPI` → `RegisterCorrelationRoutes` على `/api/v1/sigma/alerts/correlation` و `/api/v1/sigma/incidents/*` (نفس عقد correlation في `AdvancedHandler`).
+
+**الملفات:** `sigma_engine_go/internal/infrastructure/kafka/event_loop.go`, `sigma_engine_go/cmd/sigma-engine-kafka/main.go`, `sigma_engine_go/internal/handlers/server.go`, `sigma_engine_go/internal/handlers/correlation_api.go`.
+
+**قيود:** التخزين داخل الذاكرة لكل عملية؛ عند تعدد النسخ (pods) لا تُشارك الحافة بين النسخ — للإنتاج المتعدد يحتاج لاحقًا مخزنًا مشتركًا.
+
+### A3 — G4: مسار `ParallelEventProcessor` والـ scoring
+
+**المشكلة:** مسار Kafka (`EventLoop`) يستدعي `RiskScorer` بعد `GenerateAggregatedAlert`. مسار `ParallelEventProcessor` كان يولّد تنبيهات دون scoring إن لم يُضف scorer.
+
+**الحل:** إضافة `SetRiskScorer` وحقن `RiskScorer` اختياريًا قبل `Start()` — عند الاستخدام، يُطبَّق نفس تسلسل الـ snapshot (`ContextSnapshot` / `ScoreBreakdown`) كما في `event_loop.go`.
+
+**الملف:** `sigma_engine_go/internal/infrastructure/processor/parallel_processor.go`.
+
+**المرجع المعماري:** المسار **الأساسي** للإنتاج مع Docker/Kafka يبقى `sigma-engine-kafka` + `EventLoop`. مسار الـ parallel يُستخدم عند تكامل صريح؛ يجب حقن نفس `RiskScorer` لضمان تكافؤ السلوك.
+
+### ترتيب التنفيذ في `EventLoop` (ملخص)
+
+1. Lineage hydrate + UEBA record (عند التفعيل)
+2. `DetectAggregated`
+3. `GenerateAggregatedAlert`
+4. `RiskScorer.Score`
+5. `CorrelationManager.CorrelateAlert`
+6. Suppression → `alertChan` → publish + DB
+
+</div>
+
+<div dir="ltr">
+
+## 12) Phase A — Code references (quick)
+
+| Item | Location |
+|---|---|
+| Agent `signature_status` / `signature_issuer` on process events | `win_edrAgent/internal/collectors/etw.go`, `signature_status_windows.go` |
+| Kafka scoring + correlation order | `sigma_engine_go/internal/infrastructure/kafka/event_loop.go` (`processOneEvent`) |
+| Shared correlator + HTTP | `sigma_engine_go/cmd/sigma-engine-kafka/main.go`, `internal/handlers/correlation_api.go`, `internal/handlers/server.go` (`WireCorrelationAPI`) |
+| Optional scoring on parallel path | `sigma_engine_go/internal/infrastructure/processor/parallel_processor.go` (`SetRiskScorer`, `processEvent`) |
+
+</div>
 

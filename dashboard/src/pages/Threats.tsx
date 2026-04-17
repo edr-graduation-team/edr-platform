@@ -1,9 +1,10 @@
 import { useQuery } from '@tanstack/react-query';
 import React, { useState, useMemo } from 'react';
-import { Shield, Target, AlertTriangle, TrendingUp, Eye, ChevronRight, ExternalLink } from 'lucide-react';
+import { Shield, Target, TrendingUp, Eye, ChevronRight, ExternalLink, GitBranch, ArrowRight } from 'lucide-react';
 import { alertsApi, type Alert } from '../api/client';
 import { SkeletonKPICards, SkeletonChart } from '../components';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
+import { useNavigate } from 'react-router-dom';
 
 // MITRE ATT&CK Tactics
 const MITRE_TACTICS = [
@@ -23,7 +24,106 @@ const MITRE_TACTICS = [
     { id: 'TA0040', name: 'Impact', shortName: 'Impact' },
 ];
 
-// Color scale for heatmap
+// 7 Kill Chain phases and their MITRE tactic name matches
+const KILL_CHAIN_PHASES = [
+    { phase: 'Recon',          tactics: ['reconnaissance', 'resource development'],         color: '#6366f1' },
+    { phase: 'Initial Access', tactics: ['initial access'],                                  color: '#8b5cf6' },
+    { phase: 'Execution',      tactics: ['execution'],                                       color: '#f59e0b' },
+    { phase: 'Persistence',    tactics: ['persistence', 'privilege escalation'],             color: '#f97316' },
+    { phase: 'Evasion',        tactics: ['defense evasion', 'credential access', 'discovery'], color: '#ef4444' },
+    { phase: 'C2 / Lateral',   tactics: ['lateral movement', 'command and control', 'collection'], color: '#dc2626' },
+    { phase: 'Impact',         tactics: ['exfiltration', 'impact'],                         color: '#7f1d1d' },
+];
+
+// Kill Chain Swimlane
+const KillChainSwimlane = React.memo(function KillChainSwimlane({
+    tacticCounts, onPhaseClick
+}: { tacticCounts: Record<string, number>; onPhaseClick: (tactic: string) => void }) {
+    // aggregate tactic counts per phase
+    const phaseCounts = KILL_CHAIN_PHASES.map(ph => ({
+        ...ph,
+        count: ph.tactics.reduce((sum, t) => sum + (tacticCounts[t] || 0), 0),
+    }));
+    const max = Math.max(...phaseCounts.map(p => p.count), 1);
+
+    return (
+        <div className="relative bg-white/60 dark:bg-slate-900/40 backdrop-blur-md border border-slate-200/80 dark:border-slate-700/50 rounded-xl p-6 shadow-sm mb-6">
+            <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-6 flex items-center gap-2">
+                <GitBranch className="w-5 h-5 text-indigo-400" /> Kill Chain Progression
+            </h3>
+            <div className="flex items-end gap-2 overflow-x-auto pb-2">
+                {phaseCounts.map((ph, i) => {
+                    const barH = ph.count === 0 ? 6 : Math.max(18, Math.round((ph.count / max) * 80));
+                    return (
+                        <React.Fragment key={ph.phase}>
+                            <button
+                                onClick={() => onPhaseClick(ph.tactics[0])}
+                                className="flex flex-col items-center gap-2 flex-1 min-w-[80px] group"
+                                title={`${ph.count} alerts`}
+                            >
+                                <span className="text-xs font-bold text-white py-1 px-2 rounded-full" style={{ backgroundColor: ph.color }}>{ph.count}</span>
+                                <div className="w-full rounded-t-md transition-all group-hover:opacity-80" style={{ height: barH, backgroundColor: ph.color + (ph.count === 0 ? '33' : 'cc') }} />
+                                <span className="text-[10px] font-semibold text-center text-slate-600 dark:text-slate-400 leading-tight">{ph.phase}</span>
+                            </button>
+                            {i < phaseCounts.length - 1 && <ArrowRight className="w-4 h-4 text-slate-300 dark:text-slate-600 shrink-0 mb-6" />}
+                        </React.Fragment>
+                    );
+                })}
+            </div>
+        </div>
+    );
+});
+
+// ─── Premium Threat Card (replaces plain alert row) ──────────────────────────
+const PremiumThreatCard = React.memo(function PremiumThreatCard({ alert, onInvestigate }: { alert: Alert; onInvestigate: (tactic: string) => void }) {
+    const sev = alert.severity as 'critical' | 'high' | 'medium' | 'low';
+    const severityRing: Record<string, string> = {
+        critical: 'ring-2 ring-rose-500/60',
+        high:     'ring-2 ring-orange-500/60',
+        medium:   'ring-2 ring-amber-400/50',
+        low:      'ring-1 ring-indigo-400/40',
+    };
+    const severityDot: Record<string, string> = {
+        critical: 'bg-rose-500',
+        high:     'bg-orange-500',
+        medium:   'bg-amber-400',
+        low:      'bg-indigo-400',
+    };
+    const ringClass = severityRing[sev] || '';
+    const dotClass = severityDot[sev] || 'bg-slate-400';
+
+    return (
+        <div className={`relative bg-white dark:bg-slate-800/70 rounded-xl p-4 border border-slate-200 dark:border-slate-700/50 hover:shadow-md transition-all ${ringClass}`}>
+            <div className="flex items-start gap-3">
+                <span className={`w-2.5 h-2.5 rounded-full shrink-0 mt-1.5 ${dotClass} shadow-[0_0_6px_currentColor]`} />
+                <div className="flex-1 min-w-0">
+                    <p className="font-semibold text-slate-800 dark:text-slate-100 text-sm truncate">{alert.rule_title}</p>
+                    <div className="flex flex-wrap gap-1 mt-1.5">
+                        {(alert.mitre_tactics || []).slice(0, 3).map(t => (
+                            <span key={t} className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-purple-500/10 text-purple-600 dark:text-purple-300 border border-purple-500/20">{t}</span>
+                        ))}
+                        {(alert.mitre_techniques || []).slice(0, 2).map(t => (
+                            <span key={t} className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-slate-100 dark:bg-slate-900 text-slate-500 border border-slate-200 dark:border-slate-700">{t}</span>
+                        ))}
+                    </div>
+                    <div className="flex items-center justify-between mt-2">
+                        <span className="text-[11px] text-slate-400">{new Date(alert.timestamp).toLocaleString()}</span>
+                        {alert.mitre_tactics?.[0] && (
+                            <button
+                                onClick={() => onInvestigate(alert.mitre_tactics![0])}
+                                className="text-[11px] font-semibold text-indigo-500 hover:text-indigo-700 dark:text-indigo-400 flex items-center gap-1 transition-colors"
+                            >
+                                Investigate <ChevronRight className="w-3 h-3" />
+                            </button>
+                        )}
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+});
+
+
 const getHeatmapColor = (count: number, maxCount: number) => {
     if (count === 0) return 'transparent';
     const intensity = Math.min(1, count / Math.max(maxCount * 0.8, 1));
@@ -193,84 +293,12 @@ const TopTechniquesChart = React.memo(function TopTechniquesChart({ techniques }
     );
 });
 
-// Related Alerts List
-const RelatedAlertsList = React.memo(function RelatedAlertsList({
-    alerts,
-    selectedTactic
-}: {
-    alerts: Alert[];
-    selectedTactic: string | null;
-}) {
-    const filteredAlerts = selectedTactic
-        ? alerts.filter(a => a.mitre_tactics?.some(t => t.toLowerCase().includes(selectedTactic.toLowerCase())))
-        : alerts.slice(0, 10);
-
-    return (
-        <div className="relative bg-white/60 dark:bg-slate-900/40 backdrop-blur-md border border-slate-200/80 dark:border-slate-700/50 rounded-xl shadow-sm flex flex-col h-[400px] overflow-hidden">
-            <div className="p-6 pb-4 border-b border-slate-200 dark:border-slate-700/50 flex items-center justify-between shrink-0 bg-slate-50/50 dark:bg-slate-800/30">
-                <h3 className="text-lg font-bold text-slate-900 dark:text-white">
-                    {selectedTactic ? `Alerts: ${selectedTactic}` : 'Recent Threat Alerts'}
-                </h3>
-                {selectedTactic && (
-                    <span className="px-3 py-1 bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20 rounded-full text-xs font-bold uppercase tracking-wider">
-                        {filteredAlerts.length} Matches
-                    </span>
-                )}
-            </div>
-
-            <div className="flex-1 overflow-auto custom-scrollbar p-2">
-                {filteredAlerts.length === 0 ? (
-                    <div className="h-full flex items-center justify-center text-slate-500 dark:text-slate-400 text-sm">
-                        {selectedTactic ? 'No alerts for this tactic' : 'No threat alerts'}
-                    </div>
-                ) : (
-                    <div className="space-y-2">
-                        {filteredAlerts.map((alert) => (
-                            <div
-                                key={alert.id}
-                                className="group flex items-center justify-between p-4 bg-white dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600 hover:shadow-md cursor-pointer transition-all"
-                            >
-                                <div className="flex items-start gap-4">
-                                    <div className={`p-2.5 rounded-lg shrink-0 mt-0.5 ${
-                                        alert.severity === 'critical' ? 'bg-rose-500/10 text-rose-500 border border-rose-500/20' :
-                                        alert.severity === 'high' ? 'bg-orange-500/10 text-orange-500 border border-orange-500/20' :
-                                        'bg-amber-500/10 text-amber-500 border border-amber-500/20'
-                                    }`}>
-                                        <AlertTriangle className="w-5 h-5" />
-                                    </div>
-                                    <div>
-                                        <p className="text-sm font-semibold text-slate-900 dark:text-slate-100 group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">
-                                            {alert.rule_title}
-                                        </p>
-                                        <div className="flex flex-wrap items-center gap-2 mt-2">
-                                            {alert.mitre_techniques?.slice(0, 3).map((tech) => (
-                                                <span key={tech} className="px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-900 text-slate-600 dark:text-slate-400 text-xs font-mono font-medium border border-slate-200 dark:border-slate-700">
-                                                    {tech}
-                                                </span>
-                                            ))}
-                                            {(alert.mitre_techniques?.length || 0) > 3 && (
-                                                <span className="text-xs text-slate-500 dark:text-slate-400 font-medium">
-                                                    +{alert.mitre_techniques!.length - 3} more
-                                                </span>
-                                            )}
-                                        </div>
-                                    </div>
-                                </div>
-                                <div className="shrink-0 p-2 rounded-full group-hover:bg-slate-100 dark:group-hover:bg-slate-700 transition-colors hidden sm:block">
-                                    <ChevronRight className="w-4 h-4 text-slate-400 group-hover:text-slate-600 dark:group-hover:text-slate-300" />
-                                </div>
-                            </div>
-                        ))}
-                    </div>
-                )}
-            </div>
-        </div>
-    );
-});
-
 // Main Threats Page
 export default function Threats() {
+    const navigate = useNavigate();
     const [selectedTactic, setSelectedTactic] = useState<string | null>(null);
+    const [viewMode, setViewMode] = useState<'matrix' | 'swimlane'>('matrix');
+
 
     // Fetch alerts with MITRE data
     const { data, isLoading } = useQuery({
@@ -341,14 +369,28 @@ export default function Threats() {
                         <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Analytics and MITRE ATT&CK visualization</p>
                     </div>
                     
-                    <button
-                        className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded-lg transition-colors shadow-sm shadow-indigo-500/20"
-                        onClick={() => window.open('https://attack.mitre.org/', '_blank')}
-                    >
-                        <Shield className="w-4 h-4" />
-                        Explore Framework
-                        <ExternalLink className="w-3.5 h-3.5 ml-1 opacity-70" />
-                    </button>
+                    <div className="flex items-center gap-2">
+                        <button
+                            onClick={() => setViewMode('matrix')}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${ viewMode === 'matrix' ? 'bg-indigo-600 text-white shadow-sm' : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700' }`}
+                        >
+                            MITRE Matrix
+                        </button>
+                        <button
+                            onClick={() => setViewMode('swimlane')}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${ viewMode === 'swimlane' ? 'bg-indigo-600 text-white shadow-sm' : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700' }`}
+                        >
+                            Kill Chain
+                        </button>
+                        <button
+                            className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded-lg transition-colors shadow-sm shadow-indigo-500/20 ml-2"
+                            onClick={() => window.open('https://attack.mitre.org/', '_blank')}
+                        >
+                            <Shield className="w-4 h-4" />
+                            Explore Framework
+                            <ExternalLink className="w-3.5 h-3.5 ml-1 opacity-70" />
+                        </button>
+                    </div>
                 </div>
 
                 {/* Summary Cards */}
@@ -387,16 +429,44 @@ export default function Threats() {
                     />
                 </div>
 
-                {/* MITRE Matrix */}
-                <MitreMatrixHeatmap
-                    tacticCounts={tacticCounts}
-                    onTacticClick={(tactic) => setSelectedTactic(tactic === selectedTactic ? null : tactic)}
-                />
+                {/* MITRE View — Matrix or Kill Chain */}
+                {viewMode === 'swimlane' ? (
+                    <KillChainSwimlane
+                        tacticCounts={tacticCounts}
+                        onPhaseClick={(tactic) => setSelectedTactic(tactic === selectedTactic ? null : tactic)}
+                    />
+                ) : (
+                    <MitreMatrixHeatmap
+                        tacticCounts={tacticCounts}
+                        onTacticClick={(tactic) => setSelectedTactic(tactic === selectedTactic ? null : tactic)}
+                    />
+                )}
 
                 {/* Charts and Alerts */}
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 pb-8">
                     <TopTechniquesChart techniques={topTechniques} />
-                    <RelatedAlertsList alerts={alerts} selectedTactic={selectedTactic} />
+                    {/* Premium Threat Cards */}
+                    <div className="relative bg-white/60 dark:bg-slate-900/40 backdrop-blur-md border border-slate-200/80 dark:border-slate-700/50 rounded-xl shadow-sm flex flex-col h-[420px] overflow-hidden">
+                        <div className="p-5 pb-3 border-b border-slate-200 dark:border-slate-700/50 flex items-center justify-between shrink-0 bg-slate-50/50 dark:bg-slate-800/30">
+                            <h3 className="text-base font-bold text-slate-900 dark:text-white">{selectedTactic ? `Threats: ${selectedTactic}` : 'Recent Threat Alerts'}</h3>
+                            {selectedTactic && <button onClick={() => setSelectedTactic(null)} className="text-xs text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition-colors">Clear</button>}
+                        </div>
+                        <div className="flex-1 overflow-auto custom-scrollbar p-3 space-y-2">
+                            {(selectedTactic
+                                ? alerts.filter(a => a.mitre_tactics?.some(t => t.toLowerCase().includes(selectedTactic.toLowerCase())))
+                                : alerts.slice(0, 12)
+                            ).map(alert => (
+                                <PremiumThreatCard
+                                    key={alert.id}
+                                    alert={alert}
+                                    onInvestigate={(tactic) => navigate(`/alerts?tactic=${encodeURIComponent(tactic)}`)}
+                                />
+                            ))}
+                            {alerts.length === 0 && (
+                                <div className="h-full flex items-center justify-center text-slate-400 text-sm">No threat alerts found</div>
+                            )}
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>

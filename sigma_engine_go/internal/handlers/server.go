@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/edr-platform/sigma-engine/internal/analytics"
 	"github.com/edr-platform/sigma-engine/internal/application/scoring"
 	"github.com/edr-platform/sigma-engine/internal/infrastructure/database"
 	"github.com/edr-platform/sigma-engine/internal/infrastructure/logger"
@@ -42,6 +43,7 @@ type Server struct {
 	config     ServerConfig
 	httpServer *http.Server
 	router     *mux.Router
+	apiV1      *mux.Router // authenticated /api/v1 routes (for late wiring)
 
 	ruleHandler  *RuleHandler
 	alertHandler *AlertHandler
@@ -140,6 +142,7 @@ func (s *Server) setupRoutes() {
 
 	// API routes with authentication
 	api := s.router.PathPrefix("/api/v1").Subrouter()
+	s.apiV1 = api
 
 	// Apply auth middleware: JWT (dashboard) + API key (service-to-service)
 	if s.jwtAuth != nil || s.tokenAuth != nil {
@@ -165,6 +168,13 @@ func (s *Server) setupRoutes() {
 // SetPerformanceMetrics injects a real-time metrics provider into the stats handler.
 func (s *Server) SetPerformanceMetrics(provider PerformanceMetricsProvider) {
 	s.statsHandler.SetPerformanceMetrics(provider)
+}
+
+// WireCorrelationAPI registers correlation/incident HTTP routes backed by the
+// same in-memory CorrelationManager instance used by the Kafka EventLoop.
+// Safe to call before Start(); may be called after NewServer.
+func (s *Server) WireCorrelationAPI(mgr *analytics.CorrelationManager) {
+	RegisterCorrelationRoutes(s.apiV1, mgr)
 }
 
 // corsMiddlewareConfigurable adds CORS headers using configured origin.

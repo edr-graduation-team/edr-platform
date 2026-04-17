@@ -3,10 +3,16 @@ import { useNavigate } from 'react-router-dom';
 import { useState, useMemo } from 'react';
 import {
     PieChart, Pie, Cell,
+    AreaChart, Area,
+    XAxis, YAxis,
     Tooltip, ResponsiveContainer
 } from 'recharts';
-import { Download, TrendingUp, Activity, Shield, AlertTriangle, Target, ChevronDown } from 'lucide-react';
-import { statsApi, authApi, contextPoliciesApi, alertsApi, type TimelineDataPoint } from '../api/client';
+
+import { Download, TrendingUp, Activity, Shield, AlertTriangle, Target, ChevronDown, Server } from 'lucide-react';
+import { statsApi, authApi, agentsApi } from '../api/client';
+
+
+
 
 const COLORS = ['#ef4444', '#f97316', '#eab308', '#3b82f6', '#22c55e'];
 
@@ -128,30 +134,25 @@ export default function Stats() {
         refetchInterval: 15000,
     });
 
-    const { data: contextPolicies } = useQuery({
-        queryKey: ['contextPoliciesCount'],
-        queryFn: contextPoliciesApi.list,
-        refetchInterval: 30000,
+
+    const { data: heatmapData } = useQuery({
+        queryKey: ['statsHeatmap30d'],
+        queryFn: () => {
+            const to = new Date().toISOString();
+            const from = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+            return statsApi.timeline({ from, to, granularity: '1d' });
+        },
+        refetchInterval: 60000,
     });
 
-    const { data: contextAlertsSample } = useQuery({
-        queryKey: ['contextScoringSample'],
-        queryFn: () => alertsApi.list({ limit: 300, sort: 'timestamp', order: 'desc' }),
-        refetchInterval: 30000,
+    // Agent list for top targeted endpoints hostname resolution
+    const { data: agentListForStats } = useQuery({
+        queryKey: ['agentsForStats'],
+        queryFn: () => agentsApi.list({ limit: 200 }),
+        refetchInterval: 60000,
     });
 
-    const contextDistribution = useMemo(() => {
-        const alerts = contextAlertsSample?.alerts || [];
-        const buckets = { elevated: 0, neutral: 0, discounted: 0 };
-        for (const a of alerts) {
-            const m = a.score_breakdown?.context_multiplier;
-            if (typeof m !== 'number') continue;
-            if (m > 1.05) buckets.elevated++;
-            else if (m < 0.95) buckets.discounted++;
-            else buckets.neutral++;
-        }
-        return buckets;
-    }, [contextAlertsSample]);
+
 
     // Transform severity data for pie chart
     const severityData = alertStats?.by_severity
@@ -161,72 +162,7 @@ export default function Stats() {
         }))
         : [];
 
-    // Trend data with Skeleton padding (Professional Activity Matrix)
-    const trendData = useMemo(() => {
-        const raw = timelineData?.data || [];
-        const skeleton: { date: string; alerts: number }[] = [];
-        const now = new Date();
-        
-        // 1. Build chronological timeline skeleton to ensure no empty graphs
-        if (dateRange === '24h') {
-            for (let i = 23; i >= 0; i--) {
-                const d = new Date(now.getTime() - i * 60 * 60 * 1000);
-                skeleton.push({ date: d.toLocaleDateString('en-US', { hour: '2-digit' }), alerts: 0 });
-            }
-        } else if (dateRange === '7d') {
-            for (let i = 6; i >= 0; i--) {
-                const d = new Date(now.getTime() - i * 24 * 60 * 60 * 1000);
-                skeleton.push({ date: d.toLocaleDateString('en-US', { weekday: 'short' }), alerts: 0 });
-            }
-        } else if (dateRange === 'custom') {
-            const endDate = customTo ? new Date(customTo) : now;
-            const startDate = customFrom ? new Date(customFrom) : new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-            const diffDays = Math.max(1, Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24)));
-            const diffHours = (endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60);
-            
-            if (diffHours <= 48) {
-                const hours = Math.max(1, Math.ceil(diffHours));
-                for (let i = hours - 1; i >= 0; i--) {
-                    const d = new Date(endDate.getTime() - i * 60 * 60 * 1000);
-                    skeleton.push({ date: d.toLocaleDateString('en-US', { hour: '2-digit' }), alerts: 0 });
-                }
-            } else {
-                // Ensure we don't render too many columns (max 60 to prevent extreme UI breakage)
-                const limitDays = Math.min(diffDays, 60);
-                for (let i = limitDays - 1; i >= 0; i--) {
-                    const d = new Date(endDate.getTime() - i * 24 * 60 * 60 * 1000);
-                    skeleton.push({ date: d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }), alerts: 0 });
-                }
-            }
-        } else {
-            for (let i = 29; i >= 0; i--) {
-                const d = new Date(now.getTime() - i * 24 * 60 * 60 * 1000);
-                skeleton.push({ date: d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }), alerts: 0 });
-            }
-        }
 
-        // 2. Overlay API data
-        raw.forEach((point: TimelineDataPoint) => {
-            const pointDate = new Date(point.timestamp);
-            const total = (point.critical || 0) + (point.high || 0) + (point.medium || 0) + (point.low || 0) + (point.informational || 0);
-
-            let formattedPointDate = '';
-            if (dateRange === '24h' || (dateRange === 'custom' && (new Date(getDateRange().to).getTime() - new Date(getDateRange().from).getTime()) / (1000 * 60 * 60) <= 48)) {
-                formattedPointDate = pointDate.toLocaleDateString('en-US', { hour: '2-digit' });
-            } else if (dateRange === '7d') {
-                formattedPointDate = pointDate.toLocaleDateString('en-US', { weekday: 'short' });
-            } else {
-                formattedPointDate = pointDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-            }
-
-            const bucket = skeleton.find(s => s.date === formattedPointDate);
-            if (bucket) {
-                bucket.alerts += total;
-            }
-        });
-
-        return skeleton;
-    }, [timelineData, dateRange]);
 
     // Top rules from alert frequency mapping
     const topRules = alertStats?.by_rule
@@ -236,10 +172,49 @@ export default function Stats() {
             .slice(0, 5)
         : [];
 
-    const handleExport = () => {
-        // Export feature — future implementation
-        console.log(`Export requested: format=${exportFormat}, range=${dateRange}`);
-    };
+    // Agent hostname map
+    const agentMapForStats = useMemo(() => {
+        const m: Record<string, string> = {};
+        (agentListForStats?.data || []).forEach(a => { m[a.id] = a.hostname; });
+        return m;
+    }, [agentListForStats]);
+
+    // Heatmap cells (last 30 days)
+    const heatmapCells = useMemo(() => {
+        const map: Record<string, number> = {};
+        (heatmapData?.data || []).forEach(p => {
+            const day = new Date(p.timestamp).toISOString().slice(0, 10);
+            map[day] = (p.critical || 0) + (p.high || 0) + (p.medium || 0) + (p.low || 0) + (p.informational || 0);
+        });
+        const cells: { date: string; count: number; label: string }[] = [];
+        for (let i = 29; i >= 0; i--) {
+            const d = new Date(Date.now() - i * 86400000);
+            const key = d.toISOString().slice(0, 10);
+            cells.push({ date: key, count: map[key] || 0, label: d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) });
+        }
+        return cells;
+    }, [heatmapData]);
+
+    const heatmapMax = useMemo(() => Math.max(...heatmapCells.map(c => c.count), 1), [heatmapCells]);
+
+    // Top targeted endpoints from by_agent
+    const topEndpoints = useMemo(() => {
+        const byAgent = alertStats?.by_agent || {};
+        return Object.entries(byAgent)
+            .sort(([, a], [, b]) => (b as number) - (a as number))
+            .slice(0, 5)
+            .map(([id, count]) => ({ id, hostname: agentMapForStats[id] || id.slice(0, 12) + '...', count: count as number }));
+    }, [alertStats, agentMapForStats]);
+
+    // Area chart multi-series data
+    const areaChartData = useMemo(() => {
+        return (timelineData?.data || []).map(p => ({
+            name: new Date(p.timestamp).toLocaleDateString('en-US', dateRange === '24h' ? { hour: '2-digit' } : { month: 'short', day: 'numeric' }),
+            critical: p.critical || 0,
+            high: p.high || 0,
+            medium: p.medium || 0,
+        }));
+    }, [timelineData, dateRange]);
 
     if (alertsLoading || rulesLoading) {
         return (
@@ -311,7 +286,7 @@ export default function Stats() {
                                 </div>
                             </div>
 
-                            <button onClick={handleExport} className="bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white shadow-md hover:shadow-cyan-500/25 transition-all rounded-lg px-5 py-2 text-sm font-semibold flex items-center gap-2">
+                            <button onClick={() => console.log(`Export: format=${exportFormat}, range=${dateRange}`)} className="bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white shadow-md hover:shadow-cyan-500/25 transition-all rounded-lg px-5 py-2 text-sm font-semibold flex items-center gap-2">
                                 <Download className="w-4 h-4" />
                                 Export
                             </button>
@@ -376,11 +351,13 @@ export default function Stats() {
                             <Target className="w-5 h-5 text-cyan-600" />
                         </div>
                         <div>
-                            <p className="text-sm text-gray-500">Active Context Policies</p>
-                            <p className="text-2xl font-bold">{(contextPolicies?.data || []).filter(p => p.enabled).length}</p>
+                            <p className="text-sm text-gray-500">Unique Rules Fired</p>
+                            <p className="text-2xl font-bold">{Object.keys(alertStats?.by_rule || {}).length || 0}</p>
+
                         </div>
                     </div>
                 </div>
+
 
                 <div className="card border border-slate-200 dark:border-slate-700/60 shadow-sm dark:shadow-slate-900/20 rounded-xl">
                     <div className="flex items-center gap-3">
@@ -388,112 +365,162 @@ export default function Stats() {
                             <Shield className="w-5 h-5 text-indigo-600" />
                         </div>
                         <div>
-                            <p className="text-sm text-gray-500">Context Scoring (sample)</p>
-                            <p className="text-sm font-bold">
-                                +{contextDistribution.elevated} / ={contextDistribution.neutral} / -{contextDistribution.discounted}
-                            </p>
+                            <p className="text-sm text-gray-500">MITRE Tactics Seen</p>
+                            <p className="text-2xl font-bold">{Object.keys(alertStats?.by_tactic || {}).length || 0}</p>
                         </div>
                     </div>
                 </div>
+
             </div>
 
-            {/* Charts Row */}
+            {/* Charts Row — Area Chart + Donut */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-                {/* Alert Trend - Modern Activity Matrix Redesign */}
-                <div className="card min-w-0 border border-slate-200 dark:border-slate-700/60 shadow-lg dark:shadow-cyan-900/10 bg-white dark:bg-slate-800/90 backdrop-blur-sm rounded-xl">
-                    <div className="flex justify-between items-center mb-6">
-                        <h3 className="text-lg font-bold text-slate-800 dark:text-white flex items-center gap-2">
-                            <Activity className="w-5 h-5 text-cyan-400 drop-shadow-[0_0_5px_rgba(34,211,238,0.5)]" />
-                            Activity Trend <span className="text-sm font-normal text-slate-500">({dateRange})</span>
+                {/* Multi-Series Area Chart */}
+                <div className="card border border-slate-200 dark:border-slate-700/60 shadow-lg bg-white dark:bg-slate-800/90 backdrop-blur-sm rounded-xl">
+                    <div className="flex justify-between items-center mb-4">
+                        <h3 className="text-base font-bold text-slate-800 dark:text-white flex items-center gap-2">
+                            <Activity className="w-4 h-4 text-cyan-400" />
+                            Alert Trend <span className="text-sm font-normal text-slate-500">({dateRange})</span>
                         </h3>
-                         <div className="flex gap-2 items-center">
-                            <div className="flex items-center gap-1.5"><div className="w-2.5 h-2.5 rounded-full bg-slate-200 dark:bg-slate-700"></div><span className="text-xs text-slate-500">0</span></div>
-                            <div className="flex items-center gap-1.5"><div className="w-2.5 h-2.5 rounded-full bg-cyan-900/40"></div></div>
-                            <div className="flex items-center gap-1.5"><div className="w-2.5 h-2.5 rounded-full bg-cyan-600"></div></div>
-                            <div className="flex items-center gap-1.5"><div className="w-2.5 h-2.5 rounded-full bg-cyan-400 shadow-[0_0_8px_rgba(34,211,238,0.8)]"></div><span className="text-xs text-slate-500">High</span></div>
+                        <div className="flex gap-3 text-[11px] font-medium">
+                            <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-rose-500" />Critical</span>
+                            <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-orange-400" />High</span>
+                            <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-amber-400" />Medium</span>
                         </div>
                     </div>
-
-                    {!timelineData ? (
-                        <div className="h-[260px] flex items-center justify-center">
-                            <div className="w-10 h-10 rounded-full border-2 border-cyan-500/20 border-t-cyan-400 animate-spin"></div>
-                        </div>
+                    {areaChartData.length === 0 ? (
+                        <div className="h-[220px] flex items-center justify-center text-slate-500 text-sm">No timeline data</div>
                     ) : (
-                        <div className="border border-slate-200 dark:border-slate-700/40 rounded-xl p-4 sm:p-6 bg-slate-50/30 dark:bg-slate-900/40 mt-2 flex flex-col justify-end">
-                            <div className="flex items-end justify-between w-full h-[180px] gap-1 sm:gap-1.5 min-w-0">
-                                {trendData.map((data, idx) => {
-                                    // Calculate relative intensity for visualization (0.1 to 1.0)
-                                    const maxAlerts = Math.max(...trendData.map(d => d.alerts), 1);
-                                    const intensity = data.alerts === 0 ? 0 : Math.max(0.15, data.alerts / maxAlerts);
-                                    
-                                    // Generate highly dynamic column heights and glow
-                                    // Minimum 0 height if no alerts.
-                                    const heightPct = data.alerts === 0 ? 0 : 10 + (intensity * 90);
-                                    
-                                    // Stylistic variables
-                                    const isZero = data.alerts === 0;
-                                    const glowIntensity = intensity > 0.7 ? 'drop-shadow-[0_0_8px_rgba(34,211,238,0.8)]' : (intensity > 0.3 ? 'drop-shadow-[0_0_4px_rgba(6,182,212,0.5)]' : '');
-                                    const bgClass = 'bg-gradient-to-t from-blue-700/80 to-cyan-400 border-cyan-400/50';
-
-                                    return (
-                                        <div key={idx} className="relative flex flex-col items-center group flex-1 h-full min-w-0">
-                                            {/* Tooltip Hover Overlay */}
-                                            <div className="absolute bottom-[calc(100%+12px)] opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none z-20 flex flex-col items-center">
-                                                <div className="bg-slate-800 text-white text-xs font-bold px-3 py-2 rounded-lg shadow-xl border border-slate-600/50 whitespace-nowrap flex items-center">
-                                                    <span className="text-cyan-400 mr-2 text-sm">{data.alerts}</span>Alerts
-                                                    <span className="text-[10px] text-slate-400 font-normal ml-2 pl-2 border-l border-slate-600/50">{data.date}</span>
-                                                </div>
-                                                {/* Tooltip Arrow */}
-                                                <div className="w-2.5 h-2.5 bg-slate-800 border-r border-b border-slate-600/50 transform rotate-45 -mt-1.5"></div>
-                                            </div>
-
-                                            {/* Container Tube (Socket) - Always visible providing structural grid aesthetic */}
-                                            <div className="relative w-full max-w-[48px] h-full bg-slate-200/50 dark:bg-slate-800/40 rounded-md border border-slate-300/50 dark:border-slate-700/50 overflow-hidden flex items-end shadow-inner transition-colors group-hover:dark:bg-slate-700/40">
-                                                {/* Active Fill Bar */}
-                                                <div 
-                                                    className={`w-full transition-all duration-1000 ease-out border-t-2 relative ${bgClass} ${glowIntensity}`}
-                                                    style={{ height: `${heightPct}%`, opacity: isZero ? 0 : 0.8 + (intensity * 0.2) }}
-                                                >
-                                                    {!isZero && <div className="absolute top-0 left-0 right-0 h-1 bg-white/60 blur-[1px]"></div>}
-                                                    {!isZero && <div className="absolute inset-0 bg-gradient-to-b from-white/20 to-transparent"></div>}
-                                                </div>
-                                            </div>
-                                            
-                                            {/* Date Label under bar */}
-                                            <span className="text-[9px] sm:text-[10px] font-medium text-slate-500 dark:text-slate-400 mt-3 truncate w-full text-center group-hover:text-cyan-400 transition-colors">
-                                                {dateRange === '24h' || (dateRange === 'custom' && (new Date(getDateRange().to).getTime() - new Date(getDateRange().from).getTime()) / (1000 * 60 * 60) <= 48) 
-                                                    ? data.date 
-                                                    : (dateRange === '7d' ? data.date.split(' ')[0] : data.date.split(' ')[1] || data.date)}
-                                            </span>
-                                        </div>
-                                    );
-                                })}
-                            </div>
-                        </div>
+                        <ResponsiveContainer width="100%" height={220}>
+                            <AreaChart data={areaChartData} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
+                                <defs>
+                                    <linearGradient id="gradCritical" x1="0" y1="0" x2="0" y2="1">
+                                        <stop offset="5%" stopColor="#f43f5e" stopOpacity={0.5} />
+                                        <stop offset="95%" stopColor="#f43f5e" stopOpacity={0} />
+                                    </linearGradient>
+                                    <linearGradient id="gradHigh" x1="0" y1="0" x2="0" y2="1">
+                                        <stop offset="5%" stopColor="#f97316" stopOpacity={0.4} />
+                                        <stop offset="95%" stopColor="#f97316" stopOpacity={0} />
+                                    </linearGradient>
+                                    <linearGradient id="gradMedium" x1="0" y1="0" x2="0" y2="1">
+                                        <stop offset="5%" stopColor="#f59e0b" stopOpacity={0.3} />
+                                        <stop offset="95%" stopColor="#f59e0b" stopOpacity={0} />
+                                    </linearGradient>
+                                </defs>
+                                <XAxis dataKey="name" tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
+                                <YAxis tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
+                                <Tooltip
+                                    contentStyle={{ background: 'rgba(15,23,42,0.95)', border: '1px solid rgba(30,48,72,0.8)', borderRadius: '10px', color: 'white', fontSize: '12px' }}
+                                />
+                                <Area type="monotone" dataKey="medium" stackId="1" stroke="#f59e0b" strokeWidth={1.5} fill="url(#gradMedium)" />
+                                <Area type="monotone" dataKey="high" stackId="1" stroke="#f97316" strokeWidth={1.5} fill="url(#gradHigh)" />
+                                <Area type="monotone" dataKey="critical" stackId="1" stroke="#f43f5e" strokeWidth={2} fill="url(#gradCritical)" />
+                            </AreaChart>
+                        </ResponsiveContainer>
                     )}
                 </div>
 
-                {/* Severity Distribution */}
-                <div className="card border border-slate-200 dark:border-slate-700/60 shadow-sm dark:shadow-slate-900/20 rounded-xl">
-                    <h3 className="text-lg font-semibold mb-4">Severity Distribution</h3>
-                    <ResponsiveContainer width="100%" height={300}>
+                {/* Severity Donut */}
+                <div className="card border border-slate-200 dark:border-slate-700/60 shadow-sm rounded-xl">
+                    <h3 className="text-base font-bold text-slate-800 dark:text-white mb-4 flex items-center gap-2">
+                        <AlertTriangle className="w-4 h-4 text-rose-400" /> Severity Distribution
+                    </h3>
+                    <ResponsiveContainer width="100%" height={200}>
                         <PieChart>
                             <Pie
                                 data={severityData}
-                                cx="50%"
-                                cy="50%"
+                                cx="50%" cy="50%"
+                                innerRadius={55} outerRadius={85}
+                                paddingAngle={3}
+                                dataKey="value"
                                 labelLine={false}
                                 label={({ name, percent }) => `${name} ${((percent ?? 0) * 100).toFixed(0)}%`}
-                                outerRadius={100}
-                                dataKey="value"
                             >
-                                {severityData.map((_, index) => (
-                                    <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                                {severityData.map((_, i) => (
+                                    <Cell key={i} fill={COLORS[i % COLORS.length]} />
                                 ))}
                             </Pie>
-                            <Tooltip />
+                            <Tooltip contentStyle={{ background: 'rgba(15,23,42,0.95)', border: '1px solid rgba(30,48,72,0.8)', borderRadius: '10px', color: 'white', fontSize: '12px' }} />
                         </PieChart>
                     </ResponsiveContainer>
+                </div>
+            </div>
+
+            {/* Heatmap + Top Endpoints Row */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
+                {/* Alert Heatmap Calendar */}
+                <div className="lg:col-span-2 card border border-slate-200 dark:border-slate-700/60 shadow-lg bg-white dark:bg-slate-800/90 rounded-xl">
+                    <h3 className="text-base font-bold text-slate-800 dark:text-white mb-4 flex items-center gap-2">
+                        <Activity className="w-4 h-4 text-cyan-400" /> 30-Day Alert Heatmap
+                    </h3>
+                    <div className="grid gap-1.5" style={{ gridTemplateColumns: 'repeat(10, 1fr)' }}>
+                        {heatmapCells.map((cell) => {
+                            const intensity = cell.count === 0 ? 0 : Math.max(0.15, cell.count / heatmapMax);
+                            const bg = cell.count === 0
+                                ? 'rgba(30,48,72,0.3)'
+                                : intensity < 0.3 ? 'rgba(59,130,246,0.4)'
+                                : intensity < 0.6 ? 'rgba(245,158,11,0.6)'
+                                : intensity < 0.85 ? 'rgba(249,115,22,0.75)'
+                                : 'rgba(244,63,94,0.9)';
+                            return (
+                                <div
+                                    key={cell.date}
+                                    title={`${cell.label}: ${cell.count} alerts`}
+                                    className="heatmap-cell aspect-square rounded"
+                                    style={{ background: bg }}
+                                />
+                            );
+                        })}
+                    </div>
+                    <div className="flex justify-between items-center mt-3">
+                        <span className="text-[10px] text-slate-400">30 days ago</span>
+                        <div className="flex items-center gap-2 text-[10px] text-slate-400">
+                            <span>Scale:</span>
+                            {[0, 0.3, 0.6, 0.85, 1].map((t, i) => (
+                                <span key={i} className="w-3 h-3 rounded-sm inline-block" style={{
+                                    background: t === 0 ? 'rgba(30,48,72,0.3)'
+                                        : t < 0.3 ? 'rgba(59,130,246,0.4)'
+                                        : t < 0.6 ? 'rgba(245,158,11,0.6)'
+                                        : t < 0.85 ? 'rgba(249,115,22,0.75)'
+                                        : 'rgba(244,63,94,0.9)'
+                                }} />
+                            ))}
+                            <span>Today</span>
+                        </div>
+                    </div>
+                </div>
+
+                {/* Top Targeted Endpoints */}
+                <div className="card border border-slate-200 dark:border-slate-700/60 shadow-lg bg-white dark:bg-slate-800/90 rounded-xl">
+                    <h3 className="text-base font-bold text-slate-800 dark:text-white mb-4 flex items-center gap-2">
+                        <Server className="w-4 h-4 text-rose-400" /> Top Targeted Endpoints
+                    </h3>
+                    {topEndpoints.length === 0 ? (
+                        <div className="flex items-center justify-center h-28 text-slate-400 text-sm">No endpoint alert data</div>
+                    ) : (
+                        <div className="space-y-3">
+                            {topEndpoints.map((ep, i) => {
+                                const maxCount = topEndpoints[0]?.count || 1;
+                                return (
+                                    <div key={ep.id}>
+                                        <div className="flex justify-between items-center mb-1">
+                                            <div className="flex items-center gap-2">
+                                                <span className="text-[10px] font-bold font-mono text-slate-400 w-4">#{i+1}</span>
+                                                <span className="text-xs font-semibold text-slate-700 dark:text-slate-200 font-mono truncate max-w-[120px]" title={ep.hostname}>{ep.hostname}</span>
+                                            </div>
+                                            <span className="text-xs font-bold text-rose-500 dark:text-rose-400 font-mono">{ep.count}</span>
+                                        </div>
+                                        <div className="h-1.5 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
+                                            <div
+                                                className="h-full rounded-full transition-all duration-700"
+                                                style={{ width: `${(ep.count / maxCount) * 100}%`, background: 'linear-gradient(to right, #f43f5e, #f97316)' }}
+                                            />
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    )}
                 </div>
             </div>
 

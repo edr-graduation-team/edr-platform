@@ -2,6 +2,7 @@ package processor
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"runtime"
 	"runtime/debug"
@@ -10,6 +11,8 @@ import (
 
 	"github.com/edr-platform/sigma-engine/internal/application/alert"
 	"github.com/edr-platform/sigma-engine/internal/application/detection"
+	"github.com/edr-platform/sigma-engine/internal/analytics"
+	"github.com/edr-platform/sigma-engine/internal/application/scoring"
 	"github.com/edr-platform/sigma-engine/internal/domain"
 	"github.com/edr-platform/sigma-engine/internal/infrastructure/logger"
 	"github.com/edr-platform/sigma-engine/internal/infrastructure/output"
@@ -47,6 +50,13 @@ type ParallelEventProcessor struct {
 	alertGenerator  *alert.AlertGenerator
 	deduplicator    *alert.Deduplicator
 	outputManager   *output.OutputManager
+
+	// riskScorer enriches aggregated alerts when set (parity with kafka.EventLoop).
+	// Call SetRiskScorer before Start(); nil skips scoring.
+	riskScorer scoring.RiskScorer
+
+	// correlator records edges when set (parity with kafka.EventLoop). Nil skips.
+	correlator *analytics.CorrelationManager
 
 	// Channels
 	eventChan  chan *domain.LogEvent
@@ -131,6 +141,20 @@ func (p *ParallelEventProcessor) Start() error {
 
 	logger.Infof("Started parallel event processor with %d workers", p.config.NumWorkers)
 	return nil
+}
+
+// SetRiskScorer injects context-aware scoring (optional). Set before Start().
+func (p *ParallelEventProcessor) SetRiskScorer(rs scoring.RiskScorer) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.riskScorer = rs
+}
+
+// SetCorrelationManager injects the same CorrelationManager used by the Kafka EventLoop when both paths run.
+func (p *ParallelEventProcessor) SetCorrelationManager(m *analytics.CorrelationManager) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.correlator = m
 }
 
 // ProcessEvent processes a single event.
@@ -356,6 +380,37 @@ func (p *ParallelEventProcessor) processEvent(event *domain.LogEvent) *Processin
 	if matchResult.HasMatches() {
 		aggAlert := p.alertGenerator.GenerateAggregatedAlert(matchResult)
 		if aggAlert != nil {
+			p.mu.RLock()
+			rs := p.riskScorer
+			co := p.correlator
+			p.mu.RUnlock()
+			if rs != nil {
+				agentStr := ""
+				if agentID, _ := event.GetField("agent_id"); agentID != nil {
+					agentStr, _ = agentID.(string)
+				}
+				scoringInput := scoring.ScoringInput{
+					MatchResult: matchResult,
+					Event:       event,
+					AgentID:     agentStr,
+				}
+				scoreOut, scoreErr := rs.Score(context.Background(), scoringInput)
+				if scoreErr != nil {
+					logger.Warnf("RiskScorer error (parallel processor) rule %s: %v", aggAlert.RuleID, scoreErr)
+				} else {
+					aggAlert.RiskScore = scoreOut.RiskScore
+					aggAlert.FalsePositiveRisk = scoreOut.FalsePositiveRisk
+					if snap := scoreOut.Snapshot; snap != nil {
+						importJSON, _ := json.Marshal(snap)
+						_ = json.Unmarshal(importJSON, &aggAlert.ContextSnapshot)
+						bdJSON, _ := json.Marshal(snap.ScoreBreakdown)
+						_ = json.Unmarshal(bdJSON, &aggAlert.ScoreBreakdown)
+					}
+				}
+			}
+			if co != nil {
+				co.CorrelateAlert(aggAlert)
+			}
 			alerts = append(alerts, aggAlert)
 		}
 	}

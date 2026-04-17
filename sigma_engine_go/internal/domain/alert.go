@@ -70,6 +70,17 @@ type Alert struct {
 	// Stored as score_breakdown JSONB. Keys: base_score, lineage_bonus,
 	// privilege_bonus, burst_bonus, fp_discount, raw_score, final_score.
 	ScoreBreakdown map[string]any `json:"score_breakdown,omitempty"`
+
+	// CorrelationSummary is set when CorrelationManager links this alert to peers.
+	// Also mirrored under ContextSnapshot["correlation"] for DB persistence.
+	CorrelationSummary *CorrelationSummary `json:"correlation_summary,omitempty"`
+}
+
+// CorrelationSummary captures edges created for this alert at correlation time.
+type CorrelationSummary struct {
+	EdgesAdded     int     `json:"edges_added"`
+	PrimaryType    string  `json:"primary_type,omitempty"`
+	StrongestScore float64 `json:"strongest_score,omitempty"`
 }
 
 // NewAlert creates a new Alert from a DetectionResult.

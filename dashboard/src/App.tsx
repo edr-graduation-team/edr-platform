@@ -8,7 +8,9 @@ import {
 import ProtocolLogo from './components/ProtocolLogo';
 import { useState, Suspense, lazy, useEffect, useMemo, memo } from 'react';
 import { ToastProvider } from './components';
-import { authApi } from './api/client';
+import { authApi, statsApi } from './api/client';
+import { useQuery } from '@tanstack/react-query';
+
 import './index.css';
 
 // Lazy load pages for better performance
@@ -71,7 +73,45 @@ function ProtectedRoute({ children, roles }: { children: React.ReactNode; roles?
   return <>{children}</>;
 }
 
+// Engine health chip — live policy status shown in sidebar
+function EngineHealthChip() {
+  const { data: perf } = useQuery({
+    queryKey: ['sidebarPerfStats'],
+    queryFn: statsApi.performance,
+    refetchInterval: 10000,
+    enabled: authApi.isAuthenticated(),
+  });
+
+  const eps = perf?.events_per_second ?? null;
+  const errRate = perf?.error_rate ?? 0;
+
+  const status = eps === null ? 'unknown'
+    : errRate > 0.05 ? 'degraded'
+    : eps > 0 ? 'online'
+    : 'idle';
+
+  const cfg = {
+    online:   { dot: 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.8)]', label: 'Engine Online', text: 'text-emerald-400', animate: 'animate-pulse' },
+    idle:     { dot: 'bg-amber-400 shadow-[0_0_8px_rgba(245,158,11,0.8)]',   label: 'Engine Idle',   text: 'text-amber-400',   animate: '' },
+    degraded: { dot: 'bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.8)]',     label: 'Degraded',      text: 'text-rose-400',    animate: 'animate-pulse' },
+    unknown:  { dot: 'bg-slate-500',                                           label: 'Connecting…',   text: 'text-slate-400',   animate: '' },
+  }[status];
+
+  return (
+    <div className="mt-3 mx-2 mb-1 px-3 py-2 rounded-lg bg-slate-800/50 border border-slate-700/50 flex items-center gap-2.5">
+      <span className={`w-2 h-2 rounded-full shrink-0 ${cfg.dot} ${cfg.animate}`} />
+      <div className="flex-1 min-w-0">
+        <p className={`text-[11px] font-semibold ${cfg.text}`}>{cfg.label}</p>
+        {eps !== null && (
+          <p className="text-[10px] text-slate-500 font-mono">{eps.toFixed(1)} ev/s</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
 const Navigation = memo(function Navigation() {
+
   const location = useLocation();
   const [darkMode, setDarkMode] = useState(() => {
     if (typeof window !== 'undefined') {
@@ -94,6 +134,25 @@ const Navigation = memo(function Navigation() {
   }, [darkMode]);
 
   const user = authApi.getCurrentUser();
+
+  // Live open alert count for sidebar badge
+  const { data: sidebarAlertStats } = useQuery({
+    queryKey: ['sidebarAlertStats'],
+    queryFn: statsApi.alerts,
+    refetchInterval: 15000,
+    enabled: authApi.isAuthenticated() && authApi.canViewAlerts(),
+  });
+  const openAlertCount = (sidebarAlertStats?.by_status?.['open'] || 0) as number;
+  const criticalCount = (sidebarAlertStats?.by_severity?.['critical'] || 0) as number;
+
+  const roleColorMap: Record<string, string> = {
+    admin:    'bg-rose-500/20 text-rose-300 border-rose-500/30',
+    security: 'bg-orange-500/20 text-orange-300 border-orange-500/30',
+    analyst:  'bg-amber-500/20 text-amber-300 border-amber-500/30',
+    viewer:   'bg-slate-500/20 text-slate-300 border-slate-500/30',
+  };
+  const roleColor = user ? (roleColorMap[user.role] || roleColorMap.viewer) : roleColorMap.viewer;
+
 
   const navGroups = useMemo(() => [
     {
@@ -178,17 +237,18 @@ const Navigation = memo(function Navigation() {
         {/* User info */}
         {user && (
           <div className="mb-2 p-3 bg-slate-800/40 border border-slate-700/50 rounded-xl flex items-center gap-3 hover:bg-slate-800/60 transition-colors cursor-default">
-            <div className="w-10 h-10 rounded-full bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center text-white font-bold shadow-[0_0_10px_rgba(34,211,238,0.3)] shrink-0">
+            <div className="relative w-10 h-10 rounded-full bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center text-white font-bold shadow-[0_0_10px_rgba(34,211,238,0.3)] shrink-0">
               {user.username.slice(0, 2).toUpperCase()}
             </div>
-            <div className="overflow-hidden">
+            <div className="overflow-hidden flex-1 min-w-0">
               <p className="text-sm font-semibold text-white truncate">{user.username}</p>
-              <div className="mt-1 inline-block bg-cyan-500/10 text-cyan-400 px-2 py-0.5 text-[10px] uppercase tracking-wider rounded-full border border-cyan-500/20 font-medium">
+              <div className={`mt-1 inline-block px-2 py-0.5 text-[10px] uppercase tracking-wider rounded-full border font-bold ${roleColor}`}>
                 {user.role}
               </div>
             </div>
           </div>
         )}
+
 
         {/* Navigation Links */}
         <nav className="space-y-6 flex-1 mt-4">
@@ -205,9 +265,9 @@ const Navigation = memo(function Navigation() {
                       key={item.path}
                       to={item.path}
                       onClick={() => setIsMobileOpen(false)}
-                      className={`group relative flex items-center gap-3 px-4 py-2.5 transition-all duration-200 ${
+                      className={`group relative flex items-center gap-3 px-4 py-2.5 transition-all duration-200 rounded-lg ${
                         isActive
-                          ? 'bg-slate-800/30 text-white'
+                          ? 'bg-slate-800/50 text-white'
                           : 'text-slate-300 hover:bg-slate-800/50 hover:text-white'
                       }`}
                     >
@@ -215,7 +275,12 @@ const Navigation = memo(function Navigation() {
                         <div className="absolute left-0 top-0 bottom-0 w-1 bg-cyan-400 rounded-r shadow-[0_0_10px_rgba(34,211,238,0.5)]" />
                       )}
                       <item.icon className={`w-5 h-5 transition-colors duration-200 ${isActive ? 'text-cyan-400' : 'text-slate-400 group-hover:text-cyan-400'}`} />
-                      <span className="text-sm font-medium">{item.label}</span>
+                      <span className="text-sm font-medium flex-1">{item.label}</span>
+                      {item.path === '/alerts' && openAlertCount > 0 && (
+                        <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center ${ criticalCount > 0 ? 'bg-rose-500 text-white animate-pulse' : 'bg-slate-600 text-slate-200' }`}>
+                          {openAlertCount > 99 ? '99+' : openAlertCount}
+                        </span>
+                      )}
                     </Link>
                   );
                 })}
@@ -246,7 +311,11 @@ const Navigation = memo(function Navigation() {
             </button>
           )}
         </div>
+
+        {/* Live Engine Health Chip */}
+        <EngineHealthChip />
       </aside>
+
     </>
   );
 });

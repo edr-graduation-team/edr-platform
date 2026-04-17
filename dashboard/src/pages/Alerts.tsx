@@ -1248,8 +1248,9 @@ export default function Alerts() {
     }
 
     return (
+        <>
         <div className="relative flex flex-col min-h-[calc(100vh-2rem)] lg:min-h-[calc(100vh-1rem)] h-full -mx-4 sm:-mx-6 lg:-mx-8 -my-4 sm:-my-6 lg:-my-8 p-4 sm:p-6 lg:p-8 bg-slate-50 dark:bg-gradient-to-br dark:from-slate-900 dark:via-[#0b1120] dark:to-slate-900 transition-colors overflow-hidden">
-            {/* Background ambient glow effect for Alerts specific interface */}
+            {/* Background ambient glow */}
             <div className="absolute top-0 left-1/4 w-[800px] h-[500px] pointer-events-none -translate-y-1/2" style={{ background: 'radial-gradient(circle, rgba(6,182,212,0.08) 0%, transparent 70%)' }} />
 
             <div className="relative flex-1 flex flex-col min-h-0 space-y-4 lg:space-y-6 max-w-[1600px] mx-auto w-full">
@@ -1309,11 +1310,8 @@ export default function Alerts() {
                     onClear={() => setSelectedIds(new Set())}
                 />
 
-                {/* Split-pane: Table + Slide-over drawer */}
-                {/* overflow-clip instead of overflow-hidden: clips visual overflow but does NOT
-                    suppress scrolling on child elements that have their own overflow-y-auto */}
-                <div className="relative z-10 flex-1 flex min-h-0 gap-4" style={{ overflow: 'clip' }}>
-                <div className={`flex flex-col min-h-0 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700/50 rounded-2xl shadow-lg overflow-hidden transition-all duration-300 ${ selectedAlert ? 'w-full lg:w-[58%] xl:w-[62%]' : 'w-full' }`}>
+                {/* Alert table — always full width, panel is now a fixed overlay */}
+                <div className="relative z-10 flex-1 flex flex-col min-h-0 overflow-hidden bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700/50 rounded-2xl shadow-lg">
                     {isLoading ? (
                         <div className="p-4 flex-1 overflow-auto">
                             <SkeletonTable rows={10} columns={8} />
@@ -1494,46 +1492,73 @@ export default function Alerts() {
                     </div>
                 </div>
 
-                {/* Slide-over detail panel */}
-                {selectedAlert && (
-                    <div
-                        className="hidden lg:flex flex-col min-h-0 overflow-hidden w-full lg:w-[42%] xl:w-[38%] bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700/50 rounded-2xl shadow-xl"
-                        style={{ animation: 'slideInRight 0.2s ease-out' }}
-                    >
-                        {/* Panel header — fixed */}
-                        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-200 dark:border-slate-700/50 shrink-0 bg-slate-50/80 dark:bg-slate-900/60">
-                            <div className="flex items-center gap-2 min-w-0">
-                                <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${ selectedAlert.severity === 'critical' ? 'bg-rose-500' : selectedAlert.severity === 'high' ? 'bg-orange-500' : selectedAlert.severity === 'medium' ? 'bg-amber-400' : 'bg-slate-400' }`} />
-                                <span className="text-sm font-bold text-slate-800 dark:text-white truncate">{selectedAlert.rule_title}</span>
-                            </div>
-                            <button onClick={() => setSelectedAlert(null)} className="p-1.5 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors shrink-0 ml-3">
-                                <X className="w-4 h-4" />
-                            </button>
-                        </div>
-                        {/* Panel body — scrollable. flex-1 + min-h-0 lets it grow into remaining height */}
-                        <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden custom-scrollbar">
-                            <AlertDetailModal
-                                alert={selectedAlert}
-                                isOpen={false}
-                                onClose={() => setSelectedAlert(null)}
-                                onStatusChange={handleStatusChange}
-                                inlineMode
-                            />
-                        </div>
-                    </div>
-                )}
+            </div>{/* end inner flex-col */}
+        </div>{/* end outer page */}
 
-                {/* Mobile: keep modal for small screens */}
-                <div className="lg:hidden">
-                    <AlertDetailModal
-                        alert={selectedAlert}
-                        isOpen={!!selectedAlert}
-                        onClose={() => setSelectedAlert(null)}
-                        onStatusChange={handleStatusChange}
-                    />
+        {/* ── FIXED RIGHT-SIDE DRAWER ─────────────────────────────────────────────
+            position:fixed puts this completely outside the normal document flow.
+            No parent overflow:hidden can clip or suppress its scroll.          */}
+        {selectedAlert && (
+            <>
+                {/* Dim backdrop — clicking closes the drawer */}
+                <div
+                    className="fixed inset-0 z-40 bg-black/30 backdrop-blur-[2px]"
+                    onClick={() => setSelectedAlert(null)}
+                    style={{ animation: 'fadeIn 0.15s ease-out' }}
+                />
+
+                {/* Drawer panel */}
+                <div
+                    className="fixed right-0 top-0 bottom-0 z-50 w-full max-w-2xl flex flex-col bg-white dark:bg-slate-900 shadow-2xl border-l border-slate-200 dark:border-slate-700"
+                    style={{ animation: 'slideInRight 0.2s ease-out' }}
+                >
+                    {/* Header */}
+                    <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-700 shrink-0 bg-slate-50 dark:bg-slate-800/80">
+                        <div className="flex items-center gap-3 min-w-0">
+                            <span className={`w-3 h-3 rounded-full shrink-0 ${
+                                selectedAlert.severity === 'critical' ? 'bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.6)]' :
+                                selectedAlert.severity === 'high'     ? 'bg-orange-500 shadow-[0_0_8px_rgba(249,115,22,0.6)]' :
+                                selectedAlert.severity === 'medium'   ? 'bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.6)]' :
+                                'bg-slate-400'
+                            }`} />
+                            <div className="min-w-0">
+                                <p className="text-sm font-bold text-slate-900 dark:text-white truncate">{selectedAlert.rule_title}</p>
+                                <p className="text-[11px] text-slate-500 dark:text-slate-400 font-mono truncate mt-0.5">{selectedAlert.id}</p>
+                            </div>
+                        </div>
+                        <button
+                            onClick={() => setSelectedAlert(null)}
+                            className="shrink-0 ml-4 p-2 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition-colors"
+                            title="Close (Esc)"
+                        >
+                            <X className="w-5 h-5" />
+                        </button>
+                    </div>
+
+                    {/* Body — THIS IS THE SCROLLABLE AREA */}
+                    <div className="flex-1 overflow-y-auto" style={{ WebkitOverflowScrolling: 'touch' }}>
+                        <AlertDetailModal
+                            alert={selectedAlert}
+                            isOpen={false}
+                            onClose={() => setSelectedAlert(null)}
+                            onStatusChange={handleStatusChange}
+                            inlineMode
+                        />
+                    </div>
                 </div>
-                </div>
-            </div>
+            </>
+        )}
+
+        {/* Mobile modal */}
+        <div className="lg:hidden">
+            <AlertDetailModal
+                alert={selectedAlert}
+                isOpen={!!selectedAlert}
+                onClose={() => setSelectedAlert(null)}
+                onStatusChange={handleStatusChange}
+            />
         </div>
+        </>
     );
 }
+

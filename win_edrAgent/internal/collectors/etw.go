@@ -384,6 +384,7 @@ func (c *ETWCollector) processStart(pid, ppid uint32, eventImg, eventCmd string)
 		parentImage = fmt.Sprintf("pid:%d", ppid)
 	}
 	userSid, userName, isElevated, integrity := getPrivileges(pid)
+	sigStatus, sigIssuer := SignatureTrustClass(exePath)
 
 	evt := event.NewEvent(event.EventTypeProcess, event.SeverityLow, map[string]interface{}{
 		"action":           "process_creation",
@@ -398,6 +399,8 @@ func (c *ETWCollector) processStart(pid, ppid uint32, eventImg, eventCmd string)
 		"user_name":        userName,
 		"is_elevated":      isElevated,
 		"integrity_level":  integrity,
+		"signature_status": sigStatus,
+		"signature_issuer": sigIssuer,
 	})
 	c.send(evt)
 	c.logger.Infof("[ETW] Process START: pid=%d ppid=%d name=%s cmd=%s",
@@ -463,12 +466,15 @@ func (c *ETWCollector) baseline() {
 			cmd = info.x
 		}
 		sid, user, elev, integ := getPrivileges(pid)
+		snapSig, snapIss := SignatureTrustClass(info.x)
 		evt := event.NewEvent(event.EventTypeProcess, event.SeverityLow, map[string]interface{}{
 			"action": "snapshot", "pid": pid, "ppid": ppid,
 			"name": info.n, "executable": info.x, "command_line": cmd,
 			"parent_name": pinfo.n, "parent_executable": pinfo.x,
 			"user_sid": sid, "user_name": user,
 			"is_elevated": elev, "integrity_level": integ,
+			"signature_status": snapSig,
+			"signature_issuer": snapIss,
 		})
 		c.send(evt)
 		if windows.Process32Next(snap, &e) != nil {

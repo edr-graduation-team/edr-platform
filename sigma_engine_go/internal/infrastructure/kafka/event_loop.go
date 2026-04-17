@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/edr-platform/sigma-engine/internal/analytics"
 	"github.com/edr-platform/sigma-engine/internal/application/alert"
 	"github.com/edr-platform/sigma-engine/internal/application/baselines"
 	"github.com/edr-platform/sigma-engine/internal/application/detection"
@@ -173,6 +174,10 @@ type EventLoop struct {
 	// If nil, alerts are forwarded with RiskScore=0 (no context enrichment).
 	riskScorer scoring.RiskScorer
 
+	// alertCorrelator records time-decayed same-rule / time-window edges between
+	// consecutive alerts (in-memory). If nil, correlation is skipped.
+	alertCorrelator *analytics.CorrelationManager
+
 	// baselineAggregator records process events for UEBA behavioral profiling.
 	// Fire-and-forget: it enqueues into a buffered channel and never blocks.
 	// If nil, behavioral baseline aggregation is skipped (no UEBA).
@@ -240,6 +245,12 @@ func (el *EventLoop) SetLineageCache(lc cache.LineageCache) {
 // Call this before Start(). When nil, alerts are emitted with RiskScore=0.
 func (el *EventLoop) SetRiskScorer(rs scoring.RiskScorer) {
 	el.riskScorer = rs
+}
+
+// SetCorrelationManager injects an in-memory alert correlator (same-rule and
+// time-based chain edges). Call before Start(). Nil disables correlation.
+func (el *EventLoop) SetCorrelationManager(m *analytics.CorrelationManager) {
+	el.alertCorrelator = m
 }
 
 // SetBaselineAggregator injects a BaselineAggregator for UEBA behavioral profiling.
@@ -322,9 +333,9 @@ func (el *EventLoop) detectionWorker(ctx context.Context, workerID int) {
 // processOneEvent runs detection on a single event with panic isolation.
 //
 // Execution order:
-//  1. Hydrate the lineage cache unconditionally for process events  ← NEW
+//  1. Hydrate the lineage cache for process events (when configured)
 //  2. Run Sigma rule evaluation (DetectAggregated)
-//  3. If matched → generate alert → push to suppression + alertChan
+//  3. If matched → generate alert → risk score → correlate → suppression → alertChan
 func (el *EventLoop) processOneEvent(event *domain.LogEvent) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -404,6 +415,12 @@ func (el *EventLoop) processOneEvent(event *domain.LogEvent) {
 				}
 			}
 			// ─────────────────────────────────────────────────────────────────────
+
+			if el.alertCorrelator != nil {
+				if rels := el.alertCorrelator.CorrelateAlert(baseAlert); len(rels) > 0 {
+					logger.Debugf("Correlations for alert %s: %d edge(s)", baseAlert.ID, len(rels))
+				}
+			}
 
 			// S5 FIX: Include content hash in suppression key so distinct attacks
 			// on the same agent from the same rule are NOT suppressed.

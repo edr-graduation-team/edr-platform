@@ -18,6 +18,7 @@ import (
 	"github.com/edr-platform/sigma-engine/internal/application/detection"
 	"github.com/edr-platform/sigma-engine/internal/application/mapping"
 	"github.com/edr-platform/sigma-engine/internal/application/rules"
+	"github.com/edr-platform/sigma-engine/internal/analytics"
 	"github.com/edr-platform/sigma-engine/internal/application/scoring"
 	"github.com/edr-platform/sigma-engine/internal/domain"
 	"github.com/edr-platform/sigma-engine/internal/handlers"
@@ -212,6 +213,16 @@ func main() {
 		}
 	}
 	apiServer = handlers.NewServer(apiCfg, ruleRepo, alertRepo, auditLogger, cfg.RiskScoring.RiskLevels)
+	// Alert correlation (Kafka EventLoop + REST API); optional PostgreSQL edge persistence + cache warm-start.
+	corrMgr := analytics.NewCorrelationManager()
+	if dbPool != nil {
+		corrRepo := database.NewCorrelationRepository(dbPool.Pool())
+		corrMgr.SetPersistence(analytics.NewPostgresEdgePersistence(corrRepo))
+		if err := corrMgr.Bootstrap(ctx); err != nil {
+			logger.Warnf("Correlation bootstrap: %v", err)
+		}
+	}
+	apiServer.WireCorrelationAPI(corrMgr)
 	go func() {
 		if err := apiServer.Start(); err != nil && err != http.ErrServerClosed {
 			logger.Warnf("REST API server error: %v", err)
@@ -294,6 +305,9 @@ func main() {
 		// Inject RiskScorer — computes context-aware score after every alert is generated.
 		// Must be set BEFORE Start() for the same race-condition reason.
 		eventLoop.SetRiskScorer(riskScorer)
+
+		// Inject CorrelationManager — time-decayed edges for same-rule / time-window chains.
+		eventLoop.SetCorrelationManager(corrMgr)
 
 		// Inject BaselineAggregator — records process events for UEBA behavioral profiling.
 		if baselineAggregator != nil {

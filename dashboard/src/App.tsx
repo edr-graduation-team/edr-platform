@@ -27,7 +27,6 @@ const AuditLogs = lazy(() => import('./pages/AuditLogs'));
 const EnrollmentTokens = lazy(() => import('./pages/EnrollmentTokens'));
 const ActionCenter = lazy(() => import('./pages/ActionCenter'));
 const AgentDeployment = lazy(() => import('./pages/AgentDeployment'));
-const EventsExplorer = lazy(() => import('./pages/EventsExplorer'));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -167,7 +166,6 @@ const Navigation = memo(function Navigation() {
       title: 'SECURITY',
       items: [
         ...(authApi.canViewAlerts()     ? [{ path: '/alerts', icon: AlertTriangle, label: 'Alerts' }] : []),
-        ...(authApi.canViewAlerts()     ? [{ path: '/events', icon: Activity, label: 'Event Explorer' }] : []),
         ...(authApi.canViewEndpoints()  ? [{ path: '/endpoints', icon: Monitor, label: 'Endpoints' }] : []),
         ...(authApi.canViewAlerts()     ? [{ path: '/endpoint-risk', icon: TrendingUp, label: 'Risk Intelligence' }] : []),
         ...(authApi.canViewAlerts()     ? [{ path: '/threats', icon: Target, label: 'Threats' }] : []),
@@ -367,15 +365,6 @@ function AppRoutes() {
             <Route path="/alerts" element={
               <ProtectedRoute roles={['admin', 'security', 'analyst', 'operations', 'viewer']}>
                 <Alerts />
-              </ProtectedRoute>
-            } />
-
-            {/* Event Explorer: alerts:read → all roles */}
-            <Route path="/events" element={
-              <ProtectedRoute roles={['admin', 'security', 'analyst', 'operations', 'viewer']}>
-                <Suspense fallback={<PageLoader />}>
-                  <EventsExplorer />
-                </Suspense>
               </ProtectedRoute>
             } />
 

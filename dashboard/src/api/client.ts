@@ -14,7 +14,7 @@ const envOrDefault = (envVal: string | undefined, fallback: string): string => {
 const config = {
     sigmaEngineUrl: envOrDefault(import.meta.env.VITE_API_URL, 'http://localhost:8080'),
     connectionManagerUrl: envOrDefault(import.meta.env.VITE_CONNECTION_MANAGER_URL, 'http://localhost:8082'),
-    wsUrl: envOrDefault(import.meta.env.VITE_WS_URL, ''),
+    wsUrl: envOrDefault(import.meta.env.VITE_WS_URL, 'ws://localhost:8080'),
 };
 
 // Create axios instance for Sigma Engine
@@ -739,17 +739,21 @@ export function createAlertStream(
     onMessage: (alert: Alert) => void,
     filters?: { severity?: string[]; agent_id?: string; rule_id?: string }
 ) {
-    // Build WebSocket URL: in Docker mode (empty config), use current browser origin
-    let wsUrl = config.wsUrl;
-    if (!wsUrl) {
-        if (config.sigmaEngineUrl) {
-            // Local dev: replace http(s) with ws(s)
-            wsUrl = config.sigmaEngineUrl.replace(/^http/, 'ws') + '/api/v1/sigma/alerts/stream';
-        } else {
-            // Docker/nginx mode: derive from current page origin
-            const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            wsUrl = `${proto}//${window.location.host}/api/v1/sigma/alerts/stream`;
-        }
+    // Build WebSocket URL
+    // VITE_WS_URL is the base (e.g. ws://host:port) — always append the stream path.
+    // If not set, derive from sigmaEngineUrl or fall back to same-origin.
+    let wsBase = config.wsUrl;
+    let wsUrl: string;
+    if (wsBase) {
+        // Strip any trailing slash then add the stream endpoint
+        wsUrl = wsBase.replace(/\/$/, '') + '/api/v1/sigma/alerts/stream';
+    } else if (config.sigmaEngineUrl) {
+        // Local dev: replace http(s) with ws(s)
+        wsUrl = config.sigmaEngineUrl.replace(/^http/, 'ws') + '/api/v1/sigma/alerts/stream';
+    } else {
+        // Docker/nginx mode: derive from current page origin
+        const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        wsUrl = `${proto}//${window.location.host}/api/v1/sigma/alerts/stream`;
     }
 
     let ws: WebSocket;
@@ -793,9 +797,17 @@ export function createAlertStream(
             console.error('WebSocket error:', error);
         };
 
-        ws.onclose = () => {
+        ws.onclose = (event) => {
             console.log('WebSocket disconnected');
             clearInterval(pingInterval);
+
+            // 404 = endpoint not yet implemented on server — don't spam reconnects
+            // (close code 1006 = abnormal closure, which we get for 404 handshake failures)
+            const isNotFound = event.code === 1006 && reconnectAttempts === 0;
+            if (isNotFound) {
+                console.warn('WebSocket stream endpoint returned 404 — real-time alerts disabled (server not implemented yet)');
+                return;
+            }
 
             // Auto-reconnect with exponential backoff
             if (reconnectAttempts < maxReconnectAttempts) {

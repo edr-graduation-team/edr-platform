@@ -1,11 +1,11 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { authApi } from '../api/client';
-import React, { useState, useRef, useEffect } from 'react';
-import { createPortal } from 'react-dom';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Link } from 'react-router-dom';
 import {
     Search, Monitor, Wifi, WifiOff, AlertTriangle, ChevronDown,
     Play, Shield, FileX, Folder, RefreshCw, X, Check, Clock, Loader2, Power, ShieldAlert, Square, Zap,
-    LayoutGrid, List
+    LayoutGrid, List, PanelLeft, Building2, Layers, UserPlus
 } from 'lucide-react';
 import {
     agentsApi,
@@ -97,165 +97,6 @@ const OSIcon = React.memo(function OSIcon({ os }: { os: string }) {
     };
     return <span className="text-lg">{icons[os?.toLowerCase()] || '💻'}</span>;
 });
-
-// Quick Actions Dropdown — uses React Portal to escape all overflow clipping
-function QuickActionsDropdown({
-    agent,
-    onCommand
-}: {
-    agent: Agent;
-    onCommand: (command: CommandType) => void;
-}) {
-    const [isOpen, setIsOpen] = useState(false);
-    const [menuPos, setMenuPos] = useState({ top: 0, left: 0 });
-    const btnRef = useRef<HTMLButtonElement>(null);
-    const menuRef = useRef<HTMLDivElement>(null);
-    const effectiveStatus = getEffectiveStatus(agent);
-
-    const availableCommands: CommandType[] = [
-        // Network isolation (context-aware)
-        ...(agent.is_isolated ? ['restore_network' as CommandType] : ['isolate_network' as CommandType]),
-        // Forensics & scanning (online only)
-        'kill_process',
-        'quarantine_file',
-        'collect_logs',
-        'scan_memory',
-        // Agent service control
-        'restart_agent',           // restart the EDR service (stop → start)
-        'stop_agent',              // stop the EDR service only
-        'start_agent',             // start/recover a stopped EDR service
-        // OS-level control
-        'restart_machine',
-        'shutdown_machine',
-    ];
-
-    const handleToggle = () => {
-        if (!isOpen && btnRef.current) {
-            const rect = btnRef.current.getBoundingClientRect();
-            setMenuPos({
-                top: rect.bottom + 4,
-                left: Math.max(8, rect.right - 224), // 224px = w-56
-            });
-        }
-        setIsOpen(!isOpen);
-    };
-
-    // Close on scroll OUTSIDE the dropdown menu (page scroll = misalignment)
-    useEffect(() => {
-        if (!isOpen) return;
-        const handleScroll = (e: Event) => {
-            // Allow scrolling inside the dropdown menu itself
-            if (menuRef.current && menuRef.current.contains(e.target as Node)) {
-                return;
-            }
-            setIsOpen(false);
-        };
-        window.addEventListener('scroll', handleScroll, true);
-        return () => window.removeEventListener('scroll', handleScroll, true);
-    }, [isOpen]);
-
-    const menuContent = isOpen
-        ? createPortal(
-            <>
-                {/* Backdrop */}
-                <div
-                    style={{ position: 'fixed', inset: 0, zIndex: 9998 }}
-                    onClick={() => setIsOpen(false)}
-                />
-
-                {/* Menu — rendered on document.body via portal */}
-                <div
-                    ref={menuRef}
-                    style={{
-                        position: 'fixed',
-                        top: menuPos.top,
-                        left: menuPos.left,
-                        zIndex: 9999,
-                        width: 224,
-                    }}
-                    className="bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 py-1 max-h-80 overflow-y-auto"
-                >
-                    {availableCommands.map((cmd) => {
-                        const def = COMMAND_DEFINITIONS[cmd];
-                        // ── State Matrix ────────────────────────────────────────────────
-                        //  online/degraded  : Machine ON  + Agent RUNNING     → Stop, Restart enabled; Start disabled
-                        //  suspended        : Machine ON  + Agent STOPPED     → Start enabled; Stop, Restart disabled
-                        //  offline          : Machine OFF / unreachable        → ALL agent actions disabled
-                        //  pending          : Agent registering                → ALL agent actions disabled
-                        const agentRunning = effectiveStatus === 'online' || effectiveStatus === 'degraded';
-                        const agentSuspended = effectiveStatus === 'suspended';
-                        const machineOnline = effectiveStatus !== 'offline' && effectiveStatus !== 'pending';
-
-                        const isDisabled = (c: CommandType): boolean => {
-                            switch (c) {
-                                case 'start_agent':
-                                    // Enable ONLY when agent is deliberately stopped (machine still on)
-                                    return !agentSuspended;
-                                case 'stop_agent':
-                                case 'restart_agent':
-                                    // Enable ONLY when agent is actively running
-                                    return !agentRunning;
-                                case 'restart_machine':
-                                case 'shutdown_machine':
-                                    // Enable whenever machine is reachable (even if agent is suspended)
-                                    return !machineOnline;
-                                case 'restore_network':
-                                    return false; // always enabled
-                                default:
-                                    // Forensics / scan / isolation: require agent running
-                                    return !agentRunning;
-                            }
-                        };
-
-                        // Visual separator before OS-level commands
-                        const showSeparator = cmd === 'restart_machine';
-
-                        return (
-                            <React.Fragment key={cmd}>
-                                {showSeparator && (
-                                    <div className="mx-4 my-1 border-t border-gray-200 dark:border-gray-600" />
-                                )}
-                                <button
-                                    onClick={() => {
-                                        setIsOpen(false);
-                                        onCommand(cmd);
-                                    }}
-                                    disabled={isDisabled(cmd)}
-                                    className="w-full flex items-center gap-3 px-4 py-2.5 text-left hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                                >
-                                    <def.icon className={`w-4 h-4 flex-shrink-0 ${def.color}`} />
-                                    <div className="min-w-0">
-                                        <p className="text-sm font-medium text-gray-900 dark:text-white">
-                                            {def.label}
-                                        </p>
-                                        <p className="text-xs text-gray-500 dark:text-gray-400">
-                                            {def.description}
-                                        </p>
-                                    </div>
-                                </button>
-                            </React.Fragment>
-                        );
-                    })}
-                </div>
-            </>,
-            document.body,
-        )
-        : null;
-
-    return (
-        <>
-            <button
-                ref={btnRef}
-                onClick={handleToggle}
-                className="btn btn-secondary flex items-center gap-1 text-sm py-1.5 px-3"
-            >
-                Actions
-                <ChevronDown className={`w-4 h-4 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
-            </button>
-            {menuContent}
-        </>
-    );
-}
 
 // Command Execution Modal
 function CommandExecutionModal({
@@ -640,6 +481,42 @@ function getEffectiveStatus(agent: Agent): Agent['status'] {
     return agent.status;
 }
 
+function buildAvailableCommands(agent: Agent): CommandType[] {
+    return [
+        ...(agent.is_isolated ? (['restore_network'] as CommandType[]) : (['isolate_network'] as CommandType[])),
+        'kill_process',
+        'quarantine_file',
+        'collect_logs',
+        'scan_memory',
+        'restart_agent',
+        'stop_agent',
+        'start_agent',
+        'restart_machine',
+        'shutdown_machine',
+    ];
+}
+
+function isCommandDisabledForAgent(agent: Agent, cmd: CommandType): boolean {
+    const effectiveStatus = getEffectiveStatus(agent);
+    const agentRunning = effectiveStatus === 'online' || effectiveStatus === 'degraded';
+    const agentSuspended = effectiveStatus === 'suspended';
+    const machineOnline = effectiveStatus !== 'offline' && effectiveStatus !== 'pending';
+    switch (cmd) {
+        case 'start_agent':
+            return !agentSuspended;
+        case 'stop_agent':
+        case 'restart_agent':
+            return !agentRunning;
+        case 'restart_machine':
+        case 'shutdown_machine':
+            return !machineOnline;
+        case 'restore_network':
+            return false;
+        default:
+            return !agentRunning;
+    }
+}
+
 // =============================================================================
 // Inline Expandable Agent Detail Panel — appears BELOW the clicked row
 // =============================================================================
@@ -964,6 +841,20 @@ function DetailRow({ label, value, mono }: { label: string; value: React.ReactNo
     );
 }
 
+function dmProfile(agent: Agent): string {
+    return agent.tags?.profile ?? agent.metadata?.profile ?? '—';
+}
+function dmCustomer(agent: Agent): string {
+    return agent.tags?.customer ?? agent.metadata?.customer ?? '—';
+}
+function dmLastUser(agent: Agent): string {
+    return agent.metadata?.logged_in_user ?? agent.tags?.logged_in_user ?? '—';
+}
+function dmComponentsLabel(agent: Agent): string {
+    const eff = getEffectiveStatus(agent);
+    return eff === 'online' || eff === 'degraded' ? 'EDR' : '—';
+}
+
 // Main Endpoints Page
 export default function Endpoints() {
     const queryClient = useQueryClient();
@@ -977,9 +868,21 @@ export default function Endpoints() {
         search: '',
     });
     const [viewMode, setViewMode] = useState<'table' | 'grid'>('table');
-
+    const [treeVisible, setTreeVisible] = useState(false);
+    const [treeSearch, setTreeSearch] = useState('');
+    const [selectedGroupId, setSelectedGroupId] = useState<string>('g1');
+    const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
 
     const debouncedSearch = useDebounce(filters.search, 300);
+
+    const toggleSelectOne = (id: string) => {
+        setSelectedIds((prev) => {
+            const next = new Set(prev);
+            if (next.has(id)) next.delete(id);
+            else next.add(id);
+            return next;
+        });
+    };
 
     // Fetch agents
     const { data, isLoading, error } = useQuery({
@@ -998,10 +901,34 @@ export default function Endpoints() {
     const agents = data?.data || [];
     const total = data?.pagination?.total || 0;
 
+    const toggleSelectAll = () => {
+        setSelectedIds((prev) => {
+            if (prev.size === agents.length && agents.length > 0) return new Set();
+            return new Set(agents.map((a) => a.id));
+        });
+    };
+
+    useEffect(() => {
+        const valid = new Set(agents.map((a) => a.id));
+        setSelectedIds((prev) => {
+            const next = new Set<string>();
+            prev.forEach((id) => {
+                if (valid.has(id)) next.add(id);
+            });
+            return next;
+        });
+    }, [agents]);
+
     const handleCommand = (agent: Agent, command: CommandType) => {
         setSelectedAgent(agent);
         setSelectedCommand(command);
     };
+
+    const toolbarTargetAgent = useMemo(() => {
+        if (selectedIds.size !== 1) return null;
+        const id = [...selectedIds][0];
+        return agents.find((a) => a.id === id) ?? null;
+    }, [selectedIds, agents]);
 
     if (error) {
         return (
@@ -1025,125 +952,258 @@ export default function Endpoints() {
     }
 
     return (
-        <div className="relative flex flex-col min-h-[calc(100vh-2rem)] lg:min-h-[calc(100vh-1rem)] h-full -mx-4 sm:-mx-6 lg:-mx-8 -my-4 sm:-my-6 lg:-my-8 p-4 sm:p-6 lg:p-8 bg-slate-50 dark:bg-gradient-to-br dark:from-slate-900 dark:via-[#0b1120] dark:to-slate-900 transition-colors overflow-hidden">
+        <div
+            data-section-id="management-devices-root"
+            className="relative flex flex-col min-h-[calc(100vh-2rem)] lg:min-h-[calc(100vh-1rem)] h-full -mx-4 sm:-mx-6 lg:-mx-8 -my-4 sm:-my-6 lg:-my-8 p-4 sm:p-6 lg:p-8 bg-slate-50 dark:bg-gradient-to-br dark:from-slate-900 dark:via-[#0b1120] dark:to-slate-900 transition-colors overflow-hidden"
+        >
             {/* Background ambient glow effect for Endpoints interface */}
             <div className="absolute top-1/4 right-1/4 w-[600px] h-[600px] pointer-events-none -translate-y-1/2 translate-x-1/3" style={{ background: 'radial-gradient(circle, rgba(59,130,246,0.08) 0%, transparent 70%)' }} />
             
-            <div className="relative flex-1 flex flex-col min-h-0 space-y-4 lg:space-y-6 max-w-[1600px] mx-auto w-full">
-                <div className="flex items-center justify-between shrink-0">
+            <div className="relative flex-1 flex flex-col min-h-0 max-w-[1800px] mx-auto w-full space-y-4 lg:space-y-5">
+                <div className="flex flex-wrap items-center justify-between gap-3 shrink-0">
                     <div>
-                        <h1 className="text-3xl font-bold text-slate-900 dark:text-white tracking-tight">Endpoints</h1>
-                        <p className="text-sm text-slate-500 mt-1">Fleet visibility, lifecycle, and response controls</p>
+                        <h1 className="text-2xl sm:text-3xl font-bold text-slate-900 dark:text-white tracking-tight">Device management</h1>
+                        <p className="text-sm text-slate-500 mt-1">Fleet list, grouping shell, and actions (OpenEDR / Xcitium-style layout)</p>
                     </div>
-                {agents.length > 0 && (() => {
-                    // Recompute stats from agent list using effective status
-                    let onlineCount = 0, offlineCount = 0, degradedCount = 0;
-                    agents.forEach((a) => {
-                        const eff = getEffectiveStatus(a);
-                        if (eff === 'online') onlineCount++;
-                        else if (eff === 'degraded') degradedCount++;
-                        else offlineCount++;
-                    });
-                    return (
-                        <div className="flex items-center gap-3">
-                            <span className="flex items-center gap-2 px-3 py-1.5 bg-green-500/10 dark:bg-green-500/20 text-green-700 dark:text-green-400 border border-green-500/20 rounded-full text-xs font-bold uppercase tracking-wider shadow-[0_0_10px_rgba(34,197,94,0.1)]">
-                                <span className="w-1.5 h-1.5 rounded-full bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.8)]" />
-                                {onlineCount} Online
-                            </span>
-                            <span className="flex items-center gap-2 px-3 py-1.5 bg-slate-500/10 dark:bg-slate-500/20 text-slate-600 dark:text-slate-400 border border-slate-500/20 rounded-full text-xs font-bold uppercase tracking-wider">
-                                <span className="w-1.5 h-1.5 rounded-full bg-slate-400" />
-                                {offlineCount} Offline
-                            </span>
-                            <span className="flex items-center gap-2 px-3 py-1.5 bg-amber-500/10 dark:bg-amber-500/20 text-amber-700 dark:text-amber-400 border border-amber-500/20 rounded-full text-xs font-bold uppercase tracking-wider shadow-[0_0_10px_rgba(245,158,11,0.1)]">
-                                <span className="w-1.5 h-1.5 rounded-full bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.8)] animate-pulse" />
-                                {degradedCount} Degraded
-                            </span>
-                        </div>
-                    );
-                })()}
-            </div>
-
-            {/* Filters */}
-            <div className="relative z-20 shrink-0 bg-white dark:bg-slate-900/50 border border-slate-200/80 dark:border-slate-700/50 rounded-xl p-4 shadow-sm">
-                <div className="flex flex-wrap gap-4 items-end">
-                    <div className="flex-1 sm:flex-none relative">
-                        <label className="block text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1.5">
-                            Status
-                        </label>
-                        <div className="relative">
-                            <select
-                                value={filters.status}
-                                onChange={(e) => setFilters({ ...filters, status: e.target.value })}
-                                className="w-full sm:w-48 appearance-none bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 rounded-lg pl-3 pr-10 py-2 focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500 text-sm transition-colors cursor-pointer"
-                            >
-                                <option value="">All Statuses</option>
-                                <option value="online">Online</option>
-                                <option value="offline">Offline</option>
-                                <option value="degraded">Degraded</option>
-                                <option value="pending">Pending</option>
-                            </select>
-                            <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-slate-500">
-                                <ChevronDown className="w-4 h-4" />
+                    {agents.length > 0 && (() => {
+                        let onlineCount = 0, offlineCount = 0, degradedCount = 0;
+                        agents.forEach((a) => {
+                            const eff = getEffectiveStatus(a);
+                            if (eff === 'online') onlineCount++;
+                            else if (eff === 'degraded') degradedCount++;
+                            else offlineCount++;
+                        });
+                        return (
+                            <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+                                <span className="flex items-center gap-2 px-3 py-1.5 bg-green-500/10 dark:bg-green-500/20 text-green-700 dark:text-green-400 border border-green-500/20 rounded-full text-xs font-bold uppercase tracking-wider">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
+                                    {onlineCount} Online
+                                </span>
+                                <span className="flex items-center gap-2 px-3 py-1.5 bg-slate-500/10 dark:bg-slate-500/20 text-slate-600 dark:text-slate-400 border border-slate-500/20 rounded-full text-xs font-bold uppercase tracking-wider">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-slate-400" />
+                                    {offlineCount} Offline
+                                </span>
+                                <span className="flex items-center gap-2 px-3 py-1.5 bg-amber-500/10 dark:bg-amber-500/20 text-amber-700 dark:text-amber-400 border border-amber-500/20 rounded-full text-xs font-bold uppercase tracking-wider">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+                                    {degradedCount} Degraded
+                                </span>
                             </div>
-                        </div>
-                    </div>
-                    
-                    <div className="flex-1 sm:flex-none relative">
-                        <label className="block text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1.5">
-                            OS Type
-                        </label>
-                        <div className="relative">
-                            <select
-                                value={filters.os_type}
-                                onChange={(e) => setFilters({ ...filters, os_type: e.target.value })}
-                                className="w-full sm:w-48 appearance-none bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 rounded-lg pl-3 pr-10 py-2 focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500 text-sm transition-colors cursor-pointer"
-                            >
-                                <option value="">All Platforms</option>
-                                <option value="windows">Windows</option>
-                                <option value="linux">Linux</option>
-                                <option value="macos">macOS</option>
-                            </select>
-                            <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-slate-500">
-                                <ChevronDown className="w-4 h-4" />
-                            </div>
-                        </div>
-                    </div>
-
-                    <div className="flex-1 min-w-[200px]">
-                        <label className="block text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1.5">
-                            Search
-                        </label>
-                        <div className="relative">
-                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                            <input
-                                type="text"
-                                placeholder="Search by hostname or IP..."
-                                value={filters.search}
-                                onChange={(e) => setFilters({ ...filters, search: e.target.value })}
-                                className="w-full bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200 rounded-lg pl-9 pr-4 py-2 focus:outline-none focus:ring-2 focus:ring-primary-500/50 focus:border-primary-500 text-sm transition-colors"
-                            />
-                        </div>
-                    </div>
+                        );
+                    })()}
                 </div>
-            </div>
 
-            {/* View toggle */}
-            <div className="flex items-center justify-end gap-2 shrink-0">
-                <button
-                    onClick={() => setViewMode('table')}
-                    className={`p-2 rounded-lg transition-all ${ viewMode === 'table' ? 'bg-cyan-500/20 text-cyan-400' : 'text-slate-400 hover:bg-slate-800/40 hover:text-slate-200' }`}
-                    title="Table View"
-                ><List className="w-4 h-4" /></button>
-                <button
-                    onClick={() => setViewMode('grid')}
-                    className={`p-2 rounded-lg transition-all ${ viewMode === 'grid' ? 'bg-cyan-500/20 text-cyan-400' : 'text-slate-400 hover:bg-slate-800/40 hover:text-slate-200' }`}
-                    title="Card Grid View"
-                ><LayoutGrid className="w-4 h-4" /></button>
-            </div>
+                <div
+                    data-section-id="dm-structure"
+                    className="flex flex-1 min-h-0 rounded-xl border border-slate-200/90 dark:border-slate-700/60 bg-white dark:bg-slate-900/35 overflow-hidden shadow-sm"
+                >
+                    {treeVisible && (
+                        <aside className="w-[min(100%,260px)] sm:w-[260px] shrink-0 border-r border-slate-200 dark:border-slate-700 flex flex-col bg-slate-50/90 dark:bg-slate-950/80">
+                            <div className="p-3 border-b border-slate-200 dark:border-slate-700 space-y-2">
+                                <div className="relative">
+                                    <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                                    <input
+                                        type="text"
+                                        placeholder="Search group name"
+                                        value={treeSearch}
+                                        onChange={(e) => setTreeSearch(e.target.value)}
+                                        className="w-full pl-9 pr-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-primary-500/40"
+                                    />
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setSelectedGroupId('g1');
+                                        setFilters((f) => ({ ...f, search: '' }));
+                                    }}
+                                    className="w-full flex items-center gap-2 px-2 py-1.5 text-xs font-medium rounded-lg border border-dashed border-slate-300 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800/80"
+                                >
+                                    <Layers className="w-3.5 h-3.5 opacity-70" />
+                                    Show all
+                                </button>
+                            </div>
+                            <div className="flex-1 overflow-y-auto custom-scrollbar p-2 text-sm">
+                                {(!treeSearch.trim() || 'default tenant'.includes(treeSearch.trim().toLowerCase())) && (
+                                    <div className="mb-1">
+                                        <div className="flex items-center gap-2 px-2 py-1.5 text-slate-700 dark:text-slate-200 font-medium">
+                                            <Building2 className="w-4 h-4 shrink-0 text-slate-500" />
+                                            <span className="truncate">Default tenant</span>
+                                        </div>
+                                        {(!treeSearch.trim() || 'all endpoints'.includes(treeSearch.trim().toLowerCase()) || 'default'.includes(treeSearch.trim().toLowerCase())) && (
+                                            <div className="pl-3 ml-1.5 border-l border-slate-200 dark:border-slate-700">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setSelectedGroupId('g1')}
+                                                    className={`w-full text-left flex items-center gap-2 px-2 py-1.5 rounded-md transition-colors ${selectedGroupId === 'g1' ? 'bg-primary-500/15 text-primary-700 dark:text-primary-300' : 'hover:bg-slate-200/60 dark:hover:bg-slate-800'}`}
+                                                >
+                                                    <Folder className="w-4 h-4 shrink-0 text-slate-500" />
+                                                    <span className="truncate">All endpoints</span>
+                                                </button>
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
+                        </aside>
+                    )}
 
+                    <div className="flex-1 flex flex-col min-w-0 min-h-0">
+                        <div className="flex items-stretch border-b border-slate-200 dark:border-slate-700 bg-slate-50/80 dark:bg-slate-900/50">
+                            <button
+                                type="button"
+                                onClick={() => setTreeVisible((v) => !v)}
+                                className={`shrink-0 px-2.5 flex items-center justify-center border-r border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 ${treeVisible ? 'text-[#f19637]' : 'text-slate-500'}`}
+                                title={treeVisible ? 'Hide tree' : 'Show tree'}
+                            >
+                                <PanelLeft className="w-4 h-4" />
+                            </button>
+                            <nav className="flex items-end gap-1 px-1 min-w-0 overflow-x-auto">
+                                <Link
+                                    to="/management/profiles"
+                                    className="shrink-0 px-3 py-2.5 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white border-b-2 border-transparent"
+                                >
+                                    Group management
+                                </Link>
+                                <span className="shrink-0 px-3 py-2.5 text-sm font-semibold text-slate-900 dark:text-white border-b-2 border-[#f19637]">
+                                    Device management
+                                </span>
+                            </nav>
+                        </div>
 
-            {/* Agents View */}
-            <div className="relative z-10 flex-1 flex flex-col min-h-0 overflow-hidden">
+                        <div
+                            className="sticky top-0 z-20 flex flex-wrap items-center gap-x-1 gap-y-1 px-2 py-2 border-b border-slate-700/40 shadow-[0_1px_0_rgba(0,0,0,0.06)] overflow-x-auto custom-scrollbar"
+                            style={{ background: 'var(--xc-nav-bg, #0a043d)' }}
+                        >
+                            <Link
+                                to="/deploy"
+                                className="inline-flex items-center gap-1.5 px-2 py-1.5 rounded text-[11px] text-white/95 hover:bg-white/10 border border-white/15 whitespace-nowrap"
+                            >
+                                <UserPlus className="w-3.5 h-3.5 shrink-0" />
+                                Enroll device
+                            </Link>
+                            {authApi.canExecuteCommands() && (() => {
+                                // Always render action buttons — use a generic command list when no device is selected
+                                const genericCommands: CommandType[] = [
+                                    'isolate_network', 'kill_process', 'quarantine_file',
+                                    'collect_logs', 'scan_memory', 'restart_agent',
+                                    'stop_agent', 'start_agent', 'restart_machine', 'shutdown_machine',
+                                ];
+                                const cmds = toolbarTargetAgent
+                                    ? buildAvailableCommands(toolbarTargetAgent)
+                                    : genericCommands;
+                                return cmds.map((cmd) => {
+                                    const def = COMMAND_DEFINITIONS[cmd];
+                                    const Icon = def.icon;
+                                    // Disabled if: no device selected OR device is not eligible
+                                    const disabled = !toolbarTargetAgent || isCommandDisabledForAgent(toolbarTargetAgent, cmd);
+                                    const showSeparator = cmd === 'restart_machine';
+                                    return (
+                                        <React.Fragment key={cmd}>
+                                            {showSeparator && (
+                                                <div
+                                                    className="hidden sm:block w-px h-6 bg-white/25 mx-0.5 shrink-0 self-center"
+                                                    aria-hidden
+                                                />
+                                            )}
+                                            <button
+                                                type="button"
+                                                disabled={disabled}
+                                                title={
+                                                    !toolbarTargetAgent
+                                                        ? `${def.label} — Select an online device first`
+                                                        : `${def.label} — ${def.description}`
+                                                }
+                                                onClick={() => toolbarTargetAgent && handleCommand(toolbarTargetAgent, cmd)}
+                                                className="inline-flex items-center gap-1 px-2 py-1.5 rounded text-[11px] text-white/90 border border-white/10 disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap hover:bg-white/10"
+                                            >
+                                                <Icon className={`w-3.5 h-3.5 shrink-0 ${def.color}`} />
+                                                <span className="max-xl:hidden">{def.label}</span>
+                                            </button>
+                                        </React.Fragment>
+                                    );
+                                });
+                            })()}
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-2 px-3 py-2 border-b border-slate-200 dark:border-slate-700 bg-slate-50/90 dark:bg-slate-900/40">
+                            <div className="relative flex-1 min-w-[200px]">
+                                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                                <input
+                                    type="text"
+                                    placeholder="Search for devices"
+                                    value={filters.search}
+                                    onChange={(e) => setFilters({ ...filters, search: e.target.value })}
+                                    className="w-full bg-white dark:bg-slate-900/70 border border-slate-200 dark:border-slate-600 text-slate-800 dark:text-slate-100 rounded-lg pl-9 pr-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/40"
+                                />
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => queryClient.invalidateQueries({ queryKey: ['agents'] })}
+                                className="p-2 rounded-lg border border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
+                                title="Refresh table"
+                            >
+                                <RefreshCw className="w-4 h-4" />
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setFilters({ status: '', os_type: '', search: '' })}
+                                className="p-2 rounded-lg border border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
+                                title="Clear filters"
+                            >
+                                <X className="w-4 h-4" />
+                            </button>
+                        </div>
+
+                        <div className="flex flex-wrap gap-3 items-end px-3 py-2 border-b border-slate-200 dark:border-slate-700 bg-white/60 dark:bg-slate-900/20">
+                            <div className="relative">
+                                <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-500 mb-1">Status</label>
+                                <select
+                                    value={filters.status}
+                                    onChange={(e) => setFilters({ ...filters, status: e.target.value })}
+                                    className="w-40 appearance-none bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 rounded-lg pl-3 pr-8 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/50"
+                                >
+                                    <option value="">All</option>
+                                    <option value="online">Online</option>
+                                    <option value="offline">Offline</option>
+                                    <option value="degraded">Degraded</option>
+                                    <option value="pending">Pending</option>
+                                </select>
+                                <ChevronDown className="pointer-events-none absolute right-2 bottom-2.5 w-4 h-4 text-slate-500" />
+                            </div>
+                            <div className="relative">
+                                <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-500 mb-1">OS</label>
+                                <select
+                                    value={filters.os_type}
+                                    onChange={(e) => setFilters({ ...filters, os_type: e.target.value })}
+                                    className="w-40 appearance-none bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 rounded-lg pl-3 pr-8 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/50"
+                                >
+                                    <option value="">All</option>
+                                    <option value="windows">Windows</option>
+                                    <option value="linux">Linux</option>
+                                    <option value="macos">macOS</option>
+                                </select>
+                                <ChevronDown className="pointer-events-none absolute right-2 bottom-2.5 w-4 h-4 text-slate-500" />
+                            </div>
+                            <div className="ml-auto flex items-center gap-1">
+                                <button
+                                    type="button"
+                                    onClick={() => setViewMode('table')}
+                                    className={`p-2 rounded-lg transition-all ${viewMode === 'table' ? 'bg-cyan-500/20 text-cyan-600 dark:text-cyan-400' : 'text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-800'}`}
+                                    title="Table"
+                                >
+                                    <List className="w-4 h-4" />
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setViewMode('grid')}
+                                    className={`p-2 rounded-lg transition-all ${viewMode === 'grid' ? 'bg-cyan-500/20 text-cyan-600 dark:text-cyan-400' : 'text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-800'}`}
+                                    title="Grid"
+                                >
+                                    <LayoutGrid className="w-4 h-4" />
+                                </button>
+                            </div>
+                        </div>
+
+                        <div className="relative z-10 flex-1 flex flex-col min-h-0 overflow-hidden">
             {isLoading ? (
                 <div className="p-4 bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700/50">
                     <SkeletonTable rows={8} columns={7} />
@@ -1202,78 +1262,99 @@ export default function Endpoints() {
                     </div>
                 </div>
             ) : (
-                <div className="flex-1 flex flex-col min-h-0 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700/50 rounded-2xl shadow-lg overflow-hidden">
-                    <div className="flex-1 overflow-auto custom-scrollbar transform-gpu">
-                        <table className="w-full text-left text-sm whitespace-nowrap">
-                            <thead className="sticky top-0 z-10 bg-slate-100 dark:bg-slate-800 border-b-2 border-slate-200 dark:border-slate-700/80 text-xs uppercase tracking-wider text-slate-600 dark:text-slate-300 font-bold shadow-sm">
+                <div className="flex-1 flex flex-col min-h-0 bg-white dark:bg-slate-800 border-t border-slate-200 dark:border-slate-700/50 overflow-hidden">
+                    <div className="flex-1 overflow-auto overflow-x-auto custom-scrollbar">
+                        <table className="w-full text-left text-sm whitespace-nowrap min-w-[1000px]">
+                            <thead className="sticky top-0 z-10 bg-slate-100 dark:bg-slate-800 border-b-2 border-slate-200 dark:border-slate-700/80 text-[10px] uppercase tracking-wider text-slate-600 dark:text-slate-300 font-bold shadow-sm">
                                 <tr>
-                                    <th className="py-4 px-4">Hostname</th>
-                                    <th className="py-4 px-4">Status</th>
-                                    <th className="py-4 px-4">OS</th>
-                                    <th className="py-4 px-4">Version</th>
-                                    <th className="py-4 px-4">Health</th>
-                                    <th className="py-4 px-4">Last Seen</th>
-                                    <th className="py-4 px-4 text-right">Actions</th>
+                                    <th className="py-3 px-2 w-11">
+                                        <input
+                                            type="checkbox"
+                                            className="rounded border-slate-300 dark:border-slate-600"
+                                            checked={agents.length > 0 && selectedIds.size === agents.length}
+                                            onChange={toggleSelectAll}
+                                            aria-label="Select all on page"
+                                        />
+                                    </th>
+                                    <th className="py-3 px-2">OS</th>
+                                    <th className="py-3 px-3 min-w-[180px]">Name</th>
+                                    <th className="py-3 px-2">Status</th>
+                                    <th className="py-3 px-2">Health</th>
+                                    <th className="py-3 px-2">Profile</th>
+                                    <th className="py-3 px-2">Active components</th>
+                                    <th className="py-3 px-2">Customer</th>
+                                    <th className="py-3 px-2 min-w-[120px]">Last logged in user</th>
+                                    <th className="py-3 px-2">Last activity</th>
                                 </tr>
                             </thead>
-                            <tbody className="divide-y divide-slate-100 dark:divide-slate-700/60">
-                                {agents.map((agent) => (
+                            <tbody>
+                                {agents.map((agent, rowIdx) => (
                                     <React.Fragment key={agent.id}>
                                         <tr
-                                            className={`transition-colors cursor-pointer ${expandedAgentId === agent.id
-                                                ? 'bg-primary-50 dark:bg-primary-900/20 border-l-2 border-l-primary-500'
-                                                : 'hover:bg-gray-50 dark:hover:bg-gray-800'
+                                            className={`transition-colors cursor-pointer border-b border-slate-100 dark:border-slate-700/50 ${rowIdx % 2 === 0 ? 'bg-slate-50/80 dark:bg-slate-900/30' : 'bg-white dark:bg-slate-800/80'} ${expandedAgentId === agent.id
+                                                ? 'bg-primary-50/90 dark:bg-primary-900/25 border-l-2 border-l-primary-500'
+                                                : 'hover:bg-slate-100/80 dark:hover:bg-slate-800/90'
                                                 }`}
-                                            onClick={() => setExpandedAgentId(prev => prev === agent.id ? null : agent.id)}
+                                            onClick={() => setExpandedAgentId((prev) => (prev === agent.id ? null : agent.id))}
                                         >
-                                            <td className="py-4 px-4">
-                                                <div className="flex items-center gap-2">
-                                                    <div className={`w-1 h-8 rounded-full ${expandedAgentId === agent.id ? 'bg-primary-500' : 'bg-transparent'}`} />
+                                            <td className="py-3 px-2 align-middle" onClick={(e) => e.stopPropagation()}>
+                                                <input
+                                                    type="checkbox"
+                                                    className="rounded border-slate-300 dark:border-slate-600"
+                                                    checked={selectedIds.has(agent.id)}
+                                                    onChange={() => toggleSelectOne(agent.id)}
+                                                    aria-label={`Select ${agent.hostname}`}
+                                                />
+                                            </td>
+                                            <td className="py-3 px-2 align-middle">
+                                                <div className="flex items-center gap-1.5">
                                                     <OSIcon os={agent.os_type} />
-                                                    <div>
-                                                        <p className="font-medium text-slate-900 dark:text-white">
-                                                            {agent.hostname}
-                                                        </p>
-                                                        <p className="text-xs text-slate-500">
-                                                            {agent.ip_addresses?.[0] || agent.id.slice(0, 8)}
-                                                        </p>
-                                                    </div>
-                                                    <ChevronDown className={`w-4 h-4 text-slate-400 ml-auto transition-transform ${expandedAgentId === agent.id ? 'rotate-180' : ''}`} />
+                                                    <span className="text-xs capitalize text-slate-700 dark:text-slate-200">{agent.os_type}</span>
                                                 </div>
                                             </td>
-                                            <td className="py-4 px-4">
-                                                <div className="flex items-center gap-2">
+                                            <td className="py-3 px-3 align-middle">
+                                                <div className="flex items-start gap-2 min-w-0">
+                                                    <div className={`w-1 self-stretch min-h-[2rem] rounded-full shrink-0 ${expandedAgentId === agent.id ? 'bg-primary-500' : 'bg-transparent'}`} />
+                                                    <div className="min-w-0">
+                                                        <p className="font-medium text-slate-900 dark:text-white truncate">{agent.hostname}</p>
+                                                        <p className="text-[11px] text-slate-500 truncate">
+                                                            {agent.ip_addresses?.[0] || agent.id.slice(0, 8)}
+                                                            {agent.agent_version ? ` · v${agent.agent_version}` : ''}
+                                                        </p>
+                                                    </div>
+                                                    <ChevronDown className={`w-4 h-4 text-slate-400 shrink-0 ml-auto transition-transform ${expandedAgentId === agent.id ? 'rotate-180' : ''}`} />
+                                                </div>
+                                            </td>
+                                            <td className="py-3 px-2 align-middle">
+                                                <div className="flex flex-wrap items-center gap-1">
                                                     <StatusBadge status={getEffectiveStatus(agent)} />
                                                     <IsolationBadge isIsolated={agent.is_isolated} />
                                                 </div>
                                             </td>
-                                            <td className="py-4 px-4 text-sm text-slate-600 dark:text-slate-300">
-                                                {agent.os_version || agent.os_type}
-                                            </td>
-                                            <td className="py-4 px-4 text-sm text-slate-600 dark:text-slate-300">
-                                                {agent.agent_version ? `v${agent.agent_version}` : 'N/A'}
-                                            </td>
-                                            <td className="py-4 px-4">
+                                            <td className="py-3 px-2 align-middle max-w-[120px]">
                                                 <HealthScoreBar score={agent.health_score} />
                                             </td>
-                                            <td className="py-4 px-4 text-sm text-slate-500">
+                                            <td className="py-3 px-2 align-middle text-xs text-slate-600 dark:text-slate-300 max-w-[100px] truncate" title={dmProfile(agent)}>
+                                                {dmProfile(agent)}
+                                            </td>
+                                            <td className="py-3 px-2 align-middle text-xs text-slate-600 dark:text-slate-300">
+                                                {dmComponentsLabel(agent)}
+                                            </td>
+                                            <td className="py-3 px-2 align-middle text-xs text-slate-600 dark:text-slate-300 max-w-[100px] truncate" title={dmCustomer(agent)}>
+                                                {dmCustomer(agent)}
+                                            </td>
+                                            <td className="py-3 px-2 align-middle text-xs text-slate-600 dark:text-slate-300 max-w-[120px] truncate" title={dmLastUser(agent)}>
+                                                {dmLastUser(agent)}
+                                            </td>
+                                            <td className="py-3 px-2 align-middle text-xs text-slate-500">
                                                 <span title={new Date(agent.last_seen).toLocaleString()}>
                                                     {formatRelativeTime(agent.last_seen)}
                                                 </span>
                                             </td>
-                                            <td className="py-4 px-4 text-right" onClick={(e) => e.stopPropagation()}>
-                                                {authApi.canExecuteCommands() && (
-                                                    <QuickActionsDropdown
-                                                        agent={agent}
-                                                        onCommand={(cmd) => handleCommand(agent, cmd)}
-                                                    />
-                                                )}
-                                            </td>
                                         </tr>
-                                        {/* ── Inline expandable detail panel ── */}
                                         {expandedAgentId === agent.id && (
-                                            <tr>
-                                                <td colSpan={7} className="p-0 border-b-2 border-primary-500/20">
+                                            <tr className={rowIdx % 2 === 0 ? 'bg-slate-50/80 dark:bg-slate-900/30' : 'bg-white dark:bg-slate-800/80'}>
+                                                <td colSpan={10} className="p-0 border-b-2 border-primary-500/20">
                                                     <InlineAgentDetail agent={agent} />
                                                 </td>
                                             </tr>
@@ -1283,13 +1364,17 @@ export default function Endpoints() {
                             </tbody>
                         </table>
                     </div>
-                    {/* Footer */}
-                    <div className="shrink-0 px-4 py-3 bg-slate-50/50 dark:bg-slate-900/40 border-t border-slate-200 dark:border-slate-700/60 text-sm text-slate-500">
-                        Showing {agents.length} of {total} endpoints
+                    <div className="shrink-0 px-4 py-2.5 bg-slate-50/50 dark:bg-slate-900/40 border-t border-slate-200 dark:border-slate-700/60 text-xs text-slate-500 flex flex-wrap items-center justify-between gap-2">
+                        <span>Showing {agents.length} of {total} devices</span>
+                        {selectedIds.size > 0 && (
+                            <span className="text-slate-600 dark:text-slate-400">{selectedIds.size} selected</span>
+                        )}
                     </div>
                 </div>
             )}
-            </div>
+                        </div>
+                    </div>
+                </div>
 
             <CommandExecutionModal
                 isOpen={!!selectedAgent && !!selectedCommand}

@@ -155,7 +155,7 @@ async function handleRequest(req, res) {
         return;
     }
 
-    const parsedUrl = new URL(req.url, `http://localhost:${PORT}`);
+    const parsedUrl = new URL(req.url, `http://51.21.199.229:${PORT}`);
     const path = parsedUrl.pathname;
 
     console.log(`${new Date().toISOString()} ${req.method} ${path}`);
@@ -300,7 +300,7 @@ const server = http.createServer(handleRequest);
 
 server.listen(PORT, () => {
     console.log(`========================================`);
-    console.log(`Mock API Server running on http://localhost:${PORT}`);
+    console.log(`Mock API Server running on http://51.21.199.229:${PORT}`);
     console.log(`========================================`);
     console.log(`Endpoints:`);
     console.log(`  GET  /health                       - Health check`);

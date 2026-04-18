@@ -139,7 +139,7 @@ func (a *Agent) Start(ctx context.Context) error {
 	go a.runHealthReporter()
 
 	// Start platform-specific collectors (ETW on Windows)
-	startPlatformCollectors(a.ctx, a.cfg, a.eventChan, a.logger)
+	startPlatformCollectors(a.ctx, a)
 
 	// Attempt initial gRPC connect; background routines start regardless so reconnector can establish connection later.
 	if err := a.grpcClient.Connect(a.ctx); err != nil {
@@ -761,11 +761,25 @@ func mapProtoCommandType(protoType string) command.CommandType {
 		return command.CmdUpdateConfig
 	case "COMMAND_TYPE_ADJUST_RATE":
 		return command.CmdAdjustRate
+	case "COMMAND_TYPE_UPDATE_FILTER_POLICY":
+		return command.CmdUpdateConfig
+	case "COMMAND_TYPE_QUARANTINE_FILE":
+		return command.CmdQuarantineFile
+	case "COMMAND_TYPE_BLOCK_IP":
+		return command.CmdBlockIP
+	case "COMMAND_TYPE_UNBLOCK_IP":
+		return command.CmdUnblockIP
+	case "COMMAND_TYPE_BLOCK_DOMAIN":
+		return command.CmdBlockDomain
+	case "COMMAND_TYPE_UNBLOCK_DOMAIN":
+		return command.CmdUnblockDomain
+	case "COMMAND_TYPE_UPDATE_SIGNATURES":
+		return command.CmdUpdateSignatures
 	case "COMMAND_TYPE_RESTART", "10": // Machine reboot (enum value 10)
 		return command.CmdRestart
 	case "COMMAND_TYPE_SHUTDOWN", "11": // Machine shutdown (enum value 11)
 		return command.CmdShutdown
-	case "9": // RUN_CMD enum value 9 (not in generated proto code)
+	case "COMMAND_TYPE_RUN_CMD", "9":
 		return command.CmdRunCommand
 	default:
 		// Fall through: try using the raw string (e.g., "TERMINATE_PROCESS")

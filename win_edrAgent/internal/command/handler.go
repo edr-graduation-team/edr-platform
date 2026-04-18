@@ -20,6 +20,7 @@ import (
 
 	"github.com/edr-platform/win-agent/internal/config"
 	"github.com/edr-platform/win-agent/internal/logging"
+	"github.com/edr-platform/win-agent/internal/signatures"
 )
 
 // CommandType enumerates supported command types.
@@ -38,6 +39,11 @@ const (
 	CmdRunCommand       CommandType = "RUN_CMD"
 	CmdRestart          CommandType = "RESTART"  // Machine reboot
 	CmdShutdown         CommandType = "SHUTDOWN" // Machine shutdown
+	CmdBlockIP          CommandType = "BLOCK_IP"
+	CmdUnblockIP        CommandType = "UNBLOCK_IP"
+	CmdBlockDomain      CommandType = "BLOCK_DOMAIN"
+	CmdUnblockDomain    CommandType = "UNBLOCK_DOMAIN"
+	CmdUpdateSignatures CommandType = "UPDATE_SIGNATURES"
 )
 
 // =============================================================================
@@ -144,6 +150,9 @@ type Handler struct {
 	// Set via SetCurrentConfig — nil-safe: if unset the handler falls back to
 	// the full YAML / sparse-key paths.
 	currentCfg *config.Config
+
+	// sigStore is the local malware hash database (optional).
+	sigStore *signatures.Store
 }
 
 // NewHandler creates a new command handler.
@@ -197,6 +206,13 @@ func (h *Handler) SetCurrentConfig(cfg *config.Config) {
 	h.currentCfg = cfg
 }
 
+// SetSignatureStore wires the local malware hash database for UPDATE_SIGNATURES commands.
+func (h *Handler) SetSignatureStore(s *signatures.Store) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.sigStore = s
+}
+
 // Execute processes a command and returns the result.
 func (h *Handler) Execute(ctx context.Context, cmd *Command) *Result {
 	start := time.Now()
@@ -242,6 +258,16 @@ func (h *Handler) Execute(ctx context.Context, cmd *Command) *Result {
 		output, err = h.restartMachine(ctx, cmd.Parameters)
 	case CmdShutdown:
 		output, err = h.shutdownMachine(ctx, cmd.Parameters)
+	case CmdBlockIP:
+		output, err = h.blockIP(ctx, cmd.Parameters)
+	case CmdUnblockIP:
+		output, err = h.unblockIP(ctx, cmd.Parameters)
+	case CmdBlockDomain:
+		output, err = h.blockDomain(ctx, cmd.Parameters)
+	case CmdUnblockDomain:
+		output, err = h.unblockDomain(ctx, cmd.Parameters)
+	case CmdUpdateSignatures:
+		output, err = h.updateSignatures(ctx, cmd.Parameters)
 	default:
 		err = fmt.Errorf("unknown command type: %s", cmd.Type)
 	}
@@ -278,7 +304,10 @@ func truncateOutput(s string, maxLen int) string {
 // R4 FIX: Uses OpenProcess + TerminateProcess via syscall instead of shelling
 // out to taskkill. Resolves the process name via QueryFullProcessImageNameW
 // and checks against the critical system process list to prevent BSODs.
-func (h *Handler) terminateProcess(ctx context.Context, params map[string]string) (string, error) {
+//
+// When kill_tree=true in parameters, all descendant processes are terminated
+// (children first) using the same safety checks.
+func (h *Handler) terminateProcess(_ context.Context, params map[string]string) (string, error) {
 	pidStr := params["pid"]
 	if pidStr == "" {
 		return "", fmt.Errorf("pid parameter is required")
@@ -289,6 +318,35 @@ func (h *Handler) terminateProcess(ctx context.Context, params map[string]string
 		return "", fmt.Errorf("invalid PID: %s (must be a positive integer)", pidStr)
 	}
 
+	killTree := strings.EqualFold(params["kill_tree"], "true") || strings.EqualFold(params["killTree"], "true")
+	var order []uint32
+	if killTree {
+		var errTree error
+		order, errTree = processTreePostOrder(uint32(pid))
+		if errTree != nil {
+			return "", errTree
+		}
+	} else {
+		order = []uint32{uint32(pid)}
+	}
+
+	var killed []string
+	for _, p := range order {
+		msg, err := h.terminateOnePID(int(p))
+		if err != nil {
+			h.logger.Warnf("[C2] terminate PID %d: %v", p, err)
+			continue
+		}
+		killed = append(killed, fmt.Sprintf("%d", p))
+		h.logger.Infof("[C2] %s", msg)
+	}
+	if len(killed) == 0 {
+		return "", fmt.Errorf("no processes terminated (target may be protected or already exited)")
+	}
+	return fmt.Sprintf("Terminated PIDs: %s (kill_tree=%v)", strings.Join(killed, ","), killTree), nil
+}
+
+func (h *Handler) terminateOnePID(pid int) (string, error) {
 	// Block PIDs 0 and 4 (System Idle, System kernel).
 	if pid == 0 || pid == 4 {
 		return "", fmt.Errorf("cannot terminate critical system process (PID %d)", pid)
@@ -323,7 +381,6 @@ func (h *Handler) terminateProcess(ctx context.Context, params map[string]string
 		return "", fmt.Errorf("TerminateProcess failed for PID %d (%s): %w", pid, processName, err)
 	}
 
-	h.logger.Infof("[C2] Process terminated via Win32 API: PID=%d Name=%s", pid, processName)
 	return fmt.Sprintf("Process terminated via Win32 API: PID=%d Name=%s", pid, processName), nil
 }
 

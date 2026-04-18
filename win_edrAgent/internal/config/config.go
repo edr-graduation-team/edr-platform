@@ -19,8 +19,36 @@ type Config struct {
 	Agent      AgentConfig     `yaml:"agent"`
 	Collectors CollectorConfig `yaml:"collectors"`
 	Filtering  FilteringConfig `yaml:"filtering"`
+	Response   ResponseConfig  `yaml:"response"`
 	Logging    LoggingConfig   `yaml:"logging"`
 	Certs      CertConfig      `yaml:"certs"`
+}
+
+// ResponseConfig controls autonomous on-endpoint response (local hash DB, auto-quarantine).
+type ResponseConfig struct {
+	// AutoQuarantine enables hash lookup + quarantine on high-risk file paths (ETW file create/write).
+	AutoQuarantine bool `yaml:"auto_quarantine"`
+	// SignatureDBPath is the bbolt database path for malware_hashes (SHA-256 keys).
+	// On startup the agent merges: (1) embedded builtin_hashes.ndjson (includes EICAR),
+	// (2) optional NDJSON file "signature_seed.ndjson" in the same directory (operator-supplied hashes),
+	// (3) hashes from C2 UPDATE_SIGNATURES. Large feeds should use UPDATE_SIGNATURES or the seed file.
+	SignatureDBPath string `yaml:"signature_db_path"`
+	// MaxScanBytes caps bytes read per file for hashing (0 = default 10 MiB).
+	MaxScanBytes int64 `yaml:"max_scan_bytes"`
+	// USBWatcher polls for removable volumes and registers them for auto-response paths.
+	USBWatcher bool `yaml:"usb_watcher"`
+
+	// SignatureAutoFetchEnabled periodically downloads a public MalwareBazaar CSV and merges new SHA-256 keys (no overwrite unless SignatureAutoFetchForce).
+	// Host allowlist: bazaar.abuse.ch (HTTPS), or http://127.0.0.1 / localhost for testing.
+	SignatureAutoFetchEnabled bool `yaml:"signature_auto_fetch_enabled"`
+	// SignatureAutoFetchInterval between merges (default 24h).
+	SignatureAutoFetchInterval time.Duration `yaml:"signature_auto_fetch_interval"`
+	// SignatureAutoFetchURL defaults to MalwareBazaar recent CSV if empty.
+	SignatureAutoFetchURL string `yaml:"signature_auto_fetch_url"`
+	// SignatureAutoFetchLimit max hashes applied per run (default 500).
+	SignatureAutoFetchLimit int `yaml:"signature_auto_fetch_limit"`
+	// SignatureAutoFetchForce overwrites existing keys on each fetch (default false).
+	SignatureAutoFetchForce bool `yaml:"signature_auto_fetch_force"`
 }
 
 // ServerConfig defines Connection Manager connection settings.
@@ -180,6 +208,17 @@ func DefaultConfig() *Config {
 			DNSEnabled:           true,
 			PipeEnabled:          true,
 			ProcessAccessEnabled: true,
+		},
+		Response: ResponseConfig{
+			AutoQuarantine:            true,
+			SignatureDBPath:           `C:\ProgramData\EDR\signatures.db`,
+			MaxScanBytes:              10 << 20, // 10 MiB
+			USBWatcher:                true,
+			SignatureAutoFetchEnabled: false,
+			SignatureAutoFetchInterval: 24 * time.Hour,
+			SignatureAutoFetchURL:     "",
+			SignatureAutoFetchLimit:   500,
+			SignatureAutoFetchForce:   false,
 		},
 		Filtering: FilteringConfig{
 			ExcludeProcesses: []string{
@@ -343,6 +382,18 @@ func (c *Config) Validate() error {
 	if c.Agent.MaxQueueSizeMB < 1 || c.Agent.MaxQueueSizeMB > 2000 {
 		return fmt.Errorf("agent.max_queue_size_mb must be between 1 and 2000")
 	}
+	if c.Response.MaxScanBytes < 0 {
+		return fmt.Errorf("response.max_scan_bytes cannot be negative")
+	}
+	if c.Response.SignatureDBPath == "" {
+		c.Response.SignatureDBPath = `C:\ProgramData\EDR\signatures.db`
+	}
+	if c.Response.SignatureAutoFetchInterval <= 0 {
+		c.Response.SignatureAutoFetchInterval = 24 * time.Hour
+	}
+	if c.Response.SignatureAutoFetchLimit <= 0 {
+		c.Response.SignatureAutoFetchLimit = 500
+	}
 	return nil
 }
 
@@ -366,8 +417,13 @@ func (c *Config) DataDirectoriesToHarden() []string {
 		qDir   = `C:\ProgramData\EDR\quarantine`
 		encDir = `C:\ProgramData\EDR\EncryptKey`
 	)
+	sigPath := c.Response.SignatureDBPath
+	if sigPath == "" {
+		sigPath = `C:\ProgramData\EDR\signatures.db`
+	}
+	sigDir := filepath.Clean(filepath.Dir(sigPath))
 	seen := make(map[string]struct{})
-	out := make([]string, 0, 6)
+	out := make([]string, 0, 8)
 	add := func(p string) {
 		p = filepath.Clean(p)
 		if p == "." {
@@ -384,6 +440,7 @@ func (c *Config) DataDirectoriesToHarden() []string {
 	add(logDir)
 	add(qDir)
 	add(encDir)
+	add(sigDir)
 	return out
 }
 
@@ -404,6 +461,7 @@ func (c *Config) Save(path string) error {
 // Clone creates a deep copy of the configuration.
 func (c *Config) Clone() *Config {
 	clone := *c
+	clone.Response = c.Response
 	clone.Filtering.ExcludeProcesses = append([]string{}, c.Filtering.ExcludeProcesses...)
 	clone.Filtering.ExcludeIPs = append([]string{}, c.Filtering.ExcludeIPs...)
 	clone.Filtering.ExcludeRegistry = append([]string{}, c.Filtering.ExcludeRegistry...)

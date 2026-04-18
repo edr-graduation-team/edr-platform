@@ -508,26 +508,40 @@ func mapDBCommandTypeToProto(cmdType string) edrv1.CommandType {
 	switch cmdType {
 	case "terminate_process", "kill_process":
 		return edrv1.CommandType_COMMAND_TYPE_TERMINATE_PROCESS
-	case "collect_forensics", "collect_logs", "quarantine_file", "scan_file", "scan_memory":
+	case "collect_forensics", "collect_logs", "scan_file", "scan_memory":
 		return edrv1.CommandType_COMMAND_TYPE_COLLECT_FORENSICS
+	case "quarantine_file":
+		return edrv1.CommandType(13) // COMMAND_TYPE_QUARANTINE_FILE
+	case "block_ip":
+		return edrv1.CommandType(14)
+	case "unblock_ip":
+		return edrv1.CommandType(15)
+	case "block_domain":
+		return edrv1.CommandType(16)
+	case "unblock_domain":
+		return edrv1.CommandType(17)
+	case "update_signatures":
+		return edrv1.CommandType(18)
 	case "isolate_network", "isolate":
 		return edrv1.CommandType_COMMAND_TYPE_ISOLATE
 	case "restore_network", "unisolate_network", "unisolate":
 		return edrv1.CommandType_COMMAND_TYPE_UNISOLATE
-	case "restart_service", "restart_agent":
+	case "restart_service", "restart_agent", "start_agent", "start_service", "stop_agent", "stop_service":
 		return edrv1.CommandType_COMMAND_TYPE_RESTART_SERVICE
 	case "update_agent":
 		return edrv1.CommandType_COMMAND_TYPE_UPDATE_AGENT
-	case "update_config", "update_policy", "update_filter_policy":
+	case "update_config", "update_policy":
 		return edrv1.CommandType_COMMAND_TYPE_UPDATE_CONFIG
+	case "update_filter_policy":
+		return edrv1.CommandType(12) // COMMAND_TYPE_UPDATE_FILTER_POLICY
 	case "adjust_rate":
 		return edrv1.CommandType_COMMAND_TYPE_ADJUST_RATE
 	case "run_cmd", "custom":
-		return 9
+		return edrv1.CommandType(9) // COMMAND_TYPE_RUN_CMD
 	case "restart", "restart_machine":
-		return 10
+		return edrv1.CommandType(10)
 	case "shutdown", "shutdown_machine":
-		return 11
+		return edrv1.CommandType(11)
 	default:
 		return edrv1.CommandType_COMMAND_TYPE_UNSPECIFIED
 	}

@@ -50,6 +50,9 @@ type ETWCollector struct {
 	fileEnabled      bool
 	imageLoadEnabled bool
 
+	// Optional autonomous file response (local hash DB + quarantine).
+	fileAutoResp FileAutoResponse
+
 	// Per-type metrics
 	fileEvents      atomic.Uint64
 	imageLoadEvents atomic.Uint64
@@ -69,6 +72,11 @@ func NewETWCollector(session string, ch chan<- *event.Event, l *logging.Logger, 
 		fileEnabled:      fileEnabled,
 		imageLoadEnabled: imageLoadEnabled,
 	}
+}
+
+// SetFileAutoResponse registers optional local hash-match quarantine (nil disables).
+func (c *ETWCollector) SetFileAutoResponse(h FileAutoResponse) {
+	c.fileAutoResp = h
 }
 
 func (c *ETWCollector) Start(ctx context.Context) error {

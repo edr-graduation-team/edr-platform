@@ -180,6 +180,11 @@ const (
 	CommandTypeScanFile       CommandType = "scan_file"
 	CommandTypeScanMemory     CommandType = "scan_memory"
 	CommandTypeCustom         CommandType = "custom"
+	CommandTypeBlockIP          CommandType = "block_ip"
+	CommandTypeUnblockIP        CommandType = "unblock_ip"
+	CommandTypeBlockDomain      CommandType = "block_domain"
+	CommandTypeUnblockDomain    CommandType = "unblock_domain"
+	CommandTypeUpdateSignatures CommandType = "update_signatures"
 )
 
 // CommandStatus represents command execution status.

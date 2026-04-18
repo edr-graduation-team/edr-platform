@@ -7,18 +7,63 @@ import (
 	"context"
 
 	"github.com/edr-platform/win-agent/internal/collectors"
-	"github.com/edr-platform/win-agent/internal/config"
 	"github.com/edr-platform/win-agent/internal/event"
 	"github.com/edr-platform/win-agent/internal/logging"
+	"github.com/edr-platform/win-agent/internal/responder"
+	"github.com/edr-platform/win-agent/internal/signatures"
 )
 
 // startPlatformCollectors starts Windows-specific collectors (ETW, Registry, Network, WMI) when enabled.
 // Each collector runs in its own goroutine and respects ctx.Done() for graceful shutdown.
 // A shared telemetry filter is built from cfg.Filtering to reduce noise (ExcludePaths, ExcludeIPs, etc.).
 // Panics in collector goroutines are recovered so one failing collector cannot crash the agent.
-func startPlatformCollectors(ctx context.Context, cfg *config.Config, eventChan chan<- *event.Event, logger *logging.Logger) {
-	if cfg == nil || logger == nil || eventChan == nil {
+func startPlatformCollectors(ctx context.Context, a *Agent) {
+	if a == nil || a.cfg == nil || a.logger == nil || a.eventChan == nil {
 		return
+	}
+	cfg := a.cfg
+	logger := a.logger
+	eventChan := a.eventChan
+
+	var fileAuto collectors.FileAutoResponse
+	dbPath := cfg.Response.SignatureDBPath
+	if dbPath == "" {
+		dbPath = `C:\ProgramData\EDR\signatures.db`
+	}
+	st, err := signatures.Open(dbPath)
+	if err != nil {
+		logger.Warnf("[Response] signature database unavailable (auto-quarantine / C2 UPDATE_SIGNATURES / feeds disabled): %v", err)
+	} else {
+		a.commandHandler.SetSignatureStore(st)
+		go func() {
+			<-ctx.Done()
+			_ = st.Close()
+		}()
+		if cfg.Response.AutoQuarantine && cfg.Collectors.FileEnabled && cfg.Collectors.ETWEnabled {
+			maxB := cfg.Response.MaxScanBytes
+			if maxB <= 0 {
+				maxB = 10 << 20
+			}
+			eng := responder.NewEngine(logger, st, `C:\ProgramData\EDR\quarantine`, maxB, true)
+			fileAuto = eng
+			if cfg.Response.USBWatcher {
+				go collectors.StartUSBVolumeWatcher(ctx, eng, logger)
+			}
+			logger.Info("[Response] Local signature DB opened; autonomous file response armed")
+		} else {
+			logger.Info("[Response] Local signature DB opened (C2 UPDATE_SIGNATURES / optional auto-fetch; auto-quarantine inactive — ETW/file off or auto_quarantine false)")
+		}
+		if cfg.Response.SignatureAutoFetchEnabled {
+			feedURL := cfg.Response.SignatureAutoFetchURL
+			if feedURL == "" {
+				feedURL = signatures.DefaultMalwareBazaarRecentURL
+			}
+			lim := cfg.Response.SignatureAutoFetchLimit
+			iv := cfg.Response.SignatureAutoFetchInterval
+			force := cfg.Response.SignatureAutoFetchForce
+			go signatures.StartPublicFeedAutoFetch(ctx, st, logger, feedURL, iv, lim, force)
+			logger.Infof("[Response] Public signature auto-fetch enabled (interval=%v limit=%d url=%s)", iv, lim, feedURL)
+		}
 	}
 
 	// Global telemetry filter from config
@@ -44,6 +89,9 @@ func startPlatformCollectors(ctx context.Context, cfg *config.Config, eventChan 
 			cfg.Collectors.FileEnabled,
 			cfg.Collectors.ImageLoadEnabled,
 		)
+		if fileAuto != nil {
+			etw.SetFileAutoResponse(fileAuto)
+		}
 		go func() {
 			defer func() {
 				if r := recover(); r != nil {

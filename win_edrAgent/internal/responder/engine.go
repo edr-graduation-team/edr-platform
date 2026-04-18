@@ -1,0 +1,196 @@
+// Package responder implements autonomous file response (hash match + quarantine).
+package responder
+
+import (
+	"context"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/edr-platform/win-agent/internal/event"
+	"github.com/edr-platform/win-agent/internal/logging"
+	"github.com/edr-platform/win-agent/internal/scanner"
+	"github.com/edr-platform/win-agent/internal/signatures"
+)
+
+// Engine performs optional auto-quarantine when ETW file events hit monitored paths.
+type Engine struct {
+	logger        *logging.Logger
+	store         *signatures.Store
+	quarantineDir string
+	maxScan       int64
+	enabled       bool
+
+	usbMu       sync.RWMutex
+	usbPrefixes []string // e.g. "d:\"
+}
+
+// NewEngine constructs a responder. store may be nil (disables matching).
+func NewEngine(logger *logging.Logger, store *signatures.Store, quarantineDir string, maxScanBytes int64, enabled bool) *Engine {
+	if quarantineDir == "" {
+		quarantineDir = `C:\ProgramData\EDR\quarantine`
+	}
+	if maxScanBytes <= 0 {
+		maxScanBytes = 10 << 20
+	}
+	return &Engine{
+		logger:        logger,
+		store:         store,
+		quarantineDir: quarantineDir,
+		maxScan:       maxScanBytes,
+		enabled:       enabled,
+	}
+}
+
+// RegisterRemovableRoot adds a drive root (e.g. "E:" or "E:\") scanned for USB-sourced files.
+func (e *Engine) RegisterRemovableRoot(root string) {
+	root = strings.TrimSpace(root)
+	if root == "" {
+		return
+	}
+	root = strings.TrimSuffix(root, `\`)
+	if len(root) == 2 && root[1] == ':' {
+		root = strings.ToLower(root) + `\`
+	} else {
+		root = strings.ToLower(filepath.Clean(root))
+		if !strings.HasSuffix(root, `\`) {
+			root += `\`
+		}
+	}
+	e.usbMu.Lock()
+	defer e.usbMu.Unlock()
+	for _, p := range e.usbPrefixes {
+		if p == root {
+			return
+		}
+	}
+	e.usbPrefixes = append(e.usbPrefixes, root)
+	e.logger.Infof("[Responder] Removable path registered for auto-response: %s", root)
+}
+
+// EvaluateAndAct returns a high-severity replacement event and true when a file was quarantined locally.
+func (e *Engine) EvaluateAndAct(_ context.Context, filePath string, opcode uint8, pid uint32, base map[string]interface{}) (*event.Event, bool) {
+	if e == nil || !e.enabled || e.store == nil {
+		return nil, false
+	}
+	// File create / write only (see collectors/file.go opcodes).
+	if opcode != 64 && opcode != 68 {
+		return nil, false
+	}
+	lower := strings.ToLower(filePath)
+	if !e.monitoredPath(lower) {
+		return nil, false
+	}
+
+	if _, err := os.Stat(filePath); err != nil {
+		return nil, false
+	}
+
+	hashHex, _, err := scanner.FileSHA256Limited(filePath, e.maxScan)
+	if err != nil {
+		e.logger.Debugf("[Responder] skip hash %s: %v", filePath, err)
+		return nil, false
+	}
+	rec, ok := e.store.Lookup(hashHex)
+	if !ok {
+		return nil, false
+	}
+
+	if err := os.MkdirAll(e.quarantineDir, 0700); err != nil {
+		e.logger.Errorf("[Responder] quarantine dir: %v", err)
+		return nil, false
+	}
+	ts := time.Now().Format("20060102_150405")
+	baseName := filepath.Base(filePath)
+	qPath := filepath.Join(e.quarantineDir, fmt.Sprintf("%s_%s.quarantine", ts, baseName))
+	if err := os.Rename(filePath, qPath); err != nil {
+		// File may be locked — copy then remove.
+		if err := copyFileLimited(filePath, qPath, e.maxScan+1); err != nil {
+			e.logger.Errorf("[Responder] quarantine failed %s: %v", filePath, err)
+			return nil, false
+		}
+		_ = os.Remove(filePath)
+	}
+
+	metaPath := qPath + ".meta"
+	meta := fmt.Sprintf("OriginalPath: %s\nSHA256: %s\nThreat: %s\nTime: %s\nAction: auto_quarantine\n",
+		filePath, hashHex, rec.Name, time.Now().Format(time.RFC3339))
+	_ = os.WriteFile(metaPath, []byte(meta), 0600)
+
+	data := map[string]interface{}{
+		"action":            "auto_quarantined",
+		"path":              filePath,
+		"quarantine_path":   qPath,
+		"sha256":            hashHex,
+		"threat_name":       rec.Name,
+		"threat_family":     rec.Family,
+		"threat_severity":   rec.Severity,
+		"signature_source":  rec.Source,
+		"pid":               pid,
+		"device_serial":     volumeSerialForPath(filePath),
+		"autonomous":        true,
+	}
+	for k, v := range base {
+		if _, exists := data[k]; !exists {
+			data[k] = v
+		}
+	}
+
+	sev := event.SeverityHigh
+	if strings.EqualFold(rec.Severity, "critical") {
+		sev = event.SeverityCritical
+	}
+
+	evt := event.NewEvent(event.EventTypeFile, sev, data)
+	e.logger.Warnf("[Responder] AUTO-QUARANTINED %s hash=%s threat=%s", filePath, hashHex, rec.Name)
+	return evt, true
+}
+
+func (e *Engine) monitoredPath(lower string) bool {
+	if strings.Contains(lower, `\programdata\edr\`) {
+		return false
+	}
+	if strings.Contains(lower, `\windows\`) || strings.Contains(lower, `\winstore`) {
+		return false
+	}
+	if strings.Contains(lower, `\users\`) && strings.Contains(lower, `\downloads\`) {
+		return true
+	}
+	if strings.Contains(lower, `\users\`) && strings.Contains(lower, `\desktop\`) {
+		return true
+	}
+	if strings.Contains(lower, `\appdata\local\temp\`) {
+		return true
+	}
+	if strings.Contains(lower, `\programdata\`) {
+		return true
+	}
+	e.usbMu.RLock()
+	prefixes := append([]string(nil), e.usbPrefixes...)
+	e.usbMu.RUnlock()
+	for _, p := range prefixes {
+		if strings.HasPrefix(lower, p) {
+			return true
+		}
+	}
+	return false
+}
+
+func copyFileLimited(src, dst string, maxBytes int64) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+	_, err = io.Copy(out, io.LimitReader(in, maxBytes))
+	return err
+}

@@ -546,10 +546,17 @@ func mapCommandType(cmdType string) edrv1.CommandType {
 	case "collect_logs", "collect_forensics":
 		return edrv1.CommandType_COMMAND_TYPE_COLLECT_FORENSICS
 	case "quarantine_file":
-		// Agent handler: CmdQuarantineFile = "QUARANTINE_FILE"
-		// No dedicated proto enum — re-use COLLECT_FORENSICS slot with parameters.
-		// The agent distinguishes via the raw type string in the Parameters map.
-		return edrv1.CommandType_COMMAND_TYPE_COLLECT_FORENSICS
+		return edrv1.CommandType(13) // COMMAND_TYPE_QUARANTINE_FILE
+	case "block_ip":
+		return edrv1.CommandType(14)
+	case "unblock_ip":
+		return edrv1.CommandType(15)
+	case "block_domain":
+		return edrv1.CommandType(16)
+	case "unblock_domain":
+		return edrv1.CommandType(17)
+	case "update_signatures":
+		return edrv1.CommandType(18)
 	case "scan_file", "scan_memory":
 		// Map to COLLECT_FORENSICS so the agent receives it; params carry sub-type.
 		return edrv1.CommandType_COMMAND_TYPE_COLLECT_FORENSICS
@@ -566,23 +573,19 @@ func mapCommandType(cmdType string) edrv1.CommandType {
 		// Start only — agent checks Parameters["mode"] == "start"
 		return edrv1.CommandType_COMMAND_TYPE_RESTART_SERVICE
 	case "restart", "restart_machine":
-		return 10 // COMMAND_TYPE_RESTART — machine reboot (enum value 10)
+		return edrv1.CommandType(10)
 	case "shutdown", "shutdown_machine":
-		return 11 // COMMAND_TYPE_SHUTDOWN — machine power off (enum value 11)
+		return edrv1.CommandType(11)
 	case "update_agent":
 		return edrv1.CommandType_COMMAND_TYPE_UPDATE_AGENT
 	case "update_config", "update_policy":
 		return edrv1.CommandType_COMMAND_TYPE_UPDATE_CONFIG
 	case "update_filter_policy":
-		// Front-end pushes filter policy — mapped to UPDATE_CONFIG so agent
-		// receives it; Parameters["policy"] carries the JSON payload.
-		return edrv1.CommandType_COMMAND_TYPE_UPDATE_CONFIG
+		return edrv1.CommandType(12) // COMMAND_TYPE_UPDATE_FILTER_POLICY
 	case "adjust_rate":
 		return edrv1.CommandType_COMMAND_TYPE_ADJUST_RATE
 	case "run_cmd", "custom":
-		// RUN_CMD uses numeric value 9; agent handles it by string matching.
-		// "custom" from dashboard UI is also routed here.
-		return 9
+		return edrv1.CommandType(9) // COMMAND_TYPE_RUN_CMD
 	default:
 		return edrv1.CommandType_COMMAND_TYPE_UNSPECIFIED
 	}

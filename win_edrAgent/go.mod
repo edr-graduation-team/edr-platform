@@ -6,6 +6,7 @@ require (
 	github.com/bi-zone/etw v0.0.0-20210519083747-fe9042eb0ea8
 	github.com/golang/snappy v0.0.4
 	github.com/google/uuid v1.6.0
+	go.etcd.io/bbolt v1.3.11
 	golang.org/x/sys v0.26.0
 	google.golang.org/grpc v1.69.2
 	google.golang.org/protobuf v1.36.1

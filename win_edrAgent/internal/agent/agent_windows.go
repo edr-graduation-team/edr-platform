@@ -7,8 +7,6 @@ import (
 	"context"
 
 	"github.com/edr-platform/win-agent/internal/collectors"
-	"github.com/edr-platform/win-agent/internal/event"
-	"github.com/edr-platform/win-agent/internal/logging"
 	"github.com/edr-platform/win-agent/internal/responder"
 	"github.com/edr-platform/win-agent/internal/signatures"
 )
@@ -229,4 +227,3 @@ func startPlatformCollectors(ctx context.Context, a *Agent) {
 	// EVENT_TRACE_FLAG_IMAGE_LOAD). They fire real-time from the kernel
 	// with exact PID attribution — no separate polling collectors needed.
 }
-

@@ -1,6 +1,6 @@
 package signatures
 
-import "embed"
+import _ "embed"
 
 // builtin_hashes.ndjson is a newline-delimited JSON feed of SHA-256 IOCs.
 // The checked-in file is generated from MalwareBazaar public recent export

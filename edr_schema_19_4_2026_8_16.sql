@@ -2,7 +2,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict vNFaGZ5yUNGUVRgNLuJMyUCmXGcQ5Hy0JojNLbjbaEEMUqDFeydo7BVHSFxVdd0
+\restrict LJodakhs94ChKcinNYNXan8uGnmqMbYxYb67vYai8alBtOSrZPZ9X1bboed16cd
 
 -- Dumped from database version 16.13
 -- Dumped by pg_dump version 16.13
@@ -512,7 +512,7 @@ CREATE TABLE public.commands (
     expires_at timestamp with time zone,
     issued_by uuid,
     metadata jsonb DEFAULT '{}'::jsonb,
-    CONSTRAINT commands_command_type_check CHECK (((command_type)::text = ANY ((ARRAY['kill_process'::character varying, 'terminate_process'::character varying, 'quarantine_file'::character varying, 'collect_logs'::character varying, 'collect_forensics'::character varying, 'isolate_network'::character varying, 'isolate'::character varying, 'restore_network'::character varying, 'unisolate_network'::character varying, 'unisolate'::character varying, 'restart_agent'::character varying, 'restart_service'::character varying, 'restart_machine'::character varying, 'restart'::character varying, 'shutdown_machine'::character varying, 'shutdown'::character varying, 'scan_file'::character varying, 'scan_memory'::character varying, 'update_agent'::character varying, 'update_policy'::character varying, 'update_config'::character varying, 'update_filter_policy'::character varying, 'adjust_rate'::character varying, 'run_cmd'::character varying, 'custom'::character varying])::text[]))),
+    CONSTRAINT commands_command_type_check CHECK (((command_type)::text = ANY ((ARRAY['kill_process'::character varying, 'terminate_process'::character varying, 'quarantine_file'::character varying, 'collect_logs'::character varying, 'collect_forensics'::character varying, 'isolate_network'::character varying, 'isolate'::character varying, 'restore_network'::character varying, 'unisolate_network'::character varying, 'unisolate'::character varying, 'restart_agent'::character varying, 'restart_service'::character varying, 'start_agent'::character varying, 'start_service'::character varying, 'stop_agent'::character varying, 'stop_service'::character varying, 'restart_machine'::character varying, 'restart'::character varying, 'shutdown_machine'::character varying, 'shutdown'::character varying, 'scan_file'::character varying, 'scan_memory'::character varying, 'update_agent'::character varying, 'update_policy'::character varying, 'update_config'::character varying, 'update_filter_policy'::character varying, 'adjust_rate'::character varying, 'run_cmd'::character varying, 'custom'::character varying, 'block_ip'::character varying, 'unblock_ip'::character varying, 'block_domain'::character varying, 'unblock_domain'::character varying, 'update_signatures'::character varying])::text[]))),
     CONSTRAINT commands_priority_check CHECK (((priority >= 1) AND (priority <= 10))),
     CONSTRAINT commands_status_check CHECK (((status)::text = ANY ((ARRAY['pending'::character varying, 'sent'::character varying, 'acknowledged'::character varying, 'executing'::character varying, 'completed'::character varying, 'failed'::character varying, 'timeout'::character varying, 'cancelled'::character varying])::text[])))
 );
@@ -970,6 +970,23 @@ CREATE TABLE public.schema_migrations (
 
 
 ALTER TABLE public.schema_migrations OWNER TO edr;
+
+--
+-- Name: sigma_alert_correlations; Type: TABLE; Schema: public; Owner: edr
+--
+
+CREATE TABLE public.sigma_alert_correlations (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    alert_low_id text NOT NULL,
+    alert_high_id text NOT NULL,
+    relation_type character varying(32) NOT NULL,
+    correlation_score double precision NOT NULL,
+    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
+
+ALTER TABLE public.sigma_alert_correlations OWNER TO edr;
 
 --
 -- Name: sigma_alerts; Type: TABLE; Schema: public; Owner: edr
@@ -1483,6 +1500,14 @@ ALTER TABLE ONLY public.schema_migrations
 
 
 --
+-- Name: sigma_alert_correlations sigma_alert_correlations_pkey; Type: CONSTRAINT; Schema: public; Owner: edr
+--
+
+ALTER TABLE ONLY public.sigma_alert_correlations
+    ADD CONSTRAINT sigma_alert_correlations_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: sigma_alerts sigma_alerts_pkey; Type: CONSTRAINT; Schema: public; Owner: edr
 --
 
@@ -1512,6 +1537,14 @@ ALTER TABLE ONLY public.command_queue
 
 ALTER TABLE ONLY public.policy_versions
     ADD CONSTRAINT unique_policy_version UNIQUE (policy_id, version);
+
+
+--
+-- Name: sigma_alert_correlations uq_sigma_alert_correlation_pair; Type: CONSTRAINT; Schema: public; Owner: edr
+--
+
+ALTER TABLE ONLY public.sigma_alert_correlations
+    ADD CONSTRAINT uq_sigma_alert_correlation_pair UNIQUE (alert_low_id, alert_high_id);
 
 
 --
@@ -1956,6 +1989,27 @@ CREATE INDEX idx_role_permissions_perm ON public.role_permissions USING btree (p
 --
 
 CREATE INDEX idx_role_permissions_role ON public.role_permissions USING btree (role_id);
+
+
+--
+-- Name: idx_sigma_alert_correlations_created; Type: INDEX; Schema: public; Owner: edr
+--
+
+CREATE INDEX idx_sigma_alert_correlations_created ON public.sigma_alert_correlations USING btree (created_at DESC);
+
+
+--
+-- Name: idx_sigma_alert_correlations_high; Type: INDEX; Schema: public; Owner: edr
+--
+
+CREATE INDEX idx_sigma_alert_correlations_high ON public.sigma_alert_correlations USING btree (alert_high_id);
+
+
+--
+-- Name: idx_sigma_alert_correlations_low; Type: INDEX; Schema: public; Owner: edr
+--
+
+CREATE INDEX idx_sigma_alert_correlations_low ON public.sigma_alert_correlations USING btree (alert_low_id);
 
 
 --
@@ -2458,5 +2512,5 @@ ALTER TABLE ONLY public.role_permissions
 -- PostgreSQL database dump complete
 --
 
-\unrestrict vNFaGZ5yUNGUVRgNLuJMyUCmXGcQ5Hy0JojNLbjbaEEMUqDFeydo7BVHSFxVdd0
+\unrestrict LJodakhs94ChKcinNYNXan8uGnmqMbYxYb67vYai8alBtOSrZPZ9X1bboed16cd
 

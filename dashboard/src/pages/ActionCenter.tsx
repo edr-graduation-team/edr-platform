@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
     Zap, CheckCircle2, Clock, XCircle, AlertTriangle,
     ChevronDown, ChevronRight, RefreshCw, Terminal,
@@ -224,11 +225,19 @@ const CommandRow = React.memo(function CommandRow({ command: item }: { command: 
 });
 
 export default function ActionCenter() {
+    const [searchParams] = useSearchParams();
     const [filters, setFilters] = useState<{
         status?: string;
         command_type?: string;
         agent_id?: string;
-    }>({});
+    }>(() => ({
+        agent_id: searchParams.get('agent_id') || undefined,
+    }));
+
+    useEffect(() => {
+        const aid = searchParams.get('agent_id');
+        setFilters((prev) => ({ ...prev, agent_id: aid || undefined }));
+    }, [searchParams]);
     const [page, setPage] = useState(0);
     const limit = 25; // Increased limit for longer lists
     const debouncedAgentId = useDebounce(filters.agent_id, 300);

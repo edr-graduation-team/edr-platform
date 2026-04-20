@@ -12,7 +12,7 @@
 // versions:
 // - protoc-gen-go-grpc v1.6.1
 // - protoc             v4.25.3
-// source: v1/edr.proto
+// source: internal/proto/v1/edr.proto
 
 package pb
 
@@ -291,5 +291,5 @@ var EventIngestionService_ServiceDesc = grpc.ServiceDesc{
 			ClientStreams: true,
 		},
 	},
-	Metadata: "v1/edr.proto",
+	Metadata: "internal/proto/v1/edr.proto",
 }

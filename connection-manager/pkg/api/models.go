@@ -188,6 +188,12 @@ type CommandResponse struct {
 	IssuedAt  time.Time `json:"issued_at"`
 }
 
+// ProcessExceptionRequest asks the server to push an allow-exception to an endpoint.
+type ProcessExceptionRequest struct {
+	ProcessName string `json:"process_name" validate:"required,min=3"`
+	Reason      string `json:"reason"`
+}
+
 // CommandListResponse for command history.
 type CommandListResponse struct {
 	Data       []CommandSummary   `json:"data"`

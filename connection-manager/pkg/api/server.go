@@ -116,6 +116,7 @@ func (s *Server) RegisterRoutes(handlers *Handlers) {
 	agents.GET("/:id/events", handlers.GetAgentEvents, handlers.RequirePermission("endpoints", "read"))
 	agents.GET("/:id/commands", handlers.GetAgentCommands, handlers.RequirePermission("responses", "read"))
 	agents.POST("/:id/commands", handlers.ExecuteAgentCommand, handlers.RequirePermission("responses", "execute"))
+	agents.POST("/:id/process-exceptions", handlers.AddProcessException, handlers.RequirePermission("responses", "execute"))
 	// Backward-compat alias: some clients may omit the trailing 's'
 	agents.POST("/:id/command", handlers.ExecuteAgentCommand, handlers.RequirePermission("responses", "execute"))
 

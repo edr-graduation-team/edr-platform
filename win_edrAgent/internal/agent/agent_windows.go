@@ -7,8 +7,6 @@ import (
 	"context"
 
 	"github.com/edr-platform/win-agent/internal/collectors"
-	"github.com/edr-platform/win-agent/internal/event"
-	"github.com/edr-platform/win-agent/internal/logging"
 	"github.com/edr-platform/win-agent/internal/responder"
 	"github.com/edr-platform/win-agent/internal/signatures"
 )
@@ -26,6 +24,7 @@ func startPlatformCollectors(ctx context.Context, a *Agent) {
 	eventChan := a.eventChan
 
 	var fileAuto collectors.FileAutoResponse
+	var processAuto collectors.ProcessAutoResponse
 	dbPath := cfg.Response.SignatureDBPath
 	if dbPath == "" {
 		dbPath = `C:\ProgramData\EDR\signatures.db`
@@ -52,6 +51,23 @@ func startPlatformCollectors(ctx context.Context, a *Agent) {
 			logger.Info("[Response] Local signature DB opened; autonomous file response armed")
 		} else {
 			logger.Info("[Response] Local signature DB opened (C2 UPDATE_SIGNATURES / optional auto-fetch; auto-quarantine inactive — ETW/file off or auto_quarantine false)")
+		}
+		if cfg.Response.ProcessAutoKillEnabled && cfg.Collectors.ETWEnabled {
+			rulesPath := cfg.Response.ProcessRulesPath
+			if rulesPath == "" {
+				rulesPath = `C:\ProgramData\EDR\process_prevention_rules.json`
+			}
+			mode := cfg.Response.ProcessPreventionMode
+			if mode == "" {
+				mode = "auto_kill_then_override"
+			}
+			peng, pErr := responder.NewProcessEngine(logger, rulesPath, mode, true)
+			if pErr != nil {
+				logger.Warnf("[Response] process auto-response disabled: %v", pErr)
+			} else {
+				processAuto = peng
+				logger.Infof("[Response] Process auto-response armed (mode=%s rules=%s)", mode, rulesPath)
+			}
 		}
 		if cfg.Response.SignatureAutoFetchEnabled {
 			feedURL := cfg.Response.SignatureAutoFetchURL
@@ -91,6 +107,9 @@ func startPlatformCollectors(ctx context.Context, a *Agent) {
 		)
 		if fileAuto != nil {
 			etw.SetFileAutoResponse(fileAuto)
+		}
+		if processAuto != nil {
+			etw.SetProcessAutoResponse(processAuto)
 		}
 		go func() {
 			defer func() {

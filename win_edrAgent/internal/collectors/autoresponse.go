@@ -13,3 +13,8 @@ import (
 type FileAutoResponse interface {
 	EvaluateAndAct(ctx context.Context, filePath string, opcode uint8, pid uint32, base map[string]interface{}) (*event.Event, bool)
 }
+
+// ProcessAutoResponse optionally performs local process enforcement on process creation events.
+type ProcessAutoResponse interface {
+	EvaluateAndAct(ctx context.Context, base map[string]interface{}) (*event.Event, bool)
+}

@@ -52,6 +52,8 @@ type ETWCollector struct {
 
 	// Optional autonomous file response (local hash DB + quarantine).
 	fileAutoResp FileAutoResponse
+	// Optional autonomous process response (rule-pack driven terminate).
+	processAutoResp ProcessAutoResponse
 
 	// Per-type metrics
 	fileEvents      atomic.Uint64
@@ -77,6 +79,11 @@ func NewETWCollector(session string, ch chan<- *event.Event, l *logging.Logger, 
 // SetFileAutoResponse registers optional local hash-match quarantine (nil disables).
 func (c *ETWCollector) SetFileAutoResponse(h FileAutoResponse) {
 	c.fileAutoResp = h
+}
+
+// SetProcessAutoResponse registers optional local process auto-response (nil disables).
+func (c *ETWCollector) SetProcessAutoResponse(h ProcessAutoResponse) {
+	c.processAutoResp = h
 }
 
 func (c *ETWCollector) Start(ctx context.Context) error {
@@ -410,6 +417,24 @@ func (c *ETWCollector) processStart(pid, ppid uint32, eventImg, eventCmd string)
 		"signature_status": sigStatus,
 		"signature_issuer": sigIssuer,
 	})
+	// Apply configurable process filtering BEFORE local autonomous response.
+	// This ensures server-pushed allow exceptions (exclude_process) prevent
+	// both telemetry noise and accidental auto-terminate decisions.
+	if c.filter != nil && c.filter.ShouldFilter(evt) {
+		return
+	}
+
+	if c.processAutoResp != nil {
+		if alt, stop := c.processAutoResp.EvaluateAndAct(context.Background(), evt.Data); stop {
+			if alt != nil {
+				if c.filter != nil && c.filter.ShouldFilter(alt) {
+					return
+				}
+				c.send(alt)
+			}
+			return
+		}
+	}
 	c.send(evt)
 	c.logger.Infof("[ETW] Process START: pid=%d ppid=%d name=%s cmd=%s",
 		pid, ppid, name, truncStr(cmdLine, 80))
@@ -429,6 +454,9 @@ func (c *ETWCollector) processEnd(pid, ppid uint32, eventImg string) {
 		"ppid":   ppid,
 		"name":   name,
 	})
+	if c.filter != nil && c.filter.ShouldFilter(evt) {
+		return
+	}
 	c.send(evt)
 }
 

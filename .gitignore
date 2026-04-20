@@ -16,7 +16,7 @@
 # Output of go coverage
 #*.out
 #*.prof
-#*.md
+*.md
 
 # Go workspace
 go.work

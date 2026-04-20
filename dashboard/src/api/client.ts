@@ -505,15 +505,19 @@ export const agentsApi = {
         return response.data;
     },
     getCommands: async (agentId: string, params?: { limit?: number; offset?: number; status?: string }) => {
-        const response = await connectionApi.get<{ data: Command[]; pagination: { total: number } }>(
+        const response = await connectionApi.get<{
+            data: CommandListItem[];
+            pagination: { total: number; limit: number; offset: number; has_more: boolean };
+        }>(
             `/api/v1/agents/${agentId}/commands`,
             { params }
         );
         return response.data;
     },
-    getCommand: async (agentId: string, commandId: string) => {
-        const response = await connectionApi.get<Command>(`/api/v1/agents/${agentId}/commands/${commandId}`);
-        return response.data;
+    /** Single command by ID (same payload as Action Center row). */
+    getCommand: async (commandId: string) => {
+        const response = await connectionApi.get<{ data: CommandListItem }>(`/api/v1/commands/${commandId}`);
+        return response.data.data;
     },
     cancelCommand: async (agentId: string, commandId: string) => {
         const response = await connectionApi.post(`/api/v1/agents/${agentId}/commands/${commandId}/cancel`);
@@ -983,6 +987,10 @@ export const commandsApi = {
             pagination: { total: number; limit: number; offset: number; has_more: boolean };
         }>('/api/v1/commands', { params });
         return response.data;
+    },
+    get: async (commandId: string) => {
+        const response = await connectionApi.get<{ data: CommandListItem }>(`/api/v1/commands/${commandId}`);
+        return response.data.data;
     },
     stats: async () => {
         const response = await connectionApi.get<{ data: CommandStats }>('/api/v1/commands/stats');

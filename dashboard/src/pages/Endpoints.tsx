@@ -5,7 +5,7 @@ import { Link } from 'react-router-dom';
 import {
     Search, Monitor, Wifi, WifiOff, AlertTriangle, ChevronDown,
     Play, Shield, FileX, Folder, RefreshCw, X, Check, Clock, Loader2, Power, ShieldAlert, Square, Zap,
-    LayoutGrid, List, PanelLeft, Building2, Layers, UserPlus
+    LayoutGrid, List, PanelLeft, Building2, Layers, UserPlus, Terminal
 } from 'lucide-react';
 import {
     agentsApi,
@@ -124,6 +124,7 @@ function CommandExecutionModal({
             showToast(`Command queued successfully (ID: ${data.command_id})`, 'success');
             // Immediate invalidation for status changes that DB updates right away
             queryClient.invalidateQueries({ queryKey: ['agents'] });
+            queryClient.invalidateQueries({ queryKey: ['agent-commands', variables.agentId] });
             // Isolation commands take 5-15s for the agent to respond with SUCCESS.
             // The backend only writes is_isolated AFTER the agent's gRPC ACK arrives.
             // Schedule a delayed re-fetch so the UI reflects the actual state.
@@ -524,6 +525,11 @@ function isCommandDisabledForAgent(agent: Agent, cmd: CommandType): boolean {
 function InlineAgentDetail({ agent }: { agent: Agent }) {
     const queryClient = useQueryClient();
     const { showToast } = useToast();
+    const { data: agentCmds, isLoading: cmdsLoading, isError: cmdsError } = useQuery({
+        queryKey: ['agent-commands', agent.id],
+        queryFn: () => agentsApi.getCommands(agent.id, { limit: 20 }),
+        staleTime: 30_000,
+    });
     const canPushPolicy = authApi.canPushPolicy();
     const [policyJson, setPolicyJson] = useState(JSON.stringify({
         exclude_processes: ['svchost.exe'],
@@ -540,6 +546,7 @@ function InlineAgentDetail({ agent }: { agent: Agent }) {
         onSuccess: (data) => {
             showToast(`Filter policy pushed (Command ID: ${data.command_id})`, 'success');
             queryClient.invalidateQueries({ queryKey: ['agents'] });
+            queryClient.invalidateQueries({ queryKey: ['agent-commands', agent.id] });
         },
         onError: (error: Error) => {
             showToast(`Policy push failed: ${error.message}`, 'error');
@@ -826,6 +833,49 @@ function InlineAgentDetail({ agent }: { agent: Agent }) {
                         )}
                     </div>
                 </div>
+            </div>
+
+            <div className="mt-5 pt-4 border-t border-gray-200 dark:border-gray-700/80">
+                <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+                    <h4 className="text-[11px] font-bold text-gray-400 uppercase tracking-widest flex items-center gap-1.5">
+                        <Terminal className="w-3.5 h-3.5" /> Recent commands
+                    </h4>
+                    <Link
+                        to={`/responses?agent_id=${encodeURIComponent(agent.id)}`}
+                        className="text-xs font-medium text-primary-600 dark:text-primary-400 hover:underline"
+                    >
+                        Open in Action Center
+                    </Link>
+                </div>
+                {cmdsLoading && <p className="text-xs text-gray-500">Loading command history…</p>}
+                {cmdsError && <p className="text-xs text-red-500">Could not load command history.</p>}
+                {!cmdsLoading && !cmdsError && (agentCmds?.data?.length ?? 0) === 0 && (
+                    <p className="text-xs text-gray-500 dark:text-gray-400 italic">No commands recorded for this device yet.</p>
+                )}
+                {!cmdsLoading && !cmdsError && (agentCmds?.data?.length ?? 0) > 0 && (
+                    <div className="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700 bg-white/50 dark:bg-gray-900/40">
+                        <table className="w-full text-left text-[11px] text-gray-700 dark:text-gray-300">
+                            <thead>
+                                <tr className="border-b border-gray-200 dark:border-gray-700 text-gray-500 uppercase tracking-wider">
+                                    <th className="py-2 px-2 font-semibold">ID</th>
+                                    <th className="py-2 px-2 font-semibold">Type</th>
+                                    <th className="py-2 px-2 font-semibold">Status</th>
+                                    <th className="py-2 px-2 font-semibold">Issued</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {agentCmds!.data.map((c) => (
+                                    <tr key={c.id} className="border-b border-gray-100 dark:border-gray-800/80 last:border-0">
+                                        <td className="py-1.5 px-2 font-mono text-[10px] text-gray-500">{c.id.slice(0, 8)}…</td>
+                                        <td className="py-1.5 px-2">{c.command_type.replace(/_/g, ' ')}</td>
+                                        <td className="py-1.5 px-2">{c.status}</td>
+                                        <td className="py-1.5 px-2 whitespace-nowrap">{new Date(c.issued_at).toLocaleString()}</td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                )}
             </div>
         </div>
     );

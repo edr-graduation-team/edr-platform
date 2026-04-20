@@ -123,6 +123,7 @@ func (s *Server) RegisterRoutes(handlers *Handlers) {
 	commands := protected.Group("/commands")
 	commands.GET("", handlers.ListCommands, handlers.RequirePermission("responses", "read"))
 	commands.GET("/stats", handlers.GetCommandStats, handlers.RequirePermission("responses", "read"))
+	commands.GET("/:id", handlers.GetCommand, handlers.RequirePermission("responses", "read"))
 
 	// ── Alert endpoints ──────────────────────────────────────────────────
 	alerts := protected.Group("/alerts")

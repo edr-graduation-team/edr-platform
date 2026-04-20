@@ -296,20 +296,50 @@ func (h *Handlers) GetAgentEvents(c echo.Context) error {
 	})
 }
 
-// GetAgentCommands returns command history for an agent.
+// GetAgentCommands returns command history for an agent (same row shape as Action Center list).
 func (h *Handlers) GetAgentCommands(c echo.Context) error {
 	idStr := c.Param("id")
-	_, err := uuid.Parse(idStr)
+	agentID, err := uuid.Parse(idStr)
 	if err != nil {
 		return errorResponse(c, http.StatusBadRequest, "INVALID_ID", "Invalid agent ID format")
 	}
 
-	// TODO: Query commands for agent
+	if h.commandRepo == nil {
+		return errorResponse(c, http.StatusServiceUnavailable, "DB_UNAVAILABLE", "Command repository is not available")
+	}
 
-	return c.JSON(http.StatusOK, CommandListResponse{
-		Data:       []CommandSummary{},
-		Pagination: PaginationResponse{Total: 0, Limit: 50, Offset: 0},
-		Meta: ResponseMeta{
+	limit, offset := 50, 0
+	_ = echo.QueryParamsBinder(c).Int("limit", &limit).Int("offset", &offset)
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 200 {
+		limit = 200
+	}
+
+	filter := repository.CommandListFilter{
+		AgentID:   &agentID,
+		Limit:     limit,
+		Offset:    offset,
+		SortBy:    "issued_at",
+		SortOrder: "desc",
+	}
+
+	items, total, err := h.commandRepo.ListAll(c.Request().Context(), filter)
+	if err != nil {
+		h.logger.WithError(err).Error("GetAgentCommands: ListAll failed")
+		return errorResponse(c, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to retrieve commands")
+	}
+
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"data": items,
+		"pagination": PaginationResponse{
+			Total:   int(total),
+			Limit:   limit,
+			Offset:  offset,
+			HasMore: int64(offset+limit) < total,
+		},
+		"meta": ResponseMeta{
 			RequestID: c.Response().Header().Get(echo.HeaderXRequestID),
 			Timestamp: time.Now().UTC().Format(time.RFC3339),
 		},

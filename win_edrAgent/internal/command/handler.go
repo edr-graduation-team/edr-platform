@@ -1056,14 +1056,56 @@ func (h *Handler) updateConfig(ctx context.Context, params map[string]string) (s
 	if len(overrides) == 0 {
 		return "", fmt.Errorf("UPDATE_CONFIG requires either a 'config' YAML payload, a 'policy' JSON payload, or at least one override param (server_address, log_level, exclude_process)")
 	}
+	h.mu.Lock()
+	fn := h.configUpdateFn
+	base := h.currentCfg
+	h.mu.Unlock()
+	if fn == nil {
+		return "", fmt.Errorf("no config update handler registered — agent not wired for hot-reload")
+	}
+	if base == nil {
+		return "", fmt.Errorf("current config not available in command handler — call SetCurrentConfig")
+	}
 
-	// Sparse updates are acknowledged but require a full config rebuild.
-	// For now we log the intent and return — a future version can patch the
-	// live config struct field-by-field. Returning success avoids a FAILED
-	// result that would alarm the operator.
-	h.logger.Infof("[C2] Sparse config overrides received (will apply on next restart): %v", overrides)
-	return fmt.Sprintf("Sparse overrides noted (%d keys); apply takes effect on next config reload: %v",
-		len(overrides), overrides), nil
+	newCfg := base.Clone()
+	updated := 0
+
+	if v := strings.TrimSpace(params["server_address"]); v != "" {
+		newCfg.Server.Address = v
+		updated++
+	}
+	if v := strings.TrimSpace(params["log_level"]); v != "" {
+		newCfg.Logging.Level = strings.ToUpper(v)
+		updated++
+	}
+	if v := strings.TrimSpace(params["exclude_process"]); v != "" {
+		exists := false
+		for _, p := range newCfg.Filtering.ExcludeProcesses {
+			if strings.EqualFold(strings.TrimSpace(p), v) {
+				exists = true
+				break
+			}
+		}
+		if !exists {
+			newCfg.Filtering.ExcludeProcesses = append(newCfg.Filtering.ExcludeProcesses, v)
+			updated++
+		}
+	}
+
+	if updated == 0 {
+		return "Sparse overrides received, no effective changes (already present)", nil
+	}
+	if err := fn(newCfg); err != nil {
+		return "", fmt.Errorf("sparse config update failed: %w", err)
+	}
+
+	// Keep command handler's current config pointer in sync for subsequent updates.
+	h.mu.Lock()
+	h.currentCfg = newCfg
+	h.mu.Unlock()
+
+	h.logger.Infof("[C2] Sparse config hot-reload applied (%d changes): %v", updated, overrides)
+	return fmt.Sprintf("Sparse config hot-reload applied (%d changes): %v", updated, overrides), nil
 }
 
 // updateAgent downloads and installs new agent version.

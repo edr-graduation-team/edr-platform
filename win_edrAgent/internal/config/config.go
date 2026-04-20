@@ -49,6 +49,13 @@ type ResponseConfig struct {
 	SignatureAutoFetchLimit int `yaml:"signature_auto_fetch_limit"`
 	// SignatureAutoFetchForce overwrites existing keys on each fetch (default false).
 	SignatureAutoFetchForce bool `yaml:"signature_auto_fetch_force"`
+
+	// ProcessAutoKillEnabled enables local process auto-response based on external rule packs.
+	ProcessAutoKillEnabled bool `yaml:"process_auto_kill_enabled"`
+	// ProcessRulesPath points to a JSON process response rules pack.
+	ProcessRulesPath string `yaml:"process_rules_path"`
+	// ProcessPreventionMode controls behavior on rule match ("detect_only" or "auto_kill_then_override").
+	ProcessPreventionMode string `yaml:"process_prevention_mode"`
 }
 
 // ServerConfig defines Connection Manager connection settings.
@@ -219,6 +226,9 @@ func DefaultConfig() *Config {
 			SignatureAutoFetchURL:     "",
 			SignatureAutoFetchLimit:   500,
 			SignatureAutoFetchForce:   false,
+			ProcessAutoKillEnabled:    false,
+			ProcessRulesPath:          `C:\ProgramData\EDR\process_prevention_rules.json`,
+			ProcessPreventionMode:     "auto_kill_then_override",
 		},
 		Filtering: FilteringConfig{
 			ExcludeProcesses: []string{
@@ -393,6 +403,17 @@ func (c *Config) Validate() error {
 	}
 	if c.Response.SignatureAutoFetchLimit <= 0 {
 		c.Response.SignatureAutoFetchLimit = 500
+	}
+	if c.Response.ProcessRulesPath == "" {
+		c.Response.ProcessRulesPath = `C:\ProgramData\EDR\process_prevention_rules.json`
+	}
+	if c.Response.ProcessPreventionMode == "" {
+		c.Response.ProcessPreventionMode = "auto_kill_then_override"
+	}
+	switch c.Response.ProcessPreventionMode {
+	case "auto_kill_then_override", "detect_only":
+	default:
+		return fmt.Errorf("response.process_prevention_mode must be detect_only or auto_kill_then_override")
 	}
 	return nil
 }

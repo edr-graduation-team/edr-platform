@@ -535,6 +535,109 @@ func (h *Handlers) ExecuteAgentCommand(c echo.Context) error {
 	})
 }
 
+// AddProcessException pushes a live allow-exception for process auto-response.
+// It uses UPDATE_CONFIG sparse override (exclude_process=<name>) so the agent
+// hot-reloads immediately and preserves existing exclusions.
+func (h *Handlers) AddProcessException(c echo.Context) error {
+	idStr := c.Param("id")
+	agentID, err := uuid.Parse(idStr)
+	if err != nil {
+		return errorResponse(c, http.StatusBadRequest, "INVALID_ID", "Invalid agent ID format")
+	}
+	var req ProcessExceptionRequest
+	if err := c.Bind(&req); err != nil {
+		return errorResponse(c, http.StatusBadRequest, "INVALID_REQUEST", "Invalid request body")
+	}
+	procName := strings.TrimSpace(req.ProcessName)
+	if procName == "" {
+		return errorResponse(c, http.StatusBadRequest, "INVALID_REQUEST", "process_name is required")
+	}
+	if h.registry == nil || h.commandRepo == nil {
+		return errorResponse(c, http.StatusServiceUnavailable, "C2_UNAVAILABLE", "Command routing is not available")
+	}
+	if !h.registry.IsOnline(agentID.String()) {
+		return errorResponse(c, http.StatusNotFound, "AGENT_OFFLINE", "Agent is not online — exception cannot be delivered")
+	}
+
+	commandID := uuid.New()
+	meta := map[string]any{
+		"exception_type": "process_allow",
+		"process_name":   procName,
+		"reason":         strings.TrimSpace(req.Reason),
+	}
+	if user := getCurrentUser(c); user != nil {
+		meta["issued_by_username"] = user.Username
+	}
+	dbCmd := &models.Command{
+		ID:          commandID,
+		AgentID:     agentID,
+		CommandType: models.CommandType("update_config"),
+		Parameters: map[string]any{
+			"exclude_process": procName,
+		},
+		Priority:       5,
+		Status:         models.CommandStatusPending,
+		TimeoutSeconds: 120,
+		IssuedBy:       nil,
+		Metadata:       meta,
+	}
+	if err := h.commandRepo.Create(c.Request().Context(), dbCmd); err != nil {
+		h.logger.WithError(err).Error("[C2] Failed to persist process exception command")
+		return errorResponse(c, http.StatusInternalServerError, "DB_ERROR", "Failed to persist exception command")
+	}
+
+	cmd := &edrv1.Command{
+		CommandId: commandID.String(),
+		Timestamp: timestamppb.Now(),
+		Type:      edrv1.CommandType_COMMAND_TYPE_UPDATE_CONFIG,
+		Parameters: map[string]string{
+			"exclude_process": procName,
+		},
+		Priority: 5,
+	}
+	if err := h.registry.Send(agentID.String(), cmd); err != nil {
+		_ = h.commandRepo.UpdateStatus(c.Request().Context(), commandID, models.CommandStatusFailed, nil, err.Error())
+		return errorResponse(c, http.StatusConflict, "SEND_FAILED", err.Error())
+	}
+	if err := h.commandRepo.UpdateStatus(c.Request().Context(), commandID, models.CommandStatusSent, nil, ""); err != nil {
+		h.logger.WithError(err).Warn("[C2] Failed to update process exception command status to sent")
+	}
+
+	h.logger.WithFields(logrus.Fields{
+		"agent_id":   agentID,
+		"command_id": commandID,
+		"process":    procName,
+	}).Info("[C2] Process allow-exception dispatched")
+
+	if h.auditRepo != nil {
+		ip, ua := auditContext(c)
+		username := "unknown"
+		userID := uuid.Nil
+		if user := getCurrentUser(c); user != nil {
+			username = user.Username
+			if uid, parseErr := uuid.Parse(user.UserID); parseErr == nil {
+				userID = uid
+			}
+		}
+		entry := models.NewAuditLog(userID, username, models.AuditActionDeployPolicy, "agent", agentID).
+			WithContext(ip, ua).
+			WithDetails("process_exception=" + procName)
+		go func() {
+			auditCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_ = h.auditRepo.Create(auditCtx, entry)
+		}()
+	}
+
+	return c.JSON(http.StatusAccepted, map[string]interface{}{
+		"command_id":   commandID.String(),
+		"status":       "sent",
+		"agent_id":     agentID.String(),
+		"process_name": procName,
+		"meta":         responseMeta(c),
+	})
+}
+
 // mapCommandType maps REST API command type strings to proto CommandType.
 // Every command type exposed in the dashboard must have a case here;
 // missing entries would cause the agent to receive COMMAND_TYPE_UNSPECIFIED

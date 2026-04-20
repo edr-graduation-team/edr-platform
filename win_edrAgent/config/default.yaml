@@ -55,8 +55,12 @@ collectors:
   process_access_enabled: true
 
 response:
+  # Enable file-based autonomous quarantine response
+  auto_quarantine: true
+  # Enable USB removable volume watcher for response coverage
+  usb_watcher: true
   # Enable process-based autonomous response (rule-pack driven)
-  process_auto_kill_enabled: false
+  process_auto_kill_enabled: true
   # External JSON rule pack path (server-managed file recommended)
   process_rules_path: "C:\\ProgramData\\EDR\\process_prevention_rules.json"
   # "detect_only" or "auto_kill_then_override"

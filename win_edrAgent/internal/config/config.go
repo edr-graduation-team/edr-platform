@@ -226,7 +226,7 @@ func DefaultConfig() *Config {
 			SignatureAutoFetchURL:     "",
 			SignatureAutoFetchLimit:   500,
 			SignatureAutoFetchForce:   false,
-			ProcessAutoKillEnabled:    false,
+			ProcessAutoKillEnabled:    true,
 			ProcessRulesPath:          `C:\ProgramData\EDR\process_prevention_rules.json`,
 			ProcessPreventionMode:     "auto_kill_then_override",
 		},

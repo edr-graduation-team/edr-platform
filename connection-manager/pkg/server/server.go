@@ -44,11 +44,17 @@ type Server struct {
 	heartbeatHandler *handlers.HeartbeatHandler
 	registry         *handlers.AgentRegistry
 	commandRepo      repository.CommandRepository
+	quarantineRepo   repository.QuarantineRepository
 }
 
 // SetCommandRepo injects the command repository for C2 result persistence.
 func (s *Server) SetCommandRepo(repo repository.CommandRepository) {
 	s.commandRepo = repo
+}
+
+// SetQuarantineRepo injects quarantine inventory persistence (optional).
+func (s *Server) SetQuarantineRepo(repo repository.QuarantineRepository) {
+	s.quarantineRepo = repo
 }
 
 // NewServer creates a new gRPC server with all handler dependencies injected.
@@ -341,6 +347,8 @@ func (s *Server) SendCommandResult(ctx context.Context, res *edrv1.CommandResult
 					// the 'offline' overwrite when already 'suspended'.
 					s.updateAgentStatus(ctx, agentID, models.AgentStatusSuspended)
 					s.logger.Infof("[Control] Agent %s marked SUSPENDED after stop_agent ACK", agentID)
+				case cmdType == "quarantine_file" || cmdType == "restore_quarantine_file" || cmdType == "delete_quarantine_file":
+					s.applyQuarantineInventoryOnSuccess(ctx, res, cmd, agentID)
 				}
 			}
 		}

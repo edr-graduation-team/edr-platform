@@ -299,6 +299,8 @@ enum CommandType {
   COMMAND_TYPE_BLOCK_DOMAIN = 16;
   COMMAND_TYPE_UNBLOCK_DOMAIN = 17;
   COMMAND_TYPE_UPDATE_SIGNATURES = 18;
+  COMMAND_TYPE_RESTORE_QUARANTINE_FILE = 19;
+  COMMAND_TYPE_DELETE_QUARANTINE_FILE = 20;
 }
 
 // ============================================================================

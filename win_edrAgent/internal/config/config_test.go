@@ -23,11 +23,11 @@ func TestDefaultConfig(t *testing.T) {
 	}
 
 	// Agent defaults
-	if cfg.Agent.BatchSize != 50 {
-		t.Errorf("expected batch size 50, got %d", cfg.Agent.BatchSize)
+	if cfg.Agent.BatchSize != 200 {
+		t.Errorf("expected batch size 200, got %d", cfg.Agent.BatchSize)
 	}
-	if cfg.Agent.BatchInterval != time.Second {
-		t.Errorf("expected batch interval 1s, got %v", cfg.Agent.BatchInterval)
+	if cfg.Agent.BatchInterval != 2*time.Second {
+		t.Errorf("expected batch interval 2s, got %v", cfg.Agent.BatchInterval)
 	}
 	if cfg.Agent.BufferSize != 5000 {
 		t.Errorf("expected buffer size 5000, got %d", cfg.Agent.BufferSize)

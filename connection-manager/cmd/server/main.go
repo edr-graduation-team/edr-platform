@@ -187,8 +187,9 @@ func main() {
 	var enrollmentTokenRepo repository.EnrollmentTokenRepository
 	var agentRepo repository.AgentRepository     // hoisted for sweeper access
 	var commandRepo repository.CommandRepository // hoisted for C2 injection
-	var auditRepo repository.AuditLogRepository  // hoisted for audit log API
-	var alertRepo repository.AlertRepository     // hoisted for alert stats API
+	var quarantineRepo repository.QuarantineRepository
+	var auditRepo repository.AuditLogRepository // hoisted for audit log API
+	var alertRepo repository.AlertRepository    // hoisted for alert stats API
 	var dbPool *database.PostgresPool            // scoped outside if-block for fallback access
 
 	dbPoolInst, dbErr := database.NewPostgresPool(ctx, &database.PostgresConfig{
@@ -230,6 +231,7 @@ func main() {
 		certRepo := repository.NewPostgresCertificateRepository(pool)
 		commandRepo = repository.NewPostgresCommandRepository(pool)
 		alertRepo = repository.NewPostgresAlertRepository(pool)
+		quarantineRepo = repository.NewPostgresQuarantineRepository(pool)
 
 		// CA paths for signing agent certificates (ca.key next to ca.crt)
 		caCertPath := cfg.Server.CACertPath
@@ -382,6 +384,12 @@ func main() {
 		grpcServer.SetCommandRepo(commandRepo)
 		evtHandler.SetCommandRepo(commandRepo) // enables re-delivery on reconnect
 		logger.Info("C2 command persistence enabled (commands table + pending re-delivery)")
+	}
+	if quarantineRepo != nil {
+		evtHandler.SetQuarantineRepo(quarantineRepo)
+		apiHandlers.SetQuarantineRepo(quarantineRepo)
+		grpcServer.SetQuarantineRepo(quarantineRepo)
+		logger.Info("Quarantine inventory API enabled (agent_quarantine_items)")
 	}
 
 	// Wire AuditLogRepository into REST handlers for the Audit Logs page.

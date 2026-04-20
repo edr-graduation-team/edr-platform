@@ -371,6 +371,14 @@ func (h *Handlers) ExecuteAgentCommand(c echo.Context) error {
 	req.CommandType = normalizeCommandType(req.CommandType)
 	h.logger.Infof("[C2] Request bound: agent=%s type=%s timeout=%d", agentID, req.CommandType, req.Timeout)
 
+	// Reject unknown types here (API allowlist). Agent still enforces its own rules
+	// (e.g. run_cmd executable whitelist) after delivery.
+	if mapCommandType(req.CommandType) == edrv1.CommandType_COMMAND_TYPE_UNSPECIFIED {
+		h.logger.Warnf("[C2] Unsupported command_type: %q", req.CommandType)
+		return errorResponse(c, http.StatusBadRequest, "UNSUPPORTED_COMMAND",
+			"Unknown or unsupported command_type — see API documentation for allowed values")
+	}
+
 	// Validate registry is available
 	if h.registry == nil {
 		h.logger.Warn("[C2] Registry is nil")
@@ -395,6 +403,14 @@ func (h *Handlers) ExecuteAgentCommand(c echo.Context) error {
 		return errorResponse(c, http.StatusNotFound, "AGENT_OFFLINE", "Agent is not online — command cannot be delivered")
 	}
 
+	execTimeoutSec := req.Timeout
+	if req.TimeoutSeconds > 0 {
+		execTimeoutSec = req.TimeoutSeconds
+	}
+	if execTimeoutSec <= 0 {
+		execTimeoutSec = 300
+	}
+
 	// ── Step 1: Persist to DB FIRST (status=pending) ──────────────────────────
 	// Always create a durable record before attempting delivery so commands are
 	// never lost if the gRPC stream disconnects during the Send() call.
@@ -406,13 +422,6 @@ func (h *Handlers) ExecuteAgentCommand(c echo.Context) error {
 		params := make(map[string]any, len(req.Parameters))
 		for k, v := range req.Parameters {
 			params[k] = v
-		}
-		timeout := req.Timeout
-		if req.TimeoutSeconds > 0 {
-			timeout = req.TimeoutSeconds
-		}
-		if timeout <= 0 {
-			timeout = 300
 		}
 		// Build metadata with issuer info for audit (avoids FK constraint on issued_by)
 		meta := map[string]any{}
@@ -429,7 +438,7 @@ func (h *Handlers) ExecuteAgentCommand(c echo.Context) error {
 			Parameters:     params,
 			Priority:       5,
 			Status:         models.CommandStatusPending,
-			TimeoutSeconds: timeout,
+			TimeoutSeconds: execTimeoutSec,
 			IssuedBy:       nil, // always nil to avoid FK violation
 			Metadata:       meta,
 		}
@@ -477,6 +486,7 @@ func (h *Handlers) ExecuteAgentCommand(c echo.Context) error {
 		Type:       cmdType,
 		Parameters: req.Parameters,
 		Priority:   5,
+		ExpiresAt:  timestamppb.New(time.Now().Add(time.Duration(execTimeoutSec) * time.Second)),
 	}
 
 	if err := h.registry.Send(agentID.String(), cmd); err != nil {
@@ -694,6 +704,10 @@ func mapCommandType(cmdType string) edrv1.CommandType {
 		return edrv1.CommandType(17)
 	case "update_signatures":
 		return edrv1.CommandType(18)
+	case "restore_quarantine_file":
+		return edrv1.CommandType(19) // COMMAND_TYPE_RESTORE_QUARANTINE_FILE
+	case "delete_quarantine_file":
+		return edrv1.CommandType(20) // COMMAND_TYPE_DELETE_QUARANTINE_FILE
 	case "scan_file", "scan_memory":
 		// Map to COLLECT_FORENSICS so the agent receives it; params carry sub-type.
 		return edrv1.CommandType_COMMAND_TYPE_COLLECT_FORENSICS

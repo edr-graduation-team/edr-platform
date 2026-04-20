@@ -1,0 +1,67 @@
+{
+  "version": "2026.04.20",
+  "rules": [
+    {
+      "id": "proc_win_office_powershell_encoded",
+      "title": "Office parent spawning PowerShell with encoded payload indicators",
+      "enabled": true,
+      "severity": "high",
+      "action": "terminate",
+      "match": {
+        "parent_name_any": [
+          "winword.exe",
+          "excel.exe",
+          "powerpnt.exe",
+          "outlook.exe"
+        ],
+        "name_any": [
+          "powershell.exe",
+          "pwsh.exe"
+        ],
+        "command_line_contains_any": [
+          " -enc ",
+          " -encodedcommand ",
+          "frombase64string",
+          "downloadstring",
+          "invoke-expression",
+          " iwr ",
+          " iex "
+        ]
+      },
+      "response": {
+        "kill_tree": true,
+        "cooldown_seconds": 120
+      }
+    },
+    {
+      "id": "proc_win_office_cmd_lolbin_chain",
+      "title": "Office parent spawning cmd with suspicious LOLBin chain",
+      "enabled": true,
+      "severity": "high",
+      "action": "terminate",
+      "match": {
+        "parent_name_any": [
+          "winword.exe",
+          "excel.exe",
+          "powerpnt.exe",
+          "outlook.exe"
+        ],
+        "name_any": [
+          "cmd.exe"
+        ],
+        "command_line_contains_any": [
+          " mshta ",
+          " regsvr32 ",
+          " rundll32 ",
+          " powershell ",
+          " certutil ",
+          " bitsadmin "
+        ]
+      },
+      "response": {
+        "kill_tree": true,
+        "cooldown_seconds": 120
+      }
+    }
+  ]
+}

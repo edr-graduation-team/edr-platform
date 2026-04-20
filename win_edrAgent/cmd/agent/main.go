@@ -258,7 +258,6 @@ func runInstall(
 		os.Exit(1)
 	}
 
-
 	// ── Resolve parameters: CLI > Embedded > empty ───────────────────────────
 	// Token resolution (zero-touch support):
 	//   1. CLI -token flag (highest priority)
@@ -417,11 +416,11 @@ func runInstall(
 
 	// ── Step 7: Start service ────────────────────────────────────────────────
 	fmt.Println("[7/7] Starting EDRAgent service...")
-	
+
 	// Legacy directory cleanup (best-effort, ignore errors if locked by permissions)
 	os.RemoveAll(`C:\ProgramData\EDR\certs`)
 	os.RemoveAll(`C:\ProgramData\EDR\config`)
-	
+
 	if err := service.StartService(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error starting service: %v\n", err)
 		logger.Errorf("Service start failed: %v", err)

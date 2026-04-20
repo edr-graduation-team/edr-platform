@@ -116,6 +116,32 @@ func NewProcessEngine(logger *logging.Logger, rulesPath, preventionMode string, 
 	return e, nil
 }
 
+// EnsureDefaultProcessRulesFile writes the embedded starter rule pack when the file is missing or empty,
+// so process auto-response works after install without deploying JSON separately (operators may overwrite later).
+func EnsureDefaultProcessRulesFile(path string, logger *logging.Logger) error {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return fmt.Errorf("process rules path is empty")
+	}
+	if fi, err := os.Stat(path); err == nil && fi.Size() > 0 {
+		return nil
+	}
+	if len(defaultProcessRulesJSON) == 0 {
+		return fmt.Errorf("embedded default process rules unavailable")
+	}
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("mkdir rules dir: %w", err)
+	}
+	if err := os.WriteFile(path, defaultProcessRulesJSON, 0644); err != nil {
+		return fmt.Errorf("write default rules: %w", err)
+	}
+	if logger != nil {
+		logger.Infof("[Response] Installed default process rule pack → %s", path)
+	}
+	return nil
+}
+
 // EvaluateAndAct applies process rules and performs local terminate action when matched.
 func (e *ProcessEngine) EvaluateAndAct(ctx context.Context, base map[string]interface{}) (*event.Event, bool) {
 	if e == nil || !e.enabled || len(e.rules) == 0 {

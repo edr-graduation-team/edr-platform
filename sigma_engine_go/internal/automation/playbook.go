@@ -2,9 +2,12 @@
 package automation
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"regexp"
 	"strings"
 	"sync"
@@ -337,6 +340,14 @@ func (m *PlaybookManager) executeStep(ctx context.Context, step PlaybookStep, al
 		result.Output = map[string]string{"action": "acknowledge", "alert_id": alert.ID}
 	case StepResolve:
 		result.Output = map[string]string{"action": "resolve", "alert_id": alert.ID}
+	case StepWebhook:
+		err = m.executeWebhookStep(ctx, step, alert)
+	case StepCreateTicket:
+		result.Output = map[string]string{"note": "create_ticket has no external ticketing integration in this build"}
+	case StepEscalate:
+		result.Output = map[string]string{"note": "escalate step is informational; use escalation rules for timed notifications"}
+	case StepConditional:
+		result.Output = map[string]string{"note": "conditional is evaluated per-step via condition field only"}
 	default:
 		err = fmt.Errorf("unknown step type: %s", step.Type)
 	}
@@ -350,6 +361,62 @@ func (m *PlaybookManager) executeStep(ctx context.Context, step PlaybookStep, al
 	}
 
 	return result
+}
+
+// executeWebhookStep POSTs JSON to config["url"] with optional config["body"] and config["headers"].
+func (m *PlaybookManager) executeWebhookStep(ctx context.Context, step PlaybookStep, alert *domain.Alert) error {
+	rawURL, _ := step.Config["url"].(string)
+	if rawURL == "" {
+		return fmt.Errorf("webhook step missing url")
+	}
+	urlStr := SubstituteVariables(rawURL, alert)
+
+	body := map[string]interface{}{
+		"alert_id":   alert.ID,
+		"rule_id":    alert.RuleID,
+		"rule_title": alert.RuleTitle,
+		"severity":   alert.Severity.String(),
+		"timestamp":  alert.Timestamp.UTC().Format(time.RFC3339),
+	}
+	if custom, ok := step.Config["body"].(map[string]interface{}); ok {
+		for k, v := range custom {
+			body[k] = v
+		}
+	}
+
+	timeout := 30 * time.Second
+	if step.TimeoutSecs > 0 {
+		timeout = time.Duration(step.TimeoutSecs) * time.Second
+	}
+	reqCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	payload, err := json.Marshal(body)
+	if err != nil {
+		return err
+	}
+
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, urlStr, bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if hdrs, ok := step.Config["headers"].(map[string]interface{}); ok {
+		for k, v := range hdrs {
+			req.Header.Set(k, SubstituteVariables(fmt.Sprint(v), alert))
+		}
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, resp.Body)
+	if resp.StatusCode >= 400 {
+		return fmt.Errorf("webhook returned %s", resp.Status)
+	}
+	return nil
 }
 
 // evaluateCondition checks if condition is met.

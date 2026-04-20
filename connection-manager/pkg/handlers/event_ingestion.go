@@ -47,7 +47,8 @@ type EventHandler struct {
 	fallbackStore *EventFallbackStore          // PostgreSQL fallback when Kafka is unavailable
 	registry      *AgentRegistry               // Live agent presence and command routing
 	agentService  service.AgentService         // Persists status to PostgreSQL
-	commandRepo   repository.CommandRepository // Re-delivers pending commands on reconnect
+	commandRepo    repository.CommandRepository    // Re-delivers pending commands on reconnect
+	quarantineRepo repository.QuarantineRepository // Optional: quarantine inventory from telemetry
 }
 
 // NewEventHandler creates a new event handler.
@@ -84,6 +85,11 @@ func (h *EventHandler) SetAgentService(svc service.AgentService) {
 // query for any commands in status pending/sent and re-push them to the agent.
 func (h *EventHandler) SetCommandRepo(repo repository.CommandRepository) {
 	h.commandRepo = repo
+}
+
+// SetQuarantineRepo sets optional persistence for per-agent quarantine inventory.
+func (h *EventHandler) SetQuarantineRepo(repo repository.QuarantineRepository) {
+	h.quarantineRepo = repo
 }
 
 // SetFallbackStore sets the PostgreSQL fallback store.
@@ -485,6 +491,9 @@ func (h *EventHandler) redeliverPendingCommands(ctx context.Context, agentID str
 			Parameters: params,
 			Priority:   int32(dbCmd.Priority),
 		}
+		if !dbCmd.ExpiresAt.IsZero() {
+			cmd.ExpiresAt = timestamppb.New(dbCmd.ExpiresAt)
+		}
 
 		select {
 		case cmdChan <- cmd:
@@ -542,6 +551,10 @@ func mapDBCommandTypeToProto(cmdType string) edrv1.CommandType {
 		return edrv1.CommandType(10)
 	case "shutdown", "shutdown_machine":
 		return edrv1.CommandType(11)
+	case "restore_quarantine_file":
+		return edrv1.CommandType(19)
+	case "delete_quarantine_file":
+		return edrv1.CommandType(20)
 	default:
 		return edrv1.CommandType_COMMAND_TYPE_UNSPECIFIED
 	}
@@ -696,6 +709,9 @@ func (h *EventHandler) processBatch(ctx context.Context, agentID string, batch *
 	}
 	events = validEvents
 
+	h.noteAutonomousResponseEvents(logger, agentID, batch, events)
+	h.persistQuarantineFromEvents(ctx, agentID, events)
+
 	// 7. Publish each event individually to Kafka (agent_id as partition key). Respect context cancellation.
 	if h.kafkaProducer != nil {
 		for i, ev := range events {
@@ -839,6 +855,50 @@ func validateEventSchema(ev map[string]interface{}) error {
 	}
 
 	return nil
+}
+
+// noteAutonomousResponseEvents logs when the agent performed a local response (quarantine / process rule)
+// and emitted telemetry so operators can confirm the platform received it.
+func (h *EventHandler) noteAutonomousResponseEvents(logger *logrus.Entry, agentID string, batch *edrv1.EventBatch, events []map[string]interface{}) {
+	if batch != nil && batch.GetMetadata() != nil {
+		if batch.GetMetadata()["autonomous_response"] == "true" {
+			logger.WithFields(logrus.Fields{
+				"agent_id": agentID,
+				"batch_id": batch.GetBatchId(),
+			}).Info("[AutonomousResponse] Agent flagged batch containing local response actions")
+		}
+	}
+	for i, ev := range events {
+		data, _ := ev["data"].(map[string]interface{})
+		if data == nil || !interfaceTruthyAutonomous(data["autonomous"]) {
+			continue
+		}
+		action, _ := data["action"].(string)
+		threat, _ := data["threat_name"].(string)
+		bid := ""
+		if batch != nil {
+			bid = batch.GetBatchId()
+		}
+		logger.WithFields(logrus.Fields{
+			"agent_id":    agentID,
+			"batch_id":    bid,
+			"event_index": i,
+			"event_type":  ev["event_type"],
+			"action":      action,
+			"threat_name": threat,
+		}).Info("[AutonomousResponse] Local endpoint action ingested (telemetry path)")
+	}
+}
+
+func interfaceTruthyAutonomous(v interface{}) bool {
+	switch t := v.(type) {
+	case bool:
+		return t
+	case string:
+		return strings.EqualFold(strings.TrimSpace(t), "true")
+	default:
+		return false
+	}
 }
 
 // enrichEventContextFields populates normalized top-level fields from known

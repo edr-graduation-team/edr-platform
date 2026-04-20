@@ -16,6 +16,7 @@ import (
 	"github.com/edr-platform/sigma-engine/internal/application/mapping"
 	appmonitoring "github.com/edr-platform/sigma-engine/internal/application/monitoring"
 	"github.com/edr-platform/sigma-engine/internal/application/rules"
+	"github.com/edr-platform/sigma-engine/internal/automation"
 	"github.com/edr-platform/sigma-engine/internal/domain"
 	"github.com/edr-platform/sigma-engine/internal/infrastructure/cache"
 	"github.com/edr-platform/sigma-engine/internal/infrastructure/config"
@@ -156,6 +157,12 @@ func main() {
 	}()
 	outputManager.RegisterOutput("enhanced_jsonl", enhancedOutput)
 
+	automationNotifier := automation.NewNotificationManager()
+	automationPlaybooks := automation.NewPlaybookManager(automationNotifier)
+	automationEscalations := automation.NewEscalationManager(automationNotifier)
+	automationEscalations.StartBackgroundChecker(ctx, time.Minute)
+	logger.Info("Live engine: playbook + escalation automation enabled (in-process)")
+
 	// Start file monitor
 	if err := fileMonitor.Start(); err != nil {
 		logger.Fatalf("Failed to start file monitor: %v", err)
@@ -186,7 +193,7 @@ func main() {
 
 	// Main processing loop
 	logger.Info("Starting live monitoring...")
-	processEvents(ctx, fileMonitor, detectionEngine, alertEnricher, outputManager, cfg, &totalAlerts, &alertsMu)
+	processEvents(ctx, fileMonitor, detectionEngine, alertEnricher, outputManager, cfg, &totalAlerts, &alertsMu, automationPlaybooks, automationEscalations)
 
 	logger.Info("Application shutdown complete")
 }
@@ -254,6 +261,18 @@ func loadRules(ctx context.Context, cfg *config.Config) (*rules.RuleIndex, error
 	return ruleIndex, nil
 }
 
+func runPlaybookAutomation(ctx context.Context, playbooks *automation.PlaybookManager, escalations *automation.EscalationManager, a *domain.Alert) {
+	if a == nil {
+		return
+	}
+	if escalations != nil {
+		escalations.TrackAlert(a)
+	}
+	if playbooks != nil {
+		playbooks.ExecuteForAlert(ctx, a)
+	}
+}
+
 // processEvents processes events from the file monitor using ATOMIC EVENT AGGREGATION.
 // Key change: Instead of 1 event → N alerts (one per matched rule), we now produce
 // 1 event → 1 aggregated alert (combining all matched rules).
@@ -267,6 +286,8 @@ func processEvents(
 	cfg *config.Config,
 	totalAlerts *uint64,
 	alertsMu *sync.Mutex,
+	playbooks *automation.PlaybookManager,
+	escalations *automation.EscalationManager,
 ) {
 	eventChan := fileMonitor.Events()
 	errorChan := fileMonitor.Errors()
@@ -327,6 +348,8 @@ func processEvents(
 				// Fallback to base alert if enrichment fails
 				if err := outputManager.WriteAlert(baseAlert); err != nil {
 					logger.Warnf("Failed to write alert: %v", err)
+				} else {
+					runPlaybookAutomation(ctx, playbooks, escalations, baseAlert)
 				}
 				continue
 			}
@@ -360,6 +383,7 @@ func processEvents(
 			// Increment alert counter if successfully written
 			// Note: Now this is 1 per event (not 1 per rule match)
 			if alertWritten {
+				runPlaybookAutomation(ctx, playbooks, escalations, baseAlert)
 				alertsMu.Lock()
 				(*totalAlerts)++
 				alertsMu.Unlock()

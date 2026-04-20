@@ -72,6 +72,10 @@ func stringifyCommandType(t pb.CommandType) string {
 		return "COMMAND_TYPE_UNBLOCK_DOMAIN"
 	case 18:
 		return "COMMAND_TYPE_UPDATE_SIGNATURES"
+	case 19:
+		return "COMMAND_TYPE_RESTORE_QUARANTINE_FILE"
+	case 20:
+		return "COMMAND_TYPE_DELETE_QUARANTINE_FILE"
 	default:
 		return fmt.Sprintf("COMMAND_UNKNOWN_%d", int32(t))
 	}

@@ -185,6 +185,8 @@ const (
 	CommandTypeBlockDomain      CommandType = "block_domain"
 	CommandTypeUnblockDomain    CommandType = "unblock_domain"
 	CommandTypeUpdateSignatures CommandType = "update_signatures"
+	CommandTypeRestoreQuarantineFile CommandType = "restore_quarantine_file"
+	CommandTypeDeleteQuarantineFile  CommandType = "delete_quarantine_file"
 )
 
 // CommandStatus represents command execution status.
@@ -239,4 +241,29 @@ func (c *Command) IsComplete() bool {
 // IsExpired returns true if command has exceeded its expiration time.
 func (c *Command) IsExpired() bool {
 	return time.Now().After(c.ExpiresAt)
+}
+
+// QuarantineItemState is the analyst / lifecycle state for an inventoried quarantined file.
+type QuarantineItemState string
+
+const (
+	QuarantineStateQuarantined   QuarantineItemState = "quarantined"
+	QuarantineStateAcknowledged  QuarantineItemState = "acknowledged"
+	QuarantineStateRestored      QuarantineItemState = "restored"
+	QuarantineStateDeleted       QuarantineItemState = "deleted"
+)
+
+// QuarantineItem represents one file held in the agent quarantine folder (server-side inventory).
+type QuarantineItem struct {
+	ID              uuid.UUID           `json:"id" db:"id"`
+	AgentID         uuid.UUID           `json:"agent_id" db:"agent_id"`
+	EventID         string              `json:"event_id,omitempty" db:"event_id"`
+	OriginalPath    string              `json:"original_path" db:"original_path"`
+	QuarantinePath  string              `json:"quarantine_path" db:"quarantine_path"`
+	SHA256          string              `json:"sha256,omitempty" db:"sha256"`
+	ThreatName      string              `json:"threat_name,omitempty" db:"threat_name"`
+	Source          string              `json:"source" db:"source"`
+	State           QuarantineItemState `json:"state" db:"state"`
+	CreatedAt       time.Time           `json:"created_at" db:"created_at"`
+	UpdatedAt       time.Time           `json:"updated_at" db:"updated_at"`
 }

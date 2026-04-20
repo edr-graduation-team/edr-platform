@@ -204,7 +204,7 @@ func DefaultConfig() *Config {
 		Collectors: CollectorConfig{
 			ETWEnabled:       true,
 			ETWSessionName:   "EDRAgentSession",
-			WMIEnabled:       false, // Disabled by default: ETW provides real-time process events. Enable via config for periodic inventory.
+			WMIEnabled:       true, // Matches config/default.yaml — periodic inventory + full telemetry for dashboard-built installs
 			WMIInterval:      60 * time.Minute,
 			RegistryEnabled:  true,
 			FileEnabled:      true,
@@ -216,6 +216,8 @@ func DefaultConfig() *Config {
 			PipeEnabled:          true,
 			ProcessAccessEnabled: true,
 		},
+		// Autonomous response defaults: used by installer.GenerateConfig (dashboard / zero-touch).
+		// Keep aligned with config/default.yaml response.* so first-time installs are fully armed.
 		Response: ResponseConfig{
 			AutoQuarantine:            true,
 			SignatureDBPath:           `C:\ProgramData\EDR\signatures.db`,

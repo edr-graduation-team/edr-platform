@@ -20,6 +20,7 @@ import (
 	"github.com/edr-platform/sigma-engine/internal/application/rules"
 	"github.com/edr-platform/sigma-engine/internal/analytics"
 	"github.com/edr-platform/sigma-engine/internal/application/scoring"
+	"github.com/edr-platform/sigma-engine/internal/automation"
 	"github.com/edr-platform/sigma-engine/internal/domain"
 	"github.com/edr-platform/sigma-engine/internal/handlers"
 	"github.com/edr-platform/sigma-engine/internal/infrastructure/cache"
@@ -213,6 +214,14 @@ func main() {
 		}
 	}
 	apiServer = handlers.NewServer(apiCfg, ruleRepo, alertRepo, auditLogger, cfg.RiskScoring.RiskLevels)
+
+	automationNotifier := automation.NewNotificationManager()
+	automationPlaybooks := automation.NewPlaybookManager(automationNotifier)
+	automationEscalations := automation.NewEscalationManager(automationNotifier)
+	apiServer.WireAutomationAPI(automationNotifier, automationPlaybooks, automationEscalations)
+	automationEscalations.StartBackgroundChecker(ctx, time.Minute)
+	logger.Info("Sigma automation API and in-process playbook/escalation managers enabled")
+
 	// Alert correlation (Kafka EventLoop + REST API); optional PostgreSQL edge persistence + cache warm-start.
 	corrMgr := analytics.NewCorrelationManager()
 	if dbPool != nil {
@@ -313,6 +322,9 @@ func main() {
 		if baselineAggregator != nil {
 			eventLoop.SetBaselineAggregator(baselineAggregator)
 		}
+
+		eventLoop.SetPlaybookManager(automationPlaybooks)
+		eventLoop.SetEscalationManager(automationEscalations)
 
 		// Inject AlertWriter for database persistence (Kafka → PostgreSQL bridge)
 		if alertRepo != nil {

@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"os"
 	"runtime"
+	"runtime/debug"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -525,6 +527,12 @@ func (a *Agent) runBatcher() {
 
 			if batch := a.batcher.Add(evt); batch != nil {
 				a.processBatch(batch)
+			} else if eventHasAutonomousResponse(evt) {
+				// Hash-match quarantine / process-rule actions must reach the server quickly,
+				// not only when the batch fills or the flush ticker fires.
+				if b := a.batcher.Flush(); b != nil {
+					a.processBatch(b)
+				}
 			}
 		}
 	}
@@ -586,6 +594,12 @@ func (a *Agent) processBatch(batch *event.Batch) {
 	}
 
 	// Use the exact byte array produced by the Batcher so the checksum remains valid on the server.
+	meta := map[string]string{
+		"timestamp": batch.Timestamp.Format(time.RFC3339),
+	}
+	if batchContainsAutonomousResponse(batch.Events) {
+		meta["autonomous_response"] = "true"
+	}
 	pbBatch := &pb.EventBatch{
 		BatchId:     batch.ID,
 		AgentId:     a.cfg.Agent.ID,
@@ -594,9 +608,7 @@ func (a *Agent) processBatch(batch *event.Batch) {
 		Payload:     batch.Payload,
 		EventCount:  int32(len(batch.Events)),
 		Checksum:    batch.Checksum,
-		Metadata: map[string]string{
-			"timestamp": batch.Timestamp.Format(time.RFC3339),
-		},
+		Metadata:    meta,
 	}
 
 	// ── FAST PATH: direct send (no disk I/O) ─────────────────────────────────
@@ -722,19 +734,34 @@ func (a *Agent) runCommandLoop() {
 			// Dispatch execution + ACK to background goroutine.
 			go func(c *command.Command) {
 				defer func() { <-cmdSem }() // release slot
+				started := time.Now()
+				var result *command.Result
 				defer func() {
 					if r := recover(); r != nil {
-						a.logger.Errorf("[C2] Panic in command worker id=%s: %v", c.ID, r)
+						a.logger.Errorf("[C2] Panic in command worker id=%s: %v\n%s", c.ID, r, debug.Stack())
+						result = &command.Result{
+							CommandID: c.ID,
+							Status:    "FAILED",
+							Error:     fmt.Sprintf("panic during command execution: %v", r),
+							Duration:  time.Since(started),
+							Timestamp: time.Now(),
+						}
+					}
+					if result != nil {
+						a.logger.Infof("[C2] Command result: id=%s status=%s duration=%v", result.CommandID, result.Status, result.Duration)
+						if err := a.grpcClient.SendCommandResult(a.ctx, result, a.cfg.Agent.ID); err != nil {
+							a.logger.Warnf("[C2] SendCommandResult failed for id=%s: %v", result.CommandID, err)
+						}
 					}
 				}()
 
-				result := a.commandHandler.Execute(a.ctx, c)
-				if result != nil {
-					a.logger.Infof("[C2] Command result: id=%s status=%s duration=%v", result.CommandID, result.Status, result.Duration)
-					if err := a.grpcClient.SendCommandResult(a.ctx, result, a.cfg.Agent.ID); err != nil {
-						a.logger.Warnf("[C2] SendCommandResult failed for id=%s: %v", result.CommandID, err)
-					}
+				execCtx := a.ctx
+				var execCancel context.CancelFunc
+				if !c.ExpiresAt.IsZero() {
+					execCtx, execCancel = context.WithDeadline(a.ctx, c.ExpiresAt)
+					defer execCancel()
 				}
+				result = a.commandHandler.Execute(execCtx, c)
 			}(c)
 		}
 	}
@@ -775,6 +802,10 @@ func mapProtoCommandType(protoType string) command.CommandType {
 		return command.CmdUnblockDomain
 	case "COMMAND_TYPE_UPDATE_SIGNATURES":
 		return command.CmdUpdateSignatures
+	case "COMMAND_TYPE_RESTORE_QUARANTINE_FILE", "19":
+		return command.CmdRestoreQuarantineFile
+	case "COMMAND_TYPE_DELETE_QUARANTINE_FILE", "20":
+		return command.CmdDeleteQuarantineFile
 	case "COMMAND_TYPE_RESTART", "10": // Machine reboot (enum value 10)
 		return command.CmdRestart
 	case "COMMAND_TYPE_SHUTDOWN", "11": // Machine shutdown (enum value 11)
@@ -809,6 +840,34 @@ func (a *Agent) runHealthReporter() {
 			a.reportHealth()
 		}
 	}
+}
+
+// eventHasAutonomousResponse is true for local responder output (auto-quarantine / process rules).
+func eventHasAutonomousResponse(evt *event.Event) bool {
+	if evt == nil || evt.Data == nil {
+		return false
+	}
+	v, ok := evt.Data["autonomous"]
+	if !ok {
+		return false
+	}
+	switch b := v.(type) {
+	case bool:
+		return b
+	case string:
+		return strings.EqualFold(b, "true")
+	default:
+		return false
+	}
+}
+
+func batchContainsAutonomousResponse(events []*event.Event) bool {
+	for _, e := range events {
+		if eventHasAutonomousResponse(e) {
+			return true
+		}
+	}
+	return false
 }
 
 // reportHealth logs current health metrics.

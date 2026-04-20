@@ -12,6 +12,7 @@ import (
 	"github.com/edr-platform/sigma-engine/internal/application/alert"
 	"github.com/edr-platform/sigma-engine/internal/application/detection"
 	"github.com/edr-platform/sigma-engine/internal/analytics"
+	"github.com/edr-platform/sigma-engine/internal/automation"
 	"github.com/edr-platform/sigma-engine/internal/application/scoring"
 	"github.com/edr-platform/sigma-engine/internal/domain"
 	"github.com/edr-platform/sigma-engine/internal/infrastructure/logger"
@@ -57,6 +58,9 @@ type ParallelEventProcessor struct {
 
 	// correlator records edges when set (parity with kafka.EventLoop). Nil skips.
 	correlator *analytics.CorrelationManager
+
+	playbooks   *automation.PlaybookManager
+	escalations *automation.EscalationManager
 
 	// Channels
 	eventChan  chan *domain.LogEvent
@@ -155,6 +159,20 @@ func (p *ParallelEventProcessor) SetCorrelationManager(m *analytics.CorrelationM
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.correlator = m
+}
+
+// SetPlaybookManager injects playbook automation (optional). Set before Start().
+func (p *ParallelEventProcessor) SetPlaybookManager(m *automation.PlaybookManager) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.playbooks = m
+}
+
+// SetEscalationManager injects escalation tracking (optional). Set before Start().
+func (p *ParallelEventProcessor) SetEscalationManager(m *automation.EscalationManager) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.escalations = m
 }
 
 // ProcessEvent processes a single event.
@@ -423,6 +441,17 @@ func (p *ParallelEventProcessor) processEvent(event *domain.LogEvent) *Processin
 		if !alert.ShouldSuppress() {
 			if err := p.outputManager.WriteAlert(alert); err != nil {
 				logger.Warnf("Failed to write alert %s: %v", alert.ID, err)
+			} else {
+				p.mu.RLock()
+				es := p.escalations
+				pb := p.playbooks
+				p.mu.RUnlock()
+				if es != nil {
+					es.TrackAlert(alert)
+				}
+				if pb != nil {
+					pb.ExecuteForAlert(context.Background(), alert)
+				}
 			}
 		}
 	}

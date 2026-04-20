@@ -57,6 +57,9 @@ func startPlatformCollectors(ctx context.Context, a *Agent) {
 			if rulesPath == "" {
 				rulesPath = `C:\ProgramData\EDR\process_prevention_rules.json`
 			}
+			if err := responder.EnsureDefaultProcessRulesFile(rulesPath, logger); err != nil {
+				logger.Warnf("[Response] Default process rules could not be provisioned: %v", err)
+			}
 			mode := cfg.Response.ProcessPreventionMode
 			if mode == "" {
 				mode = "auto_kill_then_override"

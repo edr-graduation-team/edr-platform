@@ -115,6 +115,16 @@ function CommandExecutionModal({
     const [parameters, setParameters] = useState<Record<string, string>>({});
     const [status, setStatus] = useState<'idle' | 'executing' | 'completed' | 'failed'>('idle');
 
+    // Sensible defaults so one-click "Collect" and memory snapshot work without empty params.
+    useEffect(() => {
+        if (!isOpen || !commandType) return;
+        if (commandType === 'collect_logs') {
+            setParameters({ log_types: 'security', time_range: '24h' });
+        } else if (commandType === 'scan_memory') {
+            setParameters({ log_types: 'security,system', time_range: '24h' });
+        }
+    }, [isOpen, commandType]);
+
     const executeMutation = useMutation({
         mutationFn: async ({ agentId, command }: { agentId: string; command: CommandRequest }) => {
             return agentsApi.executeCommand(agentId, command);
@@ -152,6 +162,26 @@ function CommandExecutionModal({
         if (commandType === 'restart_machine' || commandType === 'shutdown_machine') {
             finalParams['confirm'] = 'true';
         }
+        if (commandType === 'collect_logs') {
+            const lt = (finalParams.log_types || '').trim();
+            if (!lt) {
+                showToast('Select at least one log type (or use defaults by re-opening this dialog).', 'error');
+                return;
+            }
+        }
+        if (commandType === 'custom') {
+            if (!(finalParams.cmd || '').trim()) {
+                showToast('Enter a command (e.g. ipconfig /all). Only whitelisted diagnostics are allowed on the agent.', 'error');
+                return;
+            }
+        }
+
+        const forensicCmd =
+            commandType === 'collect_logs' ||
+            commandType === 'scan_memory' ||
+            commandType === 'scan_file' ||
+            commandType === 'collect_forensics';
+        const timeoutSec = forensicCmd ? 900 : 300;
 
         setStatus('executing');
         executeMutation.mutate({
@@ -159,7 +189,7 @@ function CommandExecutionModal({
             command: {
                 command_type: commandType,
                 parameters: finalParams,
-                timeout: 300,
+                timeout: timeoutSec,
             },
         });
     };
@@ -316,6 +346,62 @@ function CommandExecutionModal({
                             value={parameters.file_path || ''}
                             onChange={(e) => setParameters({ ...parameters, file_path: e.target.value })}
                         />
+                    </div>
+                );
+
+            case 'custom':
+                return (
+                    <div className="space-y-2">
+                        <p className="text-xs text-amber-800 dark:text-amber-200/90 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg p-2.5">
+                            The agent runs <strong>only whitelisted</strong> diagnostics (no cmd.exe): ipconfig, netstat, ping, tracert, pathping, nslookup, whoami, hostname, systeminfo, tasklist, arp, route.
+                        </p>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                            Executable + arguments
+                        </label>
+                        <input
+                            type="text"
+                            className="input font-mono text-xs"
+                            placeholder="ipconfig /all"
+                            value={parameters.cmd || ''}
+                            onChange={(e) => setParameters({ ...parameters, cmd: e.target.value })}
+                        />
+                    </div>
+                );
+
+            case 'scan_memory':
+                return (
+                    <div className="space-y-3">
+                        <p className="text-xs text-gray-600 dark:text-gray-400 bg-slate-100 dark:bg-slate-800/80 rounded-lg p-2.5 border border-slate-200 dark:border-slate-700">
+                            Pulls a <strong>forensic event sample</strong> from the endpoint (Security + System by default) — not a full physical memory image.
+                            Add Sysmon below if it is installed.
+                        </p>
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                                Log channels (comma-separated keys)
+                            </label>
+                            <input
+                                type="text"
+                                className="input font-mono text-xs"
+                                placeholder="security,system"
+                                value={parameters.log_types || ''}
+                                onChange={(e) => setParameters({ ...parameters, log_types: e.target.value })}
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                                Time range
+                            </label>
+                            <select
+                                className="input"
+                                value={parameters.time_range || '24h'}
+                                onChange={(e) => setParameters({ ...parameters, time_range: e.target.value })}
+                            >
+                                <option value="1h">Last 1 hour</option>
+                                <option value="6h">Last 6 hours</option>
+                                <option value="24h">Last 24 hours</option>
+                                <option value="7d">Last 7 days</option>
+                            </select>
+                        </div>
                     </div>
                 );
 
@@ -489,6 +575,7 @@ function buildAvailableCommands(agent: Agent): CommandType[] {
         'quarantine_file',
         'collect_logs',
         'scan_memory',
+        'custom',
         'restart_agent',
         'stop_agent',
         'start_agent',
@@ -1134,7 +1221,7 @@ export default function Endpoints() {
                                 // Always render action buttons — use a generic command list when no device is selected
                                 const genericCommands: CommandType[] = [
                                     'isolate_network', 'kill_process', 'quarantine_file',
-                                    'collect_logs', 'scan_memory', 'restart_agent',
+                                    'collect_logs', 'scan_memory', 'custom', 'restart_agent',
                                     'stop_agent', 'start_agent', 'restart_machine', 'shutdown_machine',
                                 ];
                                 const cmds = toolbarTargetAgent

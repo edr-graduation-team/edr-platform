@@ -368,6 +368,7 @@ func (h *Handlers) ExecuteAgentCommand(c echo.Context) error {
 		h.logger.Warnf("[C2] Bind failed: %v", err)
 		return errorResponse(c, http.StatusBadRequest, "INVALID_REQUEST", "Invalid request body")
 	}
+	req.CommandType = normalizeCommandType(req.CommandType)
 	h.logger.Infof("[C2] Request bound: agent=%s type=%s timeout=%d", agentID, req.CommandType, req.Timeout)
 
 	// Validate registry is available
@@ -380,7 +381,7 @@ func (h *Handlers) ExecuteAgentCommand(c echo.Context) error {
 	// The command is stored in DB (status=pending). When the agent reconnects
 	// it auto-starts because: (1) Windows service recovery restarts it, or
 	// (2) the redeliverPendingCommands goroutine pushes it on next connect.
-	if strings.ToLower(req.CommandType) == "start_agent" {
+	if req.CommandType == "start_agent" {
 		// Inject mode so agent's restartService handler knows to only start, not stop
 		if req.Parameters == nil {
 			req.Parameters = map[string]string{}
@@ -389,7 +390,7 @@ func (h *Handlers) ExecuteAgentCommand(c echo.Context) error {
 	}
 
 	// Check if agent is online (skip for start_agent — handled above as offline-safe)
-	if strings.ToLower(req.CommandType) != "start_agent" && !h.registry.IsOnline(agentID.String()) {
+	if req.CommandType != "start_agent" && !h.registry.IsOnline(agentID.String()) {
 		h.logger.Warnf("[C2] Agent %s is not online", agentID)
 		return errorResponse(c, http.StatusNotFound, "AGENT_OFFLINE", "Agent is not online — command cannot be delivered")
 	}
@@ -407,6 +408,9 @@ func (h *Handlers) ExecuteAgentCommand(c echo.Context) error {
 			params[k] = v
 		}
 		timeout := req.Timeout
+		if req.TimeoutSeconds > 0 {
+			timeout = req.TimeoutSeconds
+		}
 		if timeout <= 0 {
 			timeout = 300
 		}
@@ -439,7 +443,7 @@ func (h *Handlers) ExecuteAgentCommand(c echo.Context) error {
 	// ── Step 1b: Inject mode parameter for agent service control commands ───────
 	// The agent's restartService handler checks Parameters["mode"] to decide
 	// whether to stop+start (restart), stop only, or start only.
-	switch strings.ToLower(req.CommandType) {
+	switch req.CommandType {
 	case "stop_agent", "stop_service":
 		if req.Parameters == nil {
 			req.Parameters = map[string]string{}
@@ -503,7 +507,7 @@ func (h *Handlers) ExecuteAgentCommand(c echo.Context) error {
 	// race between the dashboard's next query and the async result, ensuring
 	// the UI shows "Restore Network" (or "Isolate Network") right away.
 	if h.agentSvc != nil {
-		switch strings.ToLower(req.CommandType) {
+		switch req.CommandType {
 		case "isolate_network", "isolate":
 			if err := h.agentSvc.SetIsolation(c.Request().Context(), agentID, true); err != nil {
 				h.logger.WithError(err).Warn("[Isolation] Failed to proactively set is_isolated=true")
@@ -570,7 +574,7 @@ func (h *Handlers) ExecuteAgentCommand(c echo.Context) error {
 // missing entries would cause the agent to receive COMMAND_TYPE_UNSPECIFIED
 // and log "unknown command type", silently dropping the command.
 func mapCommandType(cmdType string) edrv1.CommandType {
-	switch strings.ToLower(cmdType) {
+	switch normalizeCommandType(cmdType) {
 	case "kill_process", "terminate_process":
 		return edrv1.CommandType_COMMAND_TYPE_TERMINATE_PROCESS
 	case "collect_logs", "collect_forensics":
@@ -619,4 +623,8 @@ func mapCommandType(cmdType string) edrv1.CommandType {
 	default:
 		return edrv1.CommandType_COMMAND_TYPE_UNSPECIFIED
 	}
+}
+
+func normalizeCommandType(v string) string {
+	return strings.ToLower(strings.TrimSpace(v))
 }

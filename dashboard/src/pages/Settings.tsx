@@ -1,85 +1,40 @@
-import { useEffect, useState, lazy, Suspense } from 'react';
-import { RefreshCw } from 'lucide-react';
+import { useEffect } from 'react';
+import { Outlet, useLocation, useNavigate, useMatch } from 'react-router-dom';
 import SettingsLayout from '../components/settings/SettingsLayout';
 import { type SettingsTab } from '../components/settings/types';
 import { authApi } from '../api/client';
-import { useSearchParams } from 'react-router-dom';
 
-// Lazy-load each tab for code-splitting
-const UserProfile = lazy(() => import('../components/settings/UserProfile'));
-const SystemConfiguration = lazy(() => import('./settings/SystemConfiguration'));
-const ContextPolicies = lazy(() => import('./settings/ContextPolicies'));
-const ReliabilityHealth = lazy(() => import('./settings/ReliabilityHealth'));
-const AccessManagement = lazy(() => import('../components/settings/AccessManagement'));
-const RBACMatrix = lazy(() => import('../components/settings/RBACMatrix'));
-
-// ── Skeleton while tab loads ──
-function TabFallback() {
-    return (
-        <div className="flex items-center justify-center py-24 text-[var(--text-tertiary)] text-sm">
-            <RefreshCw size={16} className="animate-spin mr-2" /> Loading…
-        </div>
-    );
-}
+const VALID_TABS = new Set<SettingsTab>(['profile', 'system', 'context', 'reliability', 'users', 'roles']);
 
 export default function Settings() {
-    const [searchParams, setSearchParams] = useSearchParams();
-    const tabFromUrl = (searchParams.get('tab') || '') as SettingsTab;
-    const initialTab: SettingsTab =
-        tabFromUrl === 'profile' || tabFromUrl === 'system' || tabFromUrl === 'context' || tabFromUrl === 'reliability' || tabFromUrl === 'users' || tabFromUrl === 'roles'
-            ? tabFromUrl
-            : 'profile';
-
-    const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab);
+    const match = useMatch('/settings/:tab');
+    const tab = match?.params.tab;
+    const navigate = useNavigate();
+    const location = useLocation();
     const currentUser = authApi.getCurrentUser();
     const userRole = currentUser?.role;
 
-    // Keep state in sync if URL changes (e.g., deep links).
-    useEffect(() => {
-        const next = (searchParams.get('tab') || '') as SettingsTab;
-        if (
-            next === 'profile' ||
-            next === 'system' ||
-            next === 'context' ||
-            next === 'reliability' ||
-            next === 'users' ||
-            next === 'roles'
-        ) {
-            setActiveTab(next);
-        }
-    }, [searchParams]);
+    const activeTab: SettingsTab =
+        tab && VALID_TABS.has(tab as SettingsTab) ? (tab as SettingsTab) : 'profile';
 
-    const renderTab = () => {
-        switch (activeTab) {
-            case 'profile':
-                return <Suspense fallback={<TabFallback />}><UserProfile /></Suspense>;
-            case 'system':
-                return <Suspense fallback={<TabFallback />}><SystemConfiguration /></Suspense>;
-            case 'reliability':
-                return <Suspense fallback={<TabFallback />}><ReliabilityHealth /></Suspense>;
-            case 'context':
-                return <Suspense fallback={<TabFallback />}><ContextPolicies /></Suspense>;
-            case 'users':
-                return <Suspense fallback={<TabFallback />}><AccessManagement /></Suspense>;
-            case 'roles':
-                return <Suspense fallback={<TabFallback />}><RBACMatrix /></Suspense>;
-            default:
-                return null;
+    useEffect(() => {
+        const sp = new URLSearchParams(location.search);
+        const t = sp.get('tab');
+        if (t && VALID_TABS.has(t as SettingsTab)) {
+            navigate(`/settings/${t}`, { replace: true });
         }
-    };
+    }, [location.search, navigate]);
+
+    useEffect(() => {
+        if (tab && !VALID_TABS.has(tab as SettingsTab)) {
+            navigate('/settings/profile', { replace: true });
+        }
+    }, [tab, navigate]);
 
     return (
         <div className="h-full p-6">
-            <SettingsLayout 
-                activeTab={activeTab} 
-                onChangeTab={(id) => {
-                    const next = id as SettingsTab;
-                    setActiveTab(next);
-                    setSearchParams({ tab: next });
-                }}
-                userRole={userRole}
-            >
-                {renderTab()}
+            <SettingsLayout activeTab={activeTab} userRole={userRole}>
+                <Outlet />
             </SettingsLayout>
         </div>
     );

@@ -30,6 +30,57 @@ import (
 	pb "github.com/edr-platform/win-agent/internal/pb"
 )
 
+// stringifyCommandType maps proto numeric enum values to stable string names.
+// This stays compatible before/after regenerating edr.pb.go from edr.proto.
+func stringifyCommandType(t pb.CommandType) string {
+	switch int32(t) {
+	case 0:
+		return "COMMAND_TYPE_UNSPECIFIED"
+	case 1:
+		return "COMMAND_TYPE_UPDATE_CONFIG"
+	case 2:
+		return "COMMAND_TYPE_COLLECT_FORENSICS"
+	case 3:
+		return "COMMAND_TYPE_ISOLATE"
+	case 4:
+		return "COMMAND_TYPE_UNISOLATE"
+	case 5:
+		return "COMMAND_TYPE_RESTART_SERVICE"
+	case 6:
+		return "COMMAND_TYPE_UPDATE_AGENT"
+	case 7:
+		return "COMMAND_TYPE_TERMINATE_PROCESS"
+	case 8:
+		return "COMMAND_TYPE_ADJUST_RATE"
+	case 9:
+		return "COMMAND_TYPE_RUN_CMD"
+	case 10:
+		return "COMMAND_TYPE_RESTART"
+	case 11:
+		return "COMMAND_TYPE_SHUTDOWN"
+	case 12:
+		return "COMMAND_TYPE_UPDATE_FILTER_POLICY"
+	case 13:
+		return "COMMAND_TYPE_QUARANTINE_FILE"
+	case 14:
+		return "COMMAND_TYPE_BLOCK_IP"
+	case 15:
+		return "COMMAND_TYPE_UNBLOCK_IP"
+	case 16:
+		return "COMMAND_TYPE_BLOCK_DOMAIN"
+	case 17:
+		return "COMMAND_TYPE_UNBLOCK_DOMAIN"
+	case 18:
+		return "COMMAND_TYPE_UPDATE_SIGNATURES"
+	case 19:
+		return "COMMAND_TYPE_RESTORE_QUARANTINE_FILE"
+	case 20:
+		return "COMMAND_TYPE_DELETE_QUARANTINE_FILE"
+	default:
+		return fmt.Sprintf("COMMAND_UNKNOWN_%d", int32(t))
+	}
+}
+
 // Client handles gRPC communication with Connection Manager.
 type Client struct {
 	cfg    *config.Config
@@ -644,7 +695,7 @@ func (c *Client) sendBatchInternal(ctx context.Context, batch *EventBatch) error
 			select {
 			case c.commandChan <- &Command{
 				ID:         cmd.GetCommandId(),
-				Type:       cmd.GetType().String(),
+				Type:       stringifyCommandType(cmd.GetType()),
 				Parameters: cmd.GetParameters(),
 				Priority:   int(cmd.GetPriority()),
 				ExpiresAt:  commandExpiresAt(cmd),
@@ -792,7 +843,7 @@ func (c *Client) recvLoop(ctx context.Context, stream EventIngestionService_Stre
 			select {
 			case c.commandChan <- &Command{
 				ID:         cmd.GetCommandId(),
-				Type:       cmd.GetType().String(),
+				Type:       stringifyCommandType(cmd.GetType()),
 				Parameters: cmd.GetParameters(),
 				Priority:   int(cmd.GetPriority()),
 				ExpiresAt:  commandExpiresAt(cmd),

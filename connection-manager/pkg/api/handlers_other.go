@@ -420,9 +420,59 @@ func (h *Handlers) SearchEvents(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return errorResponse(c, http.StatusBadRequest, "INVALID_REQUEST", "Invalid request body")
 	}
+	if h.eventRepo == nil {
+		return errorResponse(c, http.StatusServiceUnavailable, "DB_UNAVAILABLE", "Event repository is not available")
+	}
+
+	// Validate defaults
+	limit := req.Limit
+	offset := req.Offset
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 10000 {
+		limit = 10000
+	}
+	if offset < 0 {
+		offset = 0
+	}
+
+	// Convert request to repository request
+	filters := make([]repository.EventSearchFilter, 0, len(req.Filters))
+	for _, f := range req.Filters {
+		filters = append(filters, repository.EventSearchFilter{
+			Field:    f.Field,
+			Operator: f.Operator,
+			Value:    f.Value,
+		})
+	}
+
+	rows, total, err := h.eventRepo.Search(c.Request().Context(), repository.EventSearchRequest{
+		Filters:  filters,
+		Logic:    req.Logic,
+		TimeFrom: req.TimeRange.From,
+		TimeTo:   req.TimeRange.To,
+		Limit:    limit,
+		Offset:   offset,
+	})
+	if err != nil {
+		return errorResponse(c, http.StatusInternalServerError, "SEARCH_FAILED", err.Error())
+	}
+
+	out := make([]EventSummary, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, EventSummary{
+			ID:        r.ID,
+			AgentID:   r.AgentID,
+			EventType: r.EventType,
+			Timestamp: r.Timestamp,
+			Summary:   r.Summary,
+		})
+	}
+
 	return c.JSON(http.StatusOK, EventListResponse{
-		Data:       []EventSummary{},
-		Pagination: PaginationResponse{Total: 0, Limit: req.Limit, Offset: req.Offset},
+		Data:       out,
+		Pagination: PaginationResponse{Total: total, Limit: limit, Offset: offset},
 		Meta:       responseMeta(c),
 	})
 }
@@ -441,10 +491,32 @@ func (h *Handlers) GetEventStats(c echo.Context) error {
 // GetEvent returns a single event.
 func (h *Handlers) GetEvent(c echo.Context) error {
 	idStr := c.Param("id")
-	if _, err := uuid.Parse(idStr); err != nil {
+	eventID, err := uuid.Parse(idStr)
+	if err != nil {
 		return errorResponse(c, http.StatusBadRequest, "INVALID_ID", "Invalid event ID format")
 	}
-	return errorResponse(c, http.StatusNotFound, "NOT_FOUND", "Event not found")
+	if h.eventRepo == nil {
+		return errorResponse(c, http.StatusServiceUnavailable, "DB_UNAVAILABLE", "Event repository is not available")
+	}
+	row, err := h.eventRepo.GetByID(c.Request().Context(), eventID)
+	if err != nil {
+		return errorResponse(c, http.StatusInternalServerError, "FETCH_FAILED", err.Error())
+	}
+	if row == nil {
+		return errorResponse(c, http.StatusNotFound, "NOT_FOUND", "Event not found")
+	}
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"data": EventDetail{
+			ID:        row.ID,
+			AgentID:   row.AgentID,
+			EventType: row.EventType,
+			Severity:  row.Severity,
+			Timestamp: row.Timestamp,
+			Summary:   row.Summary,
+			Raw:       row.Raw,
+		},
+		"meta": responseMeta(c),
+	})
 }
 
 // ExportEvents exports events to CSV/JSON.

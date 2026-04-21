@@ -114,8 +114,11 @@ func (s *Server) RegisterRoutes(handlers *Handlers) {
 	agents.PATCH("/:id", handlers.UpdateAgent, handlers.RequirePermission("endpoints", "manage"))
 	agents.DELETE("/:id", handlers.DeleteAgent, handlers.RequirePermission("endpoints", "manage"))
 	agents.GET("/:id/events", handlers.GetAgentEvents, handlers.RequirePermission("endpoints", "read"))
+	agents.GET("/:id/quarantine", handlers.ListAgentQuarantine, handlers.RequirePermission("responses", "read"))
+	agents.POST("/:id/quarantine/:entryId/decision", handlers.PostAgentQuarantineDecision, handlers.RequirePermission("responses", "execute"))
 	agents.GET("/:id/commands", handlers.GetAgentCommands, handlers.RequirePermission("responses", "read"))
 	agents.POST("/:id/commands", handlers.ExecuteAgentCommand, handlers.RequirePermission("responses", "execute"))
+	agents.POST("/:id/process-exceptions", handlers.AddProcessException, handlers.RequirePermission("responses", "execute"))
 	// Backward-compat alias: some clients may omit the trailing 's'
 	agents.POST("/:id/command", handlers.ExecuteAgentCommand, handlers.RequirePermission("responses", "execute"))
 
@@ -123,6 +126,7 @@ func (s *Server) RegisterRoutes(handlers *Handlers) {
 	commands := protected.Group("/commands")
 	commands.GET("", handlers.ListCommands, handlers.RequirePermission("responses", "read"))
 	commands.GET("/stats", handlers.GetCommandStats, handlers.RequirePermission("responses", "read"))
+	commands.GET("/:id", handlers.GetCommand, handlers.RequirePermission("responses", "read"))
 
 	// ── Alert endpoints ──────────────────────────────────────────────────
 	alerts := protected.Group("/alerts")

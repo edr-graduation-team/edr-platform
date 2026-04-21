@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/edr-platform/sigma-engine/internal/analytics"
+	"github.com/edr-platform/sigma-engine/internal/automation"
 	"github.com/edr-platform/sigma-engine/internal/application/alert"
 	"github.com/edr-platform/sigma-engine/internal/application/baselines"
 	"github.com/edr-platform/sigma-engine/internal/application/detection"
@@ -183,6 +184,13 @@ type EventLoop struct {
 	// If nil, behavioral baseline aggregation is skipped (no UEBA).
 	baselineAggregator *baselines.BaselineAggregator
 
+	// playbooks runs server-side automation (Slack, webhooks, etc.) per generated alert.
+	// If nil, no playbook execution is performed.
+	playbooks *automation.PlaybookManager
+	// escalations tracks alerts for time-based escalation rules (see StartBackgroundChecker in main).
+	// If nil, escalation tracking is skipped.
+	escalations *automation.EscalationManager
+
 	lineageCacheErrors atomic.Uint64 // monotonic counter for cache write failures
 
 	alertChan chan *domain.Alert
@@ -257,6 +265,16 @@ func (el *EventLoop) SetCorrelationManager(m *analytics.CorrelationManager) {
 // Call this before Start(). When nil, baseline aggregation is silently skipped.
 func (el *EventLoop) SetBaselineAggregator(agg *baselines.BaselineAggregator) {
 	el.baselineAggregator = agg
+}
+
+// SetPlaybookManager injects playbook automation. Call before Start().
+func (el *EventLoop) SetPlaybookManager(m *automation.PlaybookManager) {
+	el.playbooks = m
+}
+
+// SetEscalationManager injects timed escalation tracking. Call before Start().
+func (el *EventLoop) SetEscalationManager(m *automation.EscalationManager) {
+	el.escalations = m
 }
 
 // Start begins the event processing loop.
@@ -502,6 +520,13 @@ func (el *EventLoop) alertPublisher(ctx context.Context) {
 				atomic.AddUint64(&el.metrics.AlertDBQueueFailures, 1)
 				metricsPkg.DefaultMetrics.RecordError("alert_db_queue_failed")
 			}
+		}
+
+		if el.escalations != nil {
+			el.escalations.TrackAlert(alert)
+		}
+		if el.playbooks != nil {
+			el.playbooks.ExecuteForAlert(ctx, alert)
 		}
 	}
 

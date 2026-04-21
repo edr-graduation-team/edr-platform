@@ -20,6 +20,8 @@ import (
 
 	"github.com/edr-platform/win-agent/internal/config"
 	"github.com/edr-platform/win-agent/internal/logging"
+	"github.com/edr-platform/win-agent/internal/scanner"
+	"github.com/edr-platform/win-agent/internal/signatures"
 )
 
 // CommandType enumerates supported command types.
@@ -38,6 +40,13 @@ const (
 	CmdRunCommand       CommandType = "RUN_CMD"
 	CmdRestart          CommandType = "RESTART"  // Machine reboot
 	CmdShutdown         CommandType = "SHUTDOWN" // Machine shutdown
+	CmdBlockIP          CommandType = "BLOCK_IP"
+	CmdUnblockIP        CommandType = "UNBLOCK_IP"
+	CmdBlockDomain      CommandType = "BLOCK_DOMAIN"
+	CmdUnblockDomain    CommandType = "UNBLOCK_DOMAIN"
+	CmdUpdateSignatures CommandType = "UPDATE_SIGNATURES"
+	CmdRestoreQuarantineFile CommandType = "RESTORE_QUARANTINE_FILE"
+	CmdDeleteQuarantineFile  CommandType = "DELETE_QUARANTINE_FILE"
 )
 
 // =============================================================================
@@ -144,6 +153,9 @@ type Handler struct {
 	// Set via SetCurrentConfig — nil-safe: if unset the handler falls back to
 	// the full YAML / sparse-key paths.
 	currentCfg *config.Config
+
+	// sigStore is the local malware hash database (optional).
+	sigStore *signatures.Store
 }
 
 // NewHandler creates a new command handler.
@@ -197,6 +209,13 @@ func (h *Handler) SetCurrentConfig(cfg *config.Config) {
 	h.currentCfg = cfg
 }
 
+// SetSignatureStore wires the local malware hash database for UPDATE_SIGNATURES commands.
+func (h *Handler) SetSignatureStore(s *signatures.Store) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.sigStore = s
+}
+
 // Execute processes a command and returns the result.
 func (h *Handler) Execute(ctx context.Context, cmd *Command) *Result {
 	start := time.Now()
@@ -242,6 +261,20 @@ func (h *Handler) Execute(ctx context.Context, cmd *Command) *Result {
 		output, err = h.restartMachine(ctx, cmd.Parameters)
 	case CmdShutdown:
 		output, err = h.shutdownMachine(ctx, cmd.Parameters)
+	case CmdBlockIP:
+		output, err = h.blockIP(ctx, cmd.Parameters)
+	case CmdUnblockIP:
+		output, err = h.unblockIP(ctx, cmd.Parameters)
+	case CmdBlockDomain:
+		output, err = h.blockDomain(ctx, cmd.Parameters)
+	case CmdUnblockDomain:
+		output, err = h.unblockDomain(ctx, cmd.Parameters)
+	case CmdUpdateSignatures:
+		output, err = h.updateSignatures(ctx, cmd.Parameters)
+	case CmdRestoreQuarantineFile:
+		output, err = h.restoreQuarantineFile(ctx, cmd.Parameters)
+	case CmdDeleteQuarantineFile:
+		output, err = h.deleteQuarantineFile(ctx, cmd.Parameters)
 	default:
 		err = fmt.Errorf("unknown command type: %s", cmd.Type)
 	}
@@ -278,7 +311,10 @@ func truncateOutput(s string, maxLen int) string {
 // R4 FIX: Uses OpenProcess + TerminateProcess via syscall instead of shelling
 // out to taskkill. Resolves the process name via QueryFullProcessImageNameW
 // and checks against the critical system process list to prevent BSODs.
-func (h *Handler) terminateProcess(ctx context.Context, params map[string]string) (string, error) {
+//
+// When kill_tree=true in parameters, all descendant processes are terminated
+// (children first) using the same safety checks.
+func (h *Handler) terminateProcess(_ context.Context, params map[string]string) (string, error) {
 	pidStr := params["pid"]
 	if pidStr == "" {
 		return "", fmt.Errorf("pid parameter is required")
@@ -289,6 +325,35 @@ func (h *Handler) terminateProcess(ctx context.Context, params map[string]string
 		return "", fmt.Errorf("invalid PID: %s (must be a positive integer)", pidStr)
 	}
 
+	killTree := strings.EqualFold(params["kill_tree"], "true") || strings.EqualFold(params["killTree"], "true")
+	var order []uint32
+	if killTree {
+		var errTree error
+		order, errTree = processTreePostOrder(uint32(pid))
+		if errTree != nil {
+			return "", errTree
+		}
+	} else {
+		order = []uint32{uint32(pid)}
+	}
+
+	var killed []string
+	for _, p := range order {
+		msg, err := h.terminateOnePID(int(p))
+		if err != nil {
+			h.logger.Warnf("[C2] terminate PID %d: %v", p, err)
+			continue
+		}
+		killed = append(killed, fmt.Sprintf("%d", p))
+		h.logger.Infof("[C2] %s", msg)
+	}
+	if len(killed) == 0 {
+		return "", fmt.Errorf("no processes terminated (target may be protected or already exited)")
+	}
+	return fmt.Sprintf("Terminated PIDs: %s (kill_tree=%v)", strings.Join(killed, ","), killTree), nil
+}
+
+func (h *Handler) terminateOnePID(pid int) (string, error) {
 	// Block PIDs 0 and 4 (System Idle, System kernel).
 	if pid == 0 || pid == 4 {
 		return "", fmt.Errorf("cannot terminate critical system process (PID %d)", pid)
@@ -323,7 +388,6 @@ func (h *Handler) terminateProcess(ctx context.Context, params map[string]string
 		return "", fmt.Errorf("TerminateProcess failed for PID %d (%s): %w", pid, processName, err)
 	}
 
-	h.logger.Infof("[C2] Process terminated via Win32 API: PID=%d Name=%s", pid, processName)
 	return fmt.Sprintf("Process terminated via Win32 API: PID=%d Name=%s", pid, processName), nil
 }
 
@@ -370,9 +434,12 @@ func win32TerminateProcess(handle syscall.Handle) error {
 
 // quarantineFile moves a file to quarantine.
 func (h *Handler) quarantineFile(ctx context.Context, params map[string]string) (string, error) {
-	filePath := params["path"]
+	filePath := strings.TrimSpace(params["path"])
 	if filePath == "" {
-		return "", fmt.Errorf("path parameter is required")
+		filePath = strings.TrimSpace(params["file_path"])
+	}
+	if filePath == "" {
+		return "", fmt.Errorf("path or file_path parameter is required")
 	}
 
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
@@ -388,8 +455,17 @@ func (h *Handler) quarantineFile(ctx context.Context, params map[string]string) 
 	quarantinePath := filepath.Join(h.quarantineDir, fmt.Sprintf("%s_%s.quarantine", timestamp, baseName))
 
 	if err := os.Rename(filePath, quarantinePath); err != nil {
-		return "", fmt.Errorf("failed to quarantine file: %w", err)
+		// Locked or cross-volume: copy then remove (same as Executor.QuarantineFile).
+		if err := copyFile(filePath, quarantinePath); err != nil {
+			return "", fmt.Errorf("failed to quarantine file: %w", err)
+		}
+		_ = os.Remove(filePath)
 	}
+
+	metaPath := quarantinePath + ".meta"
+	meta := fmt.Sprintf("OriginalPath: %s\nQuarantineTime: %s\nSource: C2 QUARANTINE_FILE\n",
+		filePath, time.Now().Format(time.RFC3339))
+	_ = os.WriteFile(metaPath, []byte(meta), 0600)
 
 	return fmt.Sprintf("File quarantined: %s -> %s", filePath, quarantinePath), nil
 }
@@ -805,75 +881,252 @@ func splitHostPort(addr string) (string, string, error) {
 	return host, port, nil
 }
 
-// collectForensics collects Windows Event Logs based on type and time range.
+// wevtUtilPath returns the absolute path to wevtutil.exe when SystemRoot is set (normal on Windows agents).
+func wevtUtilPath() string {
+	root := os.Getenv("SystemRoot")
+	if root == "" {
+		root = `C:\Windows`
+	}
+	p := filepath.Join(root, "System32", "wevtutil.exe")
+	if st, err := os.Stat(p); err == nil && !st.IsDir() {
+		return p
+	}
+	return "wevtutil.exe"
+}
+
+// forensicsLookbackMs returns the XPath timediff window in milliseconds from parameters.
+func forensicsLookbackMs(params map[string]string) int64 {
+	if v := strings.TrimSpace(params["time_range_ms"]); v != "" {
+		n, err := strconv.ParseInt(v, 10, 64)
+		if err == nil && n > 0 {
+			return capForensicsMs(n)
+		}
+	}
+	tr := strings.TrimSpace(params["time_range"])
+	if tr == "" {
+		tr = "Last 24 hours"
+	}
+	return timeRangeToMs(tr)
+}
+
+func capForensicsMs(ms int64) int64 {
+	const maxMs = int64(90 * 24 * time.Hour / time.Millisecond)
+	const minMs = int64(time.Minute / time.Millisecond)
+	if ms > maxMs {
+		return maxMs
+	}
+	if ms < minMs {
+		return minMs
+	}
+	return ms
+}
+
+func trimForensicsErr(msg string, max int) string {
+	msg = strings.TrimSpace(msg)
+	if len(msg) <= max {
+		return msg
+	}
+	return msg[:max] + "…"
+}
+
+// canonicalEventLogChannel maps dashboard / API shorthand to Windows channel names for wevtutil.
+func canonicalEventLogChannel(raw string) string {
+	s := strings.TrimSpace(raw)
+	if s == "" {
+		return s
+	}
+	if strings.Contains(s, "/") {
+		return s
+	}
+	switch strings.ToLower(s) {
+	case "security":
+		return "Security"
+	case "system":
+		return "System"
+	case "application", "app":
+		return "Application"
+	case "setup":
+		return "Setup"
+	case "sysmon":
+		return "Microsoft-Windows-Sysmon/Operational"
+	case "powershell":
+		return "Microsoft-Windows-PowerShell/Operational"
+	case "forwardedevents", "forwarded":
+		return "ForwardedEvents"
+	default:
+		return s
+	}
+}
+
+func collectForensicsMaxEvents(params map[string]string) int {
+	const def = 500
+	const hardMax = 5000
+	v := strings.TrimSpace(params["max_events"])
+	if v == "" {
+		v = strings.TrimSpace(params["event_limit"])
+	}
+	if v == "" {
+		return def
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 1 {
+		return def
+	}
+	if n > hardMax {
+		return hardMax
+	}
+	return n
+}
+
+// collectForensics collects Windows Event Logs (wevtutil) and/or hashes a file (scan_file).
+// Parameters:
+//   - log_types or types: comma-separated channels (e.g. security,system or full provider paths)
+//   - time_range: human text or Go duration (e.g. 24h, 168h); optional time_range_ms overrides (milliseconds)
+//   - max_events / event_limit: cap per log (default 500, max 5000)
+//   - file_path or path: optional file hash scan; may be combined with log collection
 func (h *Handler) collectForensics(ctx context.Context, params map[string]string) (string, error) {
 	logTypes := strings.TrimSpace(params["types"])
 	if logTypes == "" {
 		logTypes = strings.TrimSpace(params["log_types"])
 	}
-	if logTypes == "" {
-		return "", fmt.Errorf("types or log_types parameter is required (e.g., Security, Sysmon)")
+	filePath := strings.TrimSpace(params["file_path"])
+	if filePath == "" {
+		filePath = strings.TrimSpace(params["path"])
 	}
 
-	timeRange := strings.TrimSpace(params["time_range"])
-	if timeRange == "" {
-		timeRange = "Last 24 hours"
+	hasLogs := logTypes != ""
+	hasFile := filePath != ""
+
+	if !hasLogs && !hasFile {
+		return "", fmt.Errorf("provide log_types/types and/or file_path/path (e.g. log_types=Security,System or file_path=C:\\\\path\\\\file.exe)")
 	}
 
-	ms := timeRangeToMs(timeRange)
-	types := strings.Split(logTypes, ",")
-	var results []string
+	ms := forensicsLookbackMs(params)
+	maxEv := collectForensicsMaxEvents(params)
+	wevt := wevtUtilPath()
 
-	for _, logName := range types {
-		logName = strings.TrimSpace(logName)
-		if logName == "" {
-			continue
-		}
+	var sections []string
+	var warnings []string
 
-		query := fmt.Sprintf("*[System[TimeCreated[timediff(@SystemTime) <= %d]]]", ms)
-		cmd := exec.CommandContext(ctx, "wevtutil", "qe", logName, "/q:"+query, "/c:500", "/f:text")
-		output, err := cmd.CombinedOutput()
-		if err != nil {
-			h.logger.Warnf("[C2] Log collection partial failure for '%s': %v", logName, err)
-			results = append(results, fmt.Sprintf("%s: error (%v)", logName, err))
-			continue
-		}
+	if hasLogs {
+		types := strings.Split(logTypes, ",")
+		var results []string
+		anyOK := false
+		for _, logName := range types {
+			logName = strings.TrimSpace(logName)
+			if logName == "" {
+				continue
+			}
 
-		eventCount := strings.Count(string(output), "Event[")
-		if eventCount == 0 {
-			lines := strings.Split(strings.TrimSpace(string(output)), "\n")
-			for _, l := range lines {
-				if strings.TrimSpace(l) != "" {
-					eventCount++
+			channel := canonicalEventLogChannel(logName)
+			query := fmt.Sprintf("*[System[TimeCreated[timediff(@SystemTime) <= %d]]]", ms)
+			cmd := exec.CommandContext(ctx, wevt, "qe", channel, "/q:"+query, "/c:"+strconv.Itoa(maxEv), "/f:text")
+			output, err := cmd.CombinedOutput()
+			if err != nil {
+				h.logger.Warnf("[C2] wevtutil xpath failed for %q (%q): %v — fallback /rd:true", logName, channel, err)
+				cmd2 := exec.CommandContext(ctx, wevt, "qe", channel, "/c:"+strconv.Itoa(maxEv), "/f:text", "/rd:true")
+				output, err = cmd2.CombinedOutput()
+				if err != nil {
+					em := trimForensicsErr(fmt.Sprintf("%v: %s", err, string(output)), 400)
+					h.logger.Warnf("[C2] Log collection failed for %q: %s", channel, em)
+					results = append(results, fmt.Sprintf("%s: failed (%s)", channel, em))
+					continue
 				}
 			}
+
+			eventCount := strings.Count(string(output), "Event[")
+			if eventCount == 0 {
+				lines := strings.Split(strings.TrimSpace(string(output)), "\n")
+				for _, l := range lines {
+					if strings.TrimSpace(l) != "" {
+						eventCount++
+					}
+				}
+			}
+
+			results = append(results, fmt.Sprintf("%s: %d events (window_ms=%d cap=%d)", channel, eventCount, ms, maxEv))
+			anyOK = true
+			h.logger.Infof("[C2] Forensics log slice ok channel=%s events=%d", channel, eventCount)
 		}
 
-		results = append(results, fmt.Sprintf("%s: %d events", logName, eventCount))
-		h.logger.Infof("[C2] Collected %d events from '%s' log (%s)", eventCount, logName, timeRange)
+		if len(results) == 0 {
+			return "", fmt.Errorf("no valid log names in types: %s", logTypes)
+		}
+		if !anyOK {
+			return strings.Join(results, "; "), fmt.Errorf("all requested event logs failed: %s", strings.Join(results, "; "))
+		}
+		sections = append(sections, "event_logs: "+strings.Join(results, "; "))
 	}
 
-	summary := strings.Join(results, "; ")
-	return fmt.Sprintf("Successfully collected forensic logs for types: [%s] over %s — %s", logTypes, timeRange, summary), nil
+	if hasFile {
+		fsOut, err := h.collectFileHashForensics(ctx, filePath)
+		if err != nil {
+			warnings = append(warnings, "file_scan: "+err.Error())
+			if !hasLogs {
+				return "", err
+			}
+		} else {
+			sections = append(sections, "file_scan: "+fsOut)
+		}
+	}
+
+	out := strings.Join(sections, " | ")
+	if len(warnings) > 0 {
+		out += " | errors: " + strings.Join(warnings, "; ")
+	}
+	return out, nil
 }
 
-// timeRangeToMs converts a time range string to milliseconds.
+// collectFileHashForensics hashes a file on disk (used for dashboard scan_file → COLLECT_FORENSICS).
+func (h *Handler) collectFileHashForensics(ctx context.Context, filePath string) (string, error) {
+	if ctx.Err() != nil {
+		return "", ctx.Err()
+	}
+	info, err := os.Stat(filePath)
+	if err != nil {
+		return "", fmt.Errorf("stat file: %w", err)
+	}
+	if info.IsDir() {
+		return "", fmt.Errorf("path is a directory, expected a file: %s", filePath)
+	}
+	const maxBytes = 32 << 20
+	hashHex, readN, err := scanner.FileSHA256Limited(filePath, maxBytes)
+	if err != nil {
+		return "", fmt.Errorf("hash file: %w", err)
+	}
+	return fmt.Sprintf("File scan: path=%s size=%d bytes sha256=%s (hashed_bytes=%d)",
+		filePath, info.Size(), hashHex, readN), nil
+}
+
+// timeRangeToMs converts a time range string to milliseconds for wevtutil timediff().
+// Accepts Go durations (e.g. 48h, 90m), plain hour counts (e.g. 48), and legacy phrases.
 func timeRangeToMs(timeRange string) int64 {
-	switch strings.ToLower(strings.TrimSpace(timeRange)) {
+	s := strings.TrimSpace(timeRange)
+	low := strings.ToLower(s)
+	if d, err := time.ParseDuration(low); err == nil && d > 0 {
+		return capForensicsMs(d.Milliseconds())
+	}
+	switch low {
 	case "1h", "last 1 hour", "last hour":
-		return 3600000
+		return capForensicsMs(3600000)
 	case "6h", "last 6 hours":
-		return 21600000
+		return capForensicsMs(21600000)
 	case "12h", "last 12 hours":
-		return 43200000
+		return capForensicsMs(43200000)
 	case "24h", "last 24 hours", "last day":
-		return 86400000
+		return capForensicsMs(86400000)
 	case "7d", "last 7 days", "last week":
-		return 604800000
+		return capForensicsMs(604800000)
 	case "30d", "last 30 days", "last month":
-		return 2592000000
+		return capForensicsMs(2592000000)
 	default:
-		return 86400000
+		if n, err := strconv.Atoi(low); err == nil && n > 0 {
+			// Interpret small integers as hours (e.g. 48 → 48h)
+			if n <= 24*90 {
+				return capForensicsMs(int64(n) * 3600000)
+			}
+		}
+		return capForensicsMs(86400000)
 	}
 }
 
@@ -999,14 +1252,56 @@ func (h *Handler) updateConfig(ctx context.Context, params map[string]string) (s
 	if len(overrides) == 0 {
 		return "", fmt.Errorf("UPDATE_CONFIG requires either a 'config' YAML payload, a 'policy' JSON payload, or at least one override param (server_address, log_level, exclude_process)")
 	}
+	h.mu.Lock()
+	fn := h.configUpdateFn
+	base := h.currentCfg
+	h.mu.Unlock()
+	if fn == nil {
+		return "", fmt.Errorf("no config update handler registered — agent not wired for hot-reload")
+	}
+	if base == nil {
+		return "", fmt.Errorf("current config not available in command handler — call SetCurrentConfig")
+	}
 
-	// Sparse updates are acknowledged but require a full config rebuild.
-	// For now we log the intent and return — a future version can patch the
-	// live config struct field-by-field. Returning success avoids a FAILED
-	// result that would alarm the operator.
-	h.logger.Infof("[C2] Sparse config overrides received (will apply on next restart): %v", overrides)
-	return fmt.Sprintf("Sparse overrides noted (%d keys); apply takes effect on next config reload: %v",
-		len(overrides), overrides), nil
+	newCfg := base.Clone()
+	updated := 0
+
+	if v := strings.TrimSpace(params["server_address"]); v != "" {
+		newCfg.Server.Address = v
+		updated++
+	}
+	if v := strings.TrimSpace(params["log_level"]); v != "" {
+		newCfg.Logging.Level = strings.ToUpper(v)
+		updated++
+	}
+	if v := strings.TrimSpace(params["exclude_process"]); v != "" {
+		exists := false
+		for _, p := range newCfg.Filtering.ExcludeProcesses {
+			if strings.EqualFold(strings.TrimSpace(p), v) {
+				exists = true
+				break
+			}
+		}
+		if !exists {
+			newCfg.Filtering.ExcludeProcesses = append(newCfg.Filtering.ExcludeProcesses, v)
+			updated++
+		}
+	}
+
+	if updated == 0 {
+		return "Sparse overrides received, no effective changes (already present)", nil
+	}
+	if err := fn(newCfg); err != nil {
+		return "", fmt.Errorf("sparse config update failed: %w", err)
+	}
+
+	// Keep command handler's current config pointer in sync for subsequent updates.
+	h.mu.Lock()
+	h.currentCfg = newCfg
+	h.mu.Unlock()
+
+	h.logger.Infof("[C2] Sparse config hot-reload applied (%d changes): %v", updated, overrides)
+	return fmt.Sprintf("Sparse config hot-reload applied (%d changes): %v", updated, overrides), nil
 }
 
 // updateAgent downloads and installs new agent version.

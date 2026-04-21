@@ -7,6 +7,15 @@
    EDR DESIGN TOKENS
    ============================================================ */
 :root {
+  /* Xcitium OpenEDR shell (top + second menu) — layout chrome */
+  --xc-nav-bg: #0a043d;
+  --xc-nav-hover: rgb(8, 3, 49);
+  --xc-nav-text: #c0ced6;
+  --xc-nav-active: #f19637;
+  --xc-nav-border: rgba(255, 255, 255, 0.06);
+  /* Protocol / product original accent (logo + primary actions only) */
+  --xc-brand-original: #22d3ee;
+
   /* Fonts */
   --font-ui:   'Inter', system-ui, -apple-system, sans-serif;
   --font-mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;

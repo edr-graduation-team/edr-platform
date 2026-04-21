@@ -279,37 +279,94 @@ func (h *Handlers) GetAgentStats(c echo.Context) error {
 // GetAgentEvents returns events for an agent.
 func (h *Handlers) GetAgentEvents(c echo.Context) error {
 	idStr := c.Param("id")
-	_, err := uuid.Parse(idStr)
+	agentID, err := uuid.Parse(idStr)
 	if err != nil {
 		return errorResponse(c, http.StatusBadRequest, "INVALID_ID", "Invalid agent ID format")
 	}
 
-	// TODO: Query events for agent
+	if h.eventRepo == nil {
+		return errorResponse(c, http.StatusServiceUnavailable, "DB_UNAVAILABLE", "Event repository is not available")
+	}
+
+	limit, offset := 50, 0
+	_ = echo.QueryParamsBinder(c).Int("limit", &limit).Int("offset", &offset)
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 500 {
+		limit = 500
+	}
+	if offset < 0 {
+		offset = 0
+	}
+
+	rows, total, err := h.eventRepo.ListByAgent(c.Request().Context(), agentID, limit, offset)
+	if err != nil {
+		return errorResponse(c, http.StatusInternalServerError, "QUERY_FAILED", err.Error())
+	}
+
+	out := make([]EventSummary, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, EventSummary{
+			ID:        r.ID,
+			AgentID:   r.AgentID,
+			EventType: r.EventType,
+			Timestamp: r.Timestamp,
+			Summary:   r.Summary,
+		})
+	}
 
 	return c.JSON(http.StatusOK, EventListResponse{
-		Data:       []EventSummary{},
-		Pagination: PaginationResponse{Total: 0, Limit: 50, Offset: 0},
-		Meta: ResponseMeta{
-			RequestID: c.Response().Header().Get(echo.HeaderXRequestID),
-			Timestamp: time.Now().UTC().Format(time.RFC3339),
-		},
+		Data:       out,
+		Pagination: PaginationResponse{Total: total, Limit: limit, Offset: offset},
+		Meta:       responseMeta(c),
 	})
 }
 
-// GetAgentCommands returns command history for an agent.
+// GetAgentCommands returns command history for an agent (same row shape as Action Center list).
 func (h *Handlers) GetAgentCommands(c echo.Context) error {
 	idStr := c.Param("id")
-	_, err := uuid.Parse(idStr)
+	agentID, err := uuid.Parse(idStr)
 	if err != nil {
 		return errorResponse(c, http.StatusBadRequest, "INVALID_ID", "Invalid agent ID format")
 	}
 
-	// TODO: Query commands for agent
+	if h.commandRepo == nil {
+		return errorResponse(c, http.StatusServiceUnavailable, "DB_UNAVAILABLE", "Command repository is not available")
+	}
 
-	return c.JSON(http.StatusOK, CommandListResponse{
-		Data:       []CommandSummary{},
-		Pagination: PaginationResponse{Total: 0, Limit: 50, Offset: 0},
-		Meta: ResponseMeta{
+	limit, offset := 50, 0
+	_ = echo.QueryParamsBinder(c).Int("limit", &limit).Int("offset", &offset)
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 200 {
+		limit = 200
+	}
+
+	filter := repository.CommandListFilter{
+		AgentID:   &agentID,
+		Limit:     limit,
+		Offset:    offset,
+		SortBy:    "issued_at",
+		SortOrder: "desc",
+	}
+
+	items, total, err := h.commandRepo.ListAll(c.Request().Context(), filter)
+	if err != nil {
+		h.logger.WithError(err).Error("GetAgentCommands: ListAll failed")
+		return errorResponse(c, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to retrieve commands")
+	}
+
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"data": items,
+		"pagination": PaginationResponse{
+			Total:   int(total),
+			Limit:   limit,
+			Offset:  offset,
+			HasMore: int64(offset+limit) < total,
+		},
+		"meta": ResponseMeta{
 			RequestID: c.Response().Header().Get(echo.HeaderXRequestID),
 			Timestamp: time.Now().UTC().Format(time.RFC3339),
 		},
@@ -338,7 +395,16 @@ func (h *Handlers) ExecuteAgentCommand(c echo.Context) error {
 		h.logger.Warnf("[C2] Bind failed: %v", err)
 		return errorResponse(c, http.StatusBadRequest, "INVALID_REQUEST", "Invalid request body")
 	}
+	req.CommandType = normalizeCommandType(req.CommandType)
 	h.logger.Infof("[C2] Request bound: agent=%s type=%s timeout=%d", agentID, req.CommandType, req.Timeout)
+
+	// Reject unknown types here (API allowlist). Agent still enforces its own rules
+	// (e.g. run_cmd executable whitelist) after delivery.
+	if mapCommandType(req.CommandType) == edrv1.CommandType_COMMAND_TYPE_UNSPECIFIED {
+		h.logger.Warnf("[C2] Unsupported command_type: %q", req.CommandType)
+		return errorResponse(c, http.StatusBadRequest, "UNSUPPORTED_COMMAND",
+			"Unknown or unsupported command_type — see API documentation for allowed values")
+	}
 
 	// Validate registry is available
 	if h.registry == nil {
@@ -350,7 +416,7 @@ func (h *Handlers) ExecuteAgentCommand(c echo.Context) error {
 	// The command is stored in DB (status=pending). When the agent reconnects
 	// it auto-starts because: (1) Windows service recovery restarts it, or
 	// (2) the redeliverPendingCommands goroutine pushes it on next connect.
-	if strings.ToLower(req.CommandType) == "start_agent" {
+	if req.CommandType == "start_agent" {
 		// Inject mode so agent's restartService handler knows to only start, not stop
 		if req.Parameters == nil {
 			req.Parameters = map[string]string{}
@@ -359,9 +425,17 @@ func (h *Handlers) ExecuteAgentCommand(c echo.Context) error {
 	}
 
 	// Check if agent is online (skip for start_agent — handled above as offline-safe)
-	if strings.ToLower(req.CommandType) != "start_agent" && !h.registry.IsOnline(agentID.String()) {
+	if req.CommandType != "start_agent" && !h.registry.IsOnline(agentID.String()) {
 		h.logger.Warnf("[C2] Agent %s is not online", agentID)
 		return errorResponse(c, http.StatusNotFound, "AGENT_OFFLINE", "Agent is not online — command cannot be delivered")
+	}
+
+	execTimeoutSec := req.Timeout
+	if req.TimeoutSeconds > 0 {
+		execTimeoutSec = req.TimeoutSeconds
+	}
+	if execTimeoutSec <= 0 {
+		execTimeoutSec = 300
 	}
 
 	// ── Step 1: Persist to DB FIRST (status=pending) ──────────────────────────
@@ -375,10 +449,6 @@ func (h *Handlers) ExecuteAgentCommand(c echo.Context) error {
 		params := make(map[string]any, len(req.Parameters))
 		for k, v := range req.Parameters {
 			params[k] = v
-		}
-		timeout := req.Timeout
-		if timeout <= 0 {
-			timeout = 300
 		}
 		// Build metadata with issuer info for audit (avoids FK constraint on issued_by)
 		meta := map[string]any{}
@@ -395,7 +465,7 @@ func (h *Handlers) ExecuteAgentCommand(c echo.Context) error {
 			Parameters:     params,
 			Priority:       5,
 			Status:         models.CommandStatusPending,
-			TimeoutSeconds: timeout,
+			TimeoutSeconds: execTimeoutSec,
 			IssuedBy:       nil, // always nil to avoid FK violation
 			Metadata:       meta,
 		}
@@ -409,7 +479,7 @@ func (h *Handlers) ExecuteAgentCommand(c echo.Context) error {
 	// ── Step 1b: Inject mode parameter for agent service control commands ───────
 	// The agent's restartService handler checks Parameters["mode"] to decide
 	// whether to stop+start (restart), stop only, or start only.
-	switch strings.ToLower(req.CommandType) {
+	switch req.CommandType {
 	case "stop_agent", "stop_service":
 		if req.Parameters == nil {
 			req.Parameters = map[string]string{}
@@ -443,6 +513,7 @@ func (h *Handlers) ExecuteAgentCommand(c echo.Context) error {
 		Type:       cmdType,
 		Parameters: req.Parameters,
 		Priority:   5,
+		ExpiresAt:  timestamppb.New(time.Now().Add(time.Duration(execTimeoutSec) * time.Second)),
 	}
 
 	if err := h.registry.Send(agentID.String(), cmd); err != nil {
@@ -473,7 +544,7 @@ func (h *Handlers) ExecuteAgentCommand(c echo.Context) error {
 	// race between the dashboard's next query and the async result, ensuring
 	// the UI shows "Restore Network" (or "Isolate Network") right away.
 	if h.agentSvc != nil {
-		switch strings.ToLower(req.CommandType) {
+		switch req.CommandType {
 		case "isolate_network", "isolate":
 			if err := h.agentSvc.SetIsolation(c.Request().Context(), agentID, true); err != nil {
 				h.logger.WithError(err).Warn("[Isolation] Failed to proactively set is_isolated=true")
@@ -535,21 +606,135 @@ func (h *Handlers) ExecuteAgentCommand(c echo.Context) error {
 	})
 }
 
+// AddProcessException pushes a live allow-exception for process auto-response.
+// It uses UPDATE_CONFIG sparse override (exclude_process=<name>) so the agent
+// hot-reloads immediately and preserves existing exclusions.
+func (h *Handlers) AddProcessException(c echo.Context) error {
+	idStr := c.Param("id")
+	agentID, err := uuid.Parse(idStr)
+	if err != nil {
+		return errorResponse(c, http.StatusBadRequest, "INVALID_ID", "Invalid agent ID format")
+	}
+	var req ProcessExceptionRequest
+	if err := c.Bind(&req); err != nil {
+		return errorResponse(c, http.StatusBadRequest, "INVALID_REQUEST", "Invalid request body")
+	}
+	procName := strings.TrimSpace(req.ProcessName)
+	if procName == "" {
+		return errorResponse(c, http.StatusBadRequest, "INVALID_REQUEST", "process_name is required")
+	}
+	if h.registry == nil || h.commandRepo == nil {
+		return errorResponse(c, http.StatusServiceUnavailable, "C2_UNAVAILABLE", "Command routing is not available")
+	}
+	if !h.registry.IsOnline(agentID.String()) {
+		return errorResponse(c, http.StatusNotFound, "AGENT_OFFLINE", "Agent is not online — exception cannot be delivered")
+	}
+
+	commandID := uuid.New()
+	meta := map[string]any{
+		"exception_type": "process_allow",
+		"process_name":   procName,
+		"reason":         strings.TrimSpace(req.Reason),
+	}
+	if user := getCurrentUser(c); user != nil {
+		meta["issued_by_username"] = user.Username
+	}
+	dbCmd := &models.Command{
+		ID:          commandID,
+		AgentID:     agentID,
+		CommandType: models.CommandType("update_config"),
+		Parameters: map[string]any{
+			"exclude_process": procName,
+		},
+		Priority:       5,
+		Status:         models.CommandStatusPending,
+		TimeoutSeconds: 120,
+		IssuedBy:       nil,
+		Metadata:       meta,
+	}
+	if err := h.commandRepo.Create(c.Request().Context(), dbCmd); err != nil {
+		h.logger.WithError(err).Error("[C2] Failed to persist process exception command")
+		return errorResponse(c, http.StatusInternalServerError, "DB_ERROR", "Failed to persist exception command")
+	}
+
+	cmd := &edrv1.Command{
+		CommandId: commandID.String(),
+		Timestamp: timestamppb.Now(),
+		Type:      edrv1.CommandType_COMMAND_TYPE_UPDATE_CONFIG,
+		Parameters: map[string]string{
+			"exclude_process": procName,
+		},
+		Priority: 5,
+	}
+	if err := h.registry.Send(agentID.String(), cmd); err != nil {
+		_ = h.commandRepo.UpdateStatus(c.Request().Context(), commandID, models.CommandStatusFailed, nil, err.Error())
+		return errorResponse(c, http.StatusConflict, "SEND_FAILED", err.Error())
+	}
+	if err := h.commandRepo.UpdateStatus(c.Request().Context(), commandID, models.CommandStatusSent, nil, ""); err != nil {
+		h.logger.WithError(err).Warn("[C2] Failed to update process exception command status to sent")
+	}
+
+	h.logger.WithFields(logrus.Fields{
+		"agent_id":   agentID,
+		"command_id": commandID,
+		"process":    procName,
+	}).Info("[C2] Process allow-exception dispatched")
+
+	if h.auditRepo != nil {
+		ip, ua := auditContext(c)
+		username := "unknown"
+		userID := uuid.Nil
+		if user := getCurrentUser(c); user != nil {
+			username = user.Username
+			if uid, parseErr := uuid.Parse(user.UserID); parseErr == nil {
+				userID = uid
+			}
+		}
+		entry := models.NewAuditLog(userID, username, models.AuditActionDeployPolicy, "agent", agentID).
+			WithContext(ip, ua).
+			WithDetails("process_exception=" + procName)
+		go func() {
+			auditCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_ = h.auditRepo.Create(auditCtx, entry)
+		}()
+	}
+
+	return c.JSON(http.StatusAccepted, map[string]interface{}{
+		"command_id":   commandID.String(),
+		"status":       "sent",
+		"agent_id":     agentID.String(),
+		"process_name": procName,
+		"meta":         responseMeta(c),
+	})
+}
+
 // mapCommandType maps REST API command type strings to proto CommandType.
 // Every command type exposed in the dashboard must have a case here;
 // missing entries would cause the agent to receive COMMAND_TYPE_UNSPECIFIED
 // and log "unknown command type", silently dropping the command.
 func mapCommandType(cmdType string) edrv1.CommandType {
-	switch strings.ToLower(cmdType) {
+	switch normalizeCommandType(cmdType) {
 	case "kill_process", "terminate_process":
 		return edrv1.CommandType_COMMAND_TYPE_TERMINATE_PROCESS
 	case "collect_logs", "collect_forensics":
 		return edrv1.CommandType_COMMAND_TYPE_COLLECT_FORENSICS
 	case "quarantine_file":
-		// Agent handler: CmdQuarantineFile = "QUARANTINE_FILE"
-		// No dedicated proto enum — re-use COLLECT_FORENSICS slot with parameters.
-		// The agent distinguishes via the raw type string in the Parameters map.
-		return edrv1.CommandType_COMMAND_TYPE_COLLECT_FORENSICS
+		return edrv1.CommandType(13) // COMMAND_TYPE_QUARANTINE_FILE
+	case "block_ip":
+		return edrv1.CommandType(14)
+	case "unblock_ip":
+		return edrv1.CommandType(15)
+	case "block_domain":
+		return edrv1.CommandType(16)
+	case "unblock_domain":
+		return edrv1.CommandType(17)
+	case "update_signatures":
+		return edrv1.CommandType(18)
+	case "restore_quarantine_file":
+		return edrv1.CommandType(19) // COMMAND_TYPE_RESTORE_QUARANTINE_FILE
+	case "delete_quarantine_file":
+		return edrv1.CommandType(20) // COMMAND_TYPE_DELETE_QUARANTINE_FILE
 	case "scan_file", "scan_memory":
 		// Map to COLLECT_FORENSICS so the agent receives it; params carry sub-type.
 		return edrv1.CommandType_COMMAND_TYPE_COLLECT_FORENSICS
@@ -566,24 +751,24 @@ func mapCommandType(cmdType string) edrv1.CommandType {
 		// Start only — agent checks Parameters["mode"] == "start"
 		return edrv1.CommandType_COMMAND_TYPE_RESTART_SERVICE
 	case "restart", "restart_machine":
-		return 10 // COMMAND_TYPE_RESTART — machine reboot (enum value 10)
+		return edrv1.CommandType(10)
 	case "shutdown", "shutdown_machine":
-		return 11 // COMMAND_TYPE_SHUTDOWN — machine power off (enum value 11)
+		return edrv1.CommandType(11)
 	case "update_agent":
 		return edrv1.CommandType_COMMAND_TYPE_UPDATE_AGENT
 	case "update_config", "update_policy":
 		return edrv1.CommandType_COMMAND_TYPE_UPDATE_CONFIG
 	case "update_filter_policy":
-		// Front-end pushes filter policy — mapped to UPDATE_CONFIG so agent
-		// receives it; Parameters["policy"] carries the JSON payload.
-		return edrv1.CommandType_COMMAND_TYPE_UPDATE_CONFIG
+		return edrv1.CommandType(12) // COMMAND_TYPE_UPDATE_FILTER_POLICY
 	case "adjust_rate":
 		return edrv1.CommandType_COMMAND_TYPE_ADJUST_RATE
 	case "run_cmd", "custom":
-		// RUN_CMD uses numeric value 9; agent handles it by string matching.
-		// "custom" from dashboard UI is also routed here.
-		return 9
+		return edrv1.CommandType(9) // COMMAND_TYPE_RUN_CMD
 	default:
 		return edrv1.CommandType_COMMAND_TYPE_UNSPECIFIED
 	}
+}
+
+func normalizeCommandType(v string) string {
+	return strings.ToLower(strings.TrimSpace(v))
 }

@@ -254,6 +254,14 @@ type ContextPolicyRepository interface {
 	Delete(ctx context.Context, id int64) error
 }
 
+// QuarantineRepository persists agent quarantine inventory (from telemetry + C2 ACKs).
+type QuarantineRepository interface {
+	Upsert(ctx context.Context, row *models.QuarantineItem) error
+	ListByAgent(ctx context.Context, agentID uuid.UUID, includeResolved bool) ([]*models.QuarantineItem, error)
+	GetByID(ctx context.Context, id uuid.UUID) (*models.QuarantineItem, error)
+	SetState(ctx context.Context, id uuid.UUID, state models.QuarantineItemState) error
+}
+
 // AuditLogFilter defines filters for listing audit logs.
 type AuditLogFilter struct {
 	UserID       *uuid.UUID

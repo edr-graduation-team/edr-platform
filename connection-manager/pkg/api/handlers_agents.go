@@ -279,20 +279,47 @@ func (h *Handlers) GetAgentStats(c echo.Context) error {
 // GetAgentEvents returns events for an agent.
 func (h *Handlers) GetAgentEvents(c echo.Context) error {
 	idStr := c.Param("id")
-	_, err := uuid.Parse(idStr)
+	agentID, err := uuid.Parse(idStr)
 	if err != nil {
 		return errorResponse(c, http.StatusBadRequest, "INVALID_ID", "Invalid agent ID format")
 	}
 
-	// TODO: Query events for agent
+	if h.eventRepo == nil {
+		return errorResponse(c, http.StatusServiceUnavailable, "DB_UNAVAILABLE", "Event repository is not available")
+	}
+
+	limit, offset := 50, 0
+	_ = echo.QueryParamsBinder(c).Int("limit", &limit).Int("offset", &offset)
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 500 {
+		limit = 500
+	}
+	if offset < 0 {
+		offset = 0
+	}
+
+	rows, total, err := h.eventRepo.ListByAgent(c.Request().Context(), agentID, limit, offset)
+	if err != nil {
+		return errorResponse(c, http.StatusInternalServerError, "QUERY_FAILED", err.Error())
+	}
+
+	out := make([]EventSummary, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, EventSummary{
+			ID:        r.ID,
+			AgentID:   r.AgentID,
+			EventType: r.EventType,
+			Timestamp: r.Timestamp,
+			Summary:   r.Summary,
+		})
+	}
 
 	return c.JSON(http.StatusOK, EventListResponse{
-		Data:       []EventSummary{},
-		Pagination: PaginationResponse{Total: 0, Limit: 50, Offset: 0},
-		Meta: ResponseMeta{
-			RequestID: c.Response().Header().Get(echo.HeaderXRequestID),
-			Timestamp: time.Now().UTC().Format(time.RFC3339),
-		},
+		Data:       out,
+		Pagination: PaginationResponse{Total: total, Limit: limit, Offset: offset},
+		Meta:       responseMeta(c),
 	})
 }
 

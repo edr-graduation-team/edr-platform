@@ -410,6 +410,10 @@ func main() {
 		apiHandlers.SetUserRepo(repository.NewPostgresUserRepository(pool))
 		apiHandlers.SetRoleRepo(repository.NewPostgresRoleRepository(pool))
 		apiHandlers.SetContextPolicyRepo(repository.NewPostgresContextPolicyRepository(pool))
+		// Event storage/search for dashboard investigations
+		eventRepo := repository.NewPostgresEventRepository(pool)
+		apiHandlers.SetEventRepo(eventRepo)
+		evtHandler.SetEventRepo(eventRepo)
 		logger.Info("User management and RBAC enabled")
 	}
 

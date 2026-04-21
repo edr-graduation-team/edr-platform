@@ -396,7 +396,6 @@ export default function EndpointDetail() {
                             agent={agent}
                             eff={eff}
                             riskRow={riskRow}
-                            recent={recentCmds?.data || []}
                             lastCmd={lastCmd}
                             overviewAlerts={overviewAlerts?.alerts ?? []}
                             overviewAlertsLoading={overviewAlertsLoading}
@@ -497,7 +496,6 @@ function OverviewTab({
     agent,
     eff,
     riskRow,
-    recent,
     lastCmd,
     overviewAlerts,
     overviewAlertsLoading,
@@ -506,7 +504,6 @@ function OverviewTab({
     agent: Agent;
     eff: string;
     riskRow?: EndpointRiskSummary;
-    recent: CommandListItem[];
     lastCmd?: CommandListItem;
     overviewAlerts: Alert[];
     overviewAlertsLoading: boolean;
@@ -654,31 +651,18 @@ function OverviewTab({
             </div>
 
             <div>
-                <h3 className="text-sm font-bold text-slate-700 dark:text-slate-200 mb-2">Recent commands</h3>
-                <div className="overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-700">
-                    <table className="w-full text-left text-xs">
-                        <thead className="bg-slate-100 dark:bg-slate-800/80 text-slate-600 uppercase">
-                            <tr>
-                                <th className="p-2">Type</th>
-                                <th className="p-2">Status</th>
-                                <th className="p-2">Issued</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {recent.length === 0 ? (
-                                <tr><td colSpan={3} className="p-4 text-slate-500">No commands</td></tr>
-                            ) : (
-                                recent.map((c) => (
-                                    <tr key={c.id} className="border-t border-slate-100 dark:border-slate-800">
-                                        <td className="p-2 font-mono">{c.command_type}</td>
-                                        <td className="p-2">{c.status}</td>
-                                        <td className="p-2 whitespace-nowrap">{new Date(c.issued_at).toLocaleString()}</td>
-                                    </tr>
-                                ))
-                            )}
-                        </tbody>
-                    </table>
+                <div className="flex items-center justify-between gap-3">
+                    <h3 className="text-sm font-bold text-slate-700 dark:text-slate-200">Commands</h3>
+                    <Link
+                        to={`/management/devices/${encodeURIComponent(agent.id)}?tab=response`}
+                        className="text-xs font-semibold text-cyan-700 dark:text-cyan-300 hover:underline"
+                    >
+                        Open Response tab
+                    </Link>
                 </div>
+                <p className="text-sm text-slate-500 mt-2">
+                    Use the <strong>Response</strong> tab to execute commands and view full command history.
+                </p>
             </div>
         </div>
     );
@@ -703,6 +687,8 @@ function ConfigurationTab({ agent }: { agent: Agent }) {
         )
     );
     const [policyError, setPolicyError] = useState('');
+    const [exceptionProcess, setExceptionProcess] = useState('');
+    const [exceptionReason, setExceptionReason] = useState('');
 
     const policyMutation = useMutation({
         mutationFn: async () => {
@@ -715,6 +701,21 @@ function ConfigurationTab({ agent }: { agent: Agent }) {
             queryClient.invalidateQueries({ queryKey: ['agent-commands', agent.id] });
         },
         onError: (e: Error) => showToast(e.message || 'Policy push failed', 'error'),
+    });
+    const exceptionMutation = useMutation({
+        mutationFn: async () => {
+            const pn = exceptionProcess.trim();
+            if (!pn) throw new Error('process_name is required');
+            return agentsApi.addProcessException(agent.id, { process_name: pn, reason: exceptionReason.trim() || undefined });
+        },
+        onSuccess: (data) => {
+            showToast(`Process exception pushed (Command ID: ${data.command_id})`, 'success');
+            setExceptionProcess('');
+            setExceptionReason('');
+            queryClient.invalidateQueries({ queryKey: ['agent', agent.id] });
+            queryClient.invalidateQueries({ queryKey: ['agent-commands', agent.id] });
+        },
+        onError: (e: Error) => showToast(e.message || 'Failed to push process exception', 'error'),
     });
 
     return (
@@ -789,6 +790,48 @@ function ConfigurationTab({ agent }: { agent: Agent }) {
                         className="px-3 py-2 rounded-lg text-xs font-semibold bg-cyan-600 hover:bg-cyan-700 text-white disabled:opacity-50"
                     >
                         {policyMutation.isPending ? 'Pushing…' : 'Push policy to agent'}
+                    </button>
+                </div>
+            </div>
+
+            <div className="rounded-lg border border-slate-200 dark:border-slate-700 p-4 bg-white/60 dark:bg-slate-900/40">
+                <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100 mb-2">Process exceptions</h3>
+                <p className="text-xs text-slate-500 mb-3">
+                    Allow a process name to bypass <strong>process auto-response</strong>. This calls{' '}
+                    <code className="text-xs">POST /api/v1/agents/:id/process-exceptions</code> and pushes{' '}
+                    <code className="text-xs">exclude_process</code> to the agent at runtime.
+                </p>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    <div className="md:col-span-1">
+                        <label className="block text-[10px] font-semibold uppercase tracking-wide text-slate-500 mb-1">Process name</label>
+                        <input
+                            className="w-full rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-950 px-3 py-2 text-sm font-mono"
+                            value={exceptionProcess}
+                            onChange={(e) => setExceptionProcess(e.target.value)}
+                            placeholder="e.g. powershell.exe"
+                            disabled={!canPushPolicy}
+                        />
+                    </div>
+                    <div className="md:col-span-2">
+                        <label className="block text-[10px] font-semibold uppercase tracking-wide text-slate-500 mb-1">Reason (optional)</label>
+                        <input
+                            className="w-full rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-950 px-3 py-2 text-sm"
+                            value={exceptionReason}
+                            onChange={(e) => setExceptionReason(e.target.value)}
+                            placeholder="approved automation / known good"
+                            disabled={!canPushPolicy}
+                        />
+                    </div>
+                </div>
+                <div className="flex items-center justify-end gap-2 mt-3">
+                    {!canPushPolicy ? <span className="text-xs text-slate-500">Missing permission to push exceptions.</span> : null}
+                    <button
+                        type="button"
+                        disabled={!canPushPolicy || exceptionMutation.isPending}
+                        onClick={() => exceptionMutation.mutate()}
+                        className="px-3 py-2 rounded-lg text-xs font-semibold bg-cyan-600 hover:bg-cyan-700 text-white disabled:opacity-50"
+                    >
+                        {exceptionMutation.isPending ? 'Pushing…' : 'Add process exception'}
                     </button>
                 </div>
             </div>

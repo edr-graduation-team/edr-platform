@@ -696,35 +696,37 @@ export default function Endpoints() {
             <div className="relative flex-1 flex flex-col min-h-0 max-w-[1800px] mx-auto w-full space-y-4 lg:space-y-5">
                 <div className="flex flex-wrap items-center justify-between gap-3 shrink-0">
                     <div>
-                        <h1 className="text-2xl sm:text-3xl font-bold text-slate-900 dark:text-white tracking-tight">Device management</h1>
-                        <p className="text-sm text-slate-500 mt-1">Fleet list, grouping shell, and actions (OpenEDR / Xcitium-style layout)</p>
+                        <h1 className="text-2xl sm:text-3xl font-bold text-slate-900 dark:text-white tracking-tight">Devices (Fleet)</h1>
+                        <p className="text-sm text-slate-500 mt-1">
+                            Fleet inventory powered by <code className="text-xs">GET /api/v1/agents</code>. Open a device for response, activity, network, and configuration tabs.
+                        </p>
                     </div>
-                    {agents.length > 0 && (() => {
-                        let onlineCount = 0, offlineCount = 0, degradedCount = 0;
-                        agents.forEach((a) => {
-                            const eff = getEffectiveStatus(a);
-                            if (eff === 'online') onlineCount++;
-                            else if (eff === 'degraded') degradedCount++;
-                            else offlineCount++;
-                        });
-                        return (
+                {agents.length > 0 && (() => {
+                    let onlineCount = 0, offlineCount = 0, degradedCount = 0;
+                    agents.forEach((a) => {
+                        const eff = getEffectiveStatus(a);
+                        if (eff === 'online') onlineCount++;
+                        else if (eff === 'degraded') degradedCount++;
+                        else offlineCount++;
+                    });
+                    return (
                             <div className="flex flex-wrap items-center gap-2 sm:gap-3">
                                 <span className="flex items-center gap-2 px-3 py-1.5 bg-green-500/10 dark:bg-green-500/20 text-green-700 dark:text-green-400 border border-green-500/20 rounded-full text-xs font-bold uppercase tracking-wider">
                                     <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
-                                    {onlineCount} Online
-                                </span>
-                                <span className="flex items-center gap-2 px-3 py-1.5 bg-slate-500/10 dark:bg-slate-500/20 text-slate-600 dark:text-slate-400 border border-slate-500/20 rounded-full text-xs font-bold uppercase tracking-wider">
-                                    <span className="w-1.5 h-1.5 rounded-full bg-slate-400" />
-                                    {offlineCount} Offline
-                                </span>
+                                {onlineCount} Online
+                            </span>
+                            <span className="flex items-center gap-2 px-3 py-1.5 bg-slate-500/10 dark:bg-slate-500/20 text-slate-600 dark:text-slate-400 border border-slate-500/20 rounded-full text-xs font-bold uppercase tracking-wider">
+                                <span className="w-1.5 h-1.5 rounded-full bg-slate-400" />
+                                {offlineCount} Offline
+                            </span>
                                 <span className="flex items-center gap-2 px-3 py-1.5 bg-amber-500/10 dark:bg-amber-500/20 text-amber-700 dark:text-amber-400 border border-amber-500/20 rounded-full text-xs font-bold uppercase tracking-wider">
                                     <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
-                                    {degradedCount} Degraded
-                                </span>
-                            </div>
-                        );
-                    })()}
-                </div>
+                                {degradedCount} Degraded
+                            </span>
+                        </div>
+                    );
+                })()}
+            </div>
 
                 <div
                     data-section-id="dm-structure"
@@ -733,7 +735,7 @@ export default function Endpoints() {
                     {treeVisible && (
                         <aside className="w-[min(100%,260px)] sm:w-[260px] shrink-0 border-r border-slate-200 dark:border-slate-700 flex flex-col bg-slate-50/90 dark:bg-slate-950/80">
                             <div className="p-3 border-b border-slate-200 dark:border-slate-700 space-y-2">
-                                <div className="relative">
+                        <div className="relative">
                                     <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                                     <input
                                         type="text"
@@ -791,12 +793,6 @@ export default function Endpoints() {
                                 <PanelLeft className="w-4 h-4" />
                             </button>
                             <nav className="flex items-end gap-1 px-1 min-w-0 overflow-x-auto">
-                                <Link
-                                    to="/management/profiles"
-                                    className="shrink-0 px-3 py-2.5 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white border-b-2 border-transparent"
-                                >
-                                    Group management
-                                </Link>
                                 <span className="shrink-0 px-3 py-2.5 text-sm font-semibold text-slate-900 dark:text-white border-b-2 border-[#f19637]">
                                     Device management
                                 </span>
@@ -890,54 +886,54 @@ export default function Endpoints() {
                         <div className="flex flex-wrap gap-3 items-end px-3 py-2 border-b border-slate-200 dark:border-slate-700 bg-white/60 dark:bg-slate-900/20">
                             <div className="relative">
                                 <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-500 mb-1">Status</label>
-                                <select
-                                    value={filters.status}
-                                    onChange={(e) => setFilters({ ...filters, status: e.target.value })}
+                            <select
+                                value={filters.status}
+                                onChange={(e) => setFilters({ ...filters, status: e.target.value })}
                                     className="w-40 appearance-none bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 rounded-lg pl-3 pr-8 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/50"
-                                >
+                            >
                                     <option value="">All</option>
-                                    <option value="online">Online</option>
-                                    <option value="offline">Offline</option>
-                                    <option value="degraded">Degraded</option>
-                                    <option value="pending">Pending</option>
-                                </select>
+                                <option value="online">Online</option>
+                                <option value="offline">Offline</option>
+                                <option value="degraded">Degraded</option>
+                                <option value="pending">Pending</option>
+                            </select>
                                 <ChevronDown className="pointer-events-none absolute right-2 bottom-2.5 w-4 h-4 text-slate-500" />
                             </div>
-                            <div className="relative">
+                        <div className="relative">
                                 <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-500 mb-1">OS</label>
-                                <select
-                                    value={filters.os_type}
-                                    onChange={(e) => setFilters({ ...filters, os_type: e.target.value })}
+                            <select
+                                value={filters.os_type}
+                                onChange={(e) => setFilters({ ...filters, os_type: e.target.value })}
                                     className="w-40 appearance-none bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 rounded-lg pl-3 pr-8 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/50"
-                                >
+                            >
                                     <option value="">All</option>
-                                    <option value="windows">Windows</option>
-                                    <option value="linux">Linux</option>
-                                    <option value="macos">macOS</option>
-                                </select>
+                                <option value="windows">Windows</option>
+                                <option value="linux">Linux</option>
+                                <option value="macos">macOS</option>
+                            </select>
                                 <ChevronDown className="pointer-events-none absolute right-2 bottom-2.5 w-4 h-4 text-slate-500" />
                             </div>
                             <div className="ml-auto flex items-center gap-1">
-                                <button
+                <button
                                     type="button"
-                                    onClick={() => setViewMode('table')}
+                    onClick={() => setViewMode('table')}
                                     className={`p-2 rounded-lg transition-all ${viewMode === 'table' ? 'bg-cyan-500/20 text-cyan-600 dark:text-cyan-400' : 'text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-800'}`}
                                     title="Table"
                                 >
                                     <List className="w-4 h-4" />
                                 </button>
-                                <button
+                <button
                                     type="button"
-                                    onClick={() => setViewMode('grid')}
+                    onClick={() => setViewMode('grid')}
                                     className={`p-2 rounded-lg transition-all ${viewMode === 'grid' ? 'bg-cyan-500/20 text-cyan-600 dark:text-cyan-400' : 'text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-800'}`}
                                     title="Grid"
                                 >
                                     <LayoutGrid className="w-4 h-4" />
                                 </button>
                             </div>
-                        </div>
+            </div>
 
-                        <div className="relative z-10 flex-1 flex flex-col min-h-0 overflow-hidden">
+            <div className="relative z-10 flex-1 flex flex-col min-h-0 overflow-hidden">
             {isLoading ? (
                 <div className="p-4 bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700/50">
                     <SkeletonTable rows={8} columns={7} />
@@ -987,7 +983,7 @@ export default function Endpoints() {
                                         <span className="flex items-center gap-1"><Clock className="w-3 h-3" />{agent.last_seen ? new Date(agent.last_seen).toLocaleTimeString() : '—'}</span>
                                     </div>
                                     {/* Actions */}
-                                    {authApi.canViewResponses() && (
+                                        {authApi.canViewResponses() && (
                                         <div className="flex gap-2 pt-1 border-t border-slate-100 dark:border-slate-800">
                                             <button type="button" onClick={() => handleCommand(agent, 'isolate_network')} className="flex-1 py-1.5 rounded-lg text-[11px] font-semibold bg-rose-500/10 text-rose-600 dark:text-rose-400 hover:bg-rose-500/20 transition-colors border border-rose-500/20" title="Isolate Network">Isolate</button>
                                             <button type="button" onClick={() => handleCommand(agent, 'collect_logs')} className="flex-1 py-1.5 rounded-lg text-[11px] font-semibold bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 hover:bg-cyan-500/20 transition-colors border border-cyan-500/20" title="Collect Logs">Collect</button>
@@ -1102,7 +1098,7 @@ export default function Endpoints() {
             )}
                         </div>
                     </div>
-                </div>
+            </div>
 
             <CommandExecutionModal
                 isOpen={!!selectedAgent && !!selectedCommand}

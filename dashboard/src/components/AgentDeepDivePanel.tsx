@@ -430,7 +430,7 @@ export function AgentDeepDivePanel({ agent }: { agent: Agent }) {
                         to={`/responses?agent_id=${encodeURIComponent(agent.id)}`}
                         className="text-xs font-medium text-primary-600 dark:text-primary-400 hover:underline"
                     >
-                        Open in Action Center
+                        Open in Command Center
                     </Link>
                 </div>
                 {cmdsLoading && <p className="text-xs text-gray-500">Loading command history…</p>}

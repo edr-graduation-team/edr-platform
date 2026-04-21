@@ -5,12 +5,13 @@ import { Skeleton } from '../Skeleton';
 type GenericParityViewProps<T> = {
     title: string;
     description?: string;
+    missingApi?: string | string[];
     queryKey: unknown[];
     fetcher: () => Promise<T>;
     mock: T;
 };
 
-export function GenericParityView<T>({ title, description, queryKey, fetcher, mock }: GenericParityViewProps<T>) {
+export function GenericParityView<T>({ title, description, missingApi, queryKey, fetcher, mock }: GenericParityViewProps<T>) {
     const q = useParityQuery(queryKey, fetcher, mock);
 
     if (q.isLoading) {
@@ -38,7 +39,7 @@ export function GenericParityView<T>({ title, description, queryKey, fetcher, mo
                 <h1 className="text-xl font-bold text-gray-900 dark:text-white">{title}</h1>
                 {description && <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{description}</p>}
             </div>
-            {payload.isMock && <ParityMockBanner />}
+            {payload.isMock && <ParityMockBanner missingApi={missingApi} />}
             <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800/80 overflow-hidden">
                 <pre className="text-xs p-4 overflow-auto max-h-[min(70vh,560px)] text-gray-800 dark:text-gray-200 font-mono">
                     {JSON.stringify(payload.data, null, 2)}

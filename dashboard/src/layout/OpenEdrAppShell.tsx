@@ -17,7 +17,6 @@ import {
     LogOut,
     Menu,
     Moon,
-    MoreHorizontal,
     Sun,
     X,
 } from 'lucide-react';
@@ -32,7 +31,6 @@ import {
     MANAGEMENT_TABS,
     SECURITY_MODULE_TABS,
     SOC_CONTEXT_TABS,
-    isDashboardMorePath,
     isSocPath,
 } from './openEdrNavConfig';
 
@@ -266,8 +264,7 @@ export const OpenEdrAppShell = memo(function OpenEdrAppShell({ children }: { chi
     const location = useLocation();
     const pathname = location.pathname;
     const [openId, setOpenId] = useState<string | null>(null);
-    const [moreOpen, setMoreOpen] = useState(false);
-    const moreButtonRef = useRef<HTMLButtonElement>(null);
+    // Dashboards tabs are rendered directly (no “More” menu).
 
     const [darkMode, setDarkMode] = useState(() => {
         if (typeof window !== 'undefined') {
@@ -287,7 +284,6 @@ export const OpenEdrAppShell = memo(function OpenEdrAppShell({ children }: { chi
 
     useEffect(() => {
         setOpenId(null);
-        setMoreOpen(false);
         setMobileOpen(false);
     }, [pathname]);
 
@@ -383,14 +379,12 @@ export const OpenEdrAppShell = memo(function OpenEdrAppShell({ children }: { chi
                         </div>
                     </Link>
 
-                    <a
-                        href="/"
-                        target="_blank"
-                        rel="noopener noreferrer"
+                    <Link
+                        to="/"
                         className="hidden md:inline text-[12px] px-2 py-1 rounded text-[var(--xc-nav-text)] hover:bg-[var(--xc-nav-hover)]"
                     >
                         Essential Platform
-                    </a>
+                    </Link>
 
                     <nav className="hidden lg:flex items-center gap-0.5 flex-1 min-w-0 overflow-x-auto [&::-webkit-scrollbar]:hidden">
                         <NavLink
@@ -400,84 +394,67 @@ export const OpenEdrAppShell = memo(function OpenEdrAppShell({ children }: { chi
                             Dashboards
                         </NavLink>
 
-                        <NavDropdown
-                            id="security"
-                            label="Security"
-                            active={securityTopActive}
-                            openId={openId}
-                            setOpenId={setOpenId}
-                        >
+                        <NavDropdown id="soc" label="SOC" active={isSocPath(pathname)} openId={openId} setOpenId={setOpenId}>
+                            {authApi.canViewAlerts() && (
+                                <DropdownLink to="/alerts" onNavigate={() => setOpenId(null)}>
+                                    Alerts (Triage)
+                                    {openAlertCount > 0 && (
+                                        <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded-full bg-white/10">
+                                            {openAlertCount > 99 ? '99+' : openAlertCount}
+                                        </span>
+                                    )}
+                                </DropdownLink>
+                            )}
+                            <DropdownLink to="/events" onNavigate={() => setOpenId(null)}>
+                                Telemetry Search
+                            </DropdownLink>
+                            {authApi.canViewEndpoints() && (
+                                <DropdownLink to="/endpoints" onNavigate={() => setOpenId(null)}>
+                                    Devices
+                                </DropdownLink>
+                            )}
+                            {authApi.canViewAlerts() && (
+                                <DropdownLink to="/endpoint-risk" onNavigate={() => setOpenId(null)}>
+                                    Endpoint Risk
+                                </DropdownLink>
+                            )}
+                            {authApi.canViewAlerts() && (
+                                <DropdownLink to="/threats" onNavigate={() => setOpenId(null)}>
+                                    ATT&CK Analytics
+                                </DropdownLink>
+                            )}
+                            {authApi.canViewRules() && (
+                                <DropdownLink to="/rules" onNavigate={() => setOpenId(null)}>
+                                    Detection Rules
+                                </DropdownLink>
+                            )}
+                            {authApi.canViewResponses() && (
+                                <DropdownLink to="/responses" onNavigate={() => setOpenId(null)}>
+                                    Command Center
+                                </DropdownLink>
+                            )}
+                            <DropdownLink to="/stats" onNavigate={() => setOpenId(null)}>
+                                Reports &amp; Statistics
+                            </DropdownLink>
+                        </NavDropdown>
+
+                        <NavDropdown id="security" label="Security" active={securityTopActive} openId={openId} setOpenId={setOpenId}>
                             <DropdownLink to="/security/endpoint-zero-trust" onNavigate={() => setOpenId(null)}>
                                 Endpoint Zero Trust
                             </DropdownLink>
-                            <DropdownLink to="/security/cloud-zero-trust" onNavigate={() => setOpenId(null)}>
-                                Cloud Security — Zero Trust
-                            </DropdownLink>
                             <DropdownLink to="/security/siem-x" onNavigate={() => setOpenId(null)}>
-                                SIEM — X
+                                SIEM Connectors
                             </DropdownLink>
-                            <DropdownLink to="/security/threat-labs" onNavigate={() => setOpenId(null)}>
-                                Threat Labs
-                            </DropdownLink>
-                            {(authApi.canViewAlerts() ||
-                                authApi.canViewEndpoints() ||
-                                authApi.canViewRules() ||
-                                authApi.canViewResponses()) && (
-                                <div
-                                    className="my-1 border-t pt-1"
-                                    style={{ borderColor: 'var(--xc-nav-border)' }}
-                                    role="presentation"
-                                >
-                                    <p className="px-3 py-1 text-[10px] font-bold uppercase tracking-wider opacity-60 text-[var(--xc-nav-text)]">
-                                        SOC
-                                    </p>
-                                    {authApi.canViewAlerts() && (
-                                        <DropdownLink to="/alerts" onNavigate={() => setOpenId(null)}>
-                                            Alerts
-                                            {openAlertCount > 0 && (
-                                                <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded-full bg-white/10">
-                                                    {openAlertCount > 99 ? '99+' : openAlertCount}
-                                                </span>
-                                            )}
-                                        </DropdownLink>
-                                    )}
-                                    {authApi.canViewEndpoints() && (
-                                        <DropdownLink to="/endpoints" onNavigate={() => setOpenId(null)}>
-                                            Endpoints
-                                        </DropdownLink>
-                                    )}
-                                    {authApi.canViewAlerts() && (
-                                        <DropdownLink to="/endpoint-risk" onNavigate={() => setOpenId(null)}>
-                                            Risk Intelligence
-                                        </DropdownLink>
-                                    )}
-                                    {authApi.canViewAlerts() && (
-                                        <DropdownLink to="/threats" onNavigate={() => setOpenId(null)}>
-                                            Threats
-                                        </DropdownLink>
-                                    )}
-                                    {authApi.canViewRules() && (
-                                        <DropdownLink to="/rules" onNavigate={() => setOpenId(null)}>
-                                            Rules
-                                        </DropdownLink>
-                                    )}
-                                    {authApi.canViewResponses() && (
-                                        <DropdownLink to="/responses" onNavigate={() => setOpenId(null)}>
-                                            Action Center
-                                        </DropdownLink>
-                                    )}
-                                </div>
-                            )}
                         </NavDropdown>
 
                         <NavLink
                             to="/managed-security/overview"
                             className={({ isActive }) => cx(navLinkBase, isActive || managedTopActive ? navLinkActive : navLinkIdle)}
                         >
-                            Managed Security
+                            Managed Detection &amp; Response
                         </NavLink>
 
-                        <NavDropdown id="itsm" label="ITSM" active={itsmTopActive} openId={openId} setOpenId={setOpenId}>
+                        <NavDropdown id="workflows" label="Workflows" active={itsmTopActive} openId={openId} setOpenId={setOpenId}>
                             {ITSM_TABS.map((t) => (
                                 <DropdownLink key={t.to} to={t.to} onNavigate={() => setOpenId(null)}>
                                     {t.label}
@@ -577,7 +554,7 @@ export const OpenEdrAppShell = memo(function OpenEdrAppShell({ children }: { chi
                         <div className="flex items-center gap-1 py-1.5 flex-1 min-w-0">
                             {contextRow.variant === 'dashboards' && (
                                 <>
-                                    {DASHBOARD_MAIN_TABS.map((t) => (
+                                    {[...DASHBOARD_MAIN_TABS, ...DASHBOARD_MORE_TABS].map((t) => (
                                         <NavLink
                                             key={t.to}
                                             to={t.to}
@@ -589,46 +566,6 @@ export const OpenEdrAppShell = memo(function OpenEdrAppShell({ children }: { chi
                                             {t.label}
                                         </NavLink>
                                     ))}
-                                    <div className="relative inline-flex shrink-0">
-                                        <button
-                                            ref={moreButtonRef}
-                                            type="button"
-                                            onClick={() => setMoreOpen((v) => !v)}
-                                            className={cx(
-                                                ctxTabBase,
-                                                'inline-flex items-center gap-1',
-                                                isDashboardMorePath(pathname) || moreOpen ? ctxTabActive : ctxTabIdle,
-                                            )}
-                                        >
-                                            <MoreHorizontal className="w-4 h-4" />
-                                            More
-                                            <ChevronDown className={`w-3 h-3 transition-transform ${moreOpen ? 'rotate-180' : ''}`} />
-                                        </button>
-                                        <DropdownMenuPortal
-                                            open={moreOpen}
-                                            anchorRef={moreButtonRef}
-                                            onClose={() => setMoreOpen(false)}
-                                            minWidth={200}
-                                        >
-                                            {DASHBOARD_MORE_TABS.map((t) => (
-                                                <NavLink
-                                                    key={t.to}
-                                                    to={t.to}
-                                                    onClick={() => setMoreOpen(false)}
-                                                    className={({ isActive }) =>
-                                                        cx(
-                                                            'block px-3 py-2 text-[13px]',
-                                                            isActive
-                                                                ? 'text-[var(--xc-nav-active)] bg-[var(--xc-nav-hover)]'
-                                                                : 'text-[var(--xc-nav-text)] hover:bg-[var(--xc-nav-hover)]',
-                                                        )
-                                                    }
-                                                >
-                                                    {t.label}
-                                                </NavLink>
-                                            ))}
-                                        </DropdownMenuPortal>
-                                    </div>
                                 </>
                             )}
                             {contextRow.variant === 'security-modules' &&

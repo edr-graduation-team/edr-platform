@@ -299,7 +299,7 @@ export default function EnrollmentTokens() {
             {/* Background ambient glow matching Alerts/Endpoints */}
             <div className="absolute top-0 right-0 w-[500px] h-[500px] pointer-events-none mix-blend-screen" style={{ background: 'radial-gradient(circle, rgba(6,182,212,0.08) 0%, transparent 70%)' }} />
 
-            <div className="relative flex-1 flex flex-col min-h-0 space-y-4 lg:space-y-6 max-w-[1600px] mx-auto w-full">
+            <div className="relative flex-1 flex flex-col min-h-0 space-y-4 lg:space-y-6  w-full">
                 {/* Header */}
                 <div className="flex items-center justify-between shrink-0">
                     <div>

@@ -120,7 +120,7 @@ export default function Events() {
 
     return (
         <div className="relative flex flex-col min-h-[calc(100vh-2rem)] -mx-4 sm:-mx-6 lg:-mx-8 -my-4 sm:-my-6 lg:-my-8 p-4 sm:p-6 lg:p-8 bg-slate-50 dark:bg-gradient-to-br dark:from-slate-900 dark:via-[#0b1120] dark:to-slate-900">
-            <div className="max-w-[1600px] mx-auto w-full space-y-4">
+            <div className=" w-full space-y-4">
                 <div className="flex items-start gap-3">
                     <div className="p-2 rounded-xl border border-cyan-500/20 bg-cyan-500/10 text-cyan-700 dark:text-cyan-300">
                         <Activity className="w-6 h-6" />

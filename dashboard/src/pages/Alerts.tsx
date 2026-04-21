@@ -1253,7 +1253,7 @@ export default function Alerts() {
             {/* Background ambient glow */}
             <div className="absolute top-0 left-1/4 w-[800px] h-[500px] pointer-events-none -translate-y-1/2" style={{ background: 'radial-gradient(circle, rgba(6,182,212,0.08) 0%, transparent 70%)' }} />
 
-            <div className="relative flex-1 flex flex-col min-h-0 space-y-4 lg:space-y-6 max-w-[1600px] mx-auto w-full">
+            <div className="relative flex-1 flex flex-col min-h-0 space-y-4 lg:space-y-6  w-full">
                 <div className="flex items-center justify-between shrink-0">
                     <div>
                         <h1 className="text-3xl font-bold text-slate-900 dark:text-white tracking-tight">Alerts (Triage)</h1>

@@ -19,17 +19,8 @@ import {
     type EndpointRiskSummary,
     type QuarantineItem,
 } from '../api/client';
-import { Modal, useToast } from '../components';
-
-const STALE_THRESHOLD_MS = 60 * 1000;
-
-function getEffectiveStatus(agent: Agent): Agent['status'] {
-    if (agent.status === 'online' || agent.status === 'degraded') {
-        const elapsed = Date.now() - new Date(agent.last_seen).getTime();
-        if (elapsed > STALE_THRESHOLD_MS) return 'offline';
-    }
-    return agent.status;
-}
+import { AgentDeepDivePanel, EventDetailModal, Modal, useToast } from '../components';
+import { getEffectiveStatus } from '../utils/agentDisplay';
 
 type DetailTab =
     | 'overview'
@@ -400,6 +391,8 @@ export default function EndpointDetail() {
                     </div>
                 </div>
 
+                <AgentDeepDivePanel agent={agent} />
+
                 <div className="flex flex-wrap gap-1 border-b border-slate-200 dark:border-slate-700 pb-px">
                     {TAB_LABELS.map(({ id, label }) => (
                         <button
@@ -480,6 +473,7 @@ export default function EndpointDetail() {
                                 agentId={agentId}
                                 data={networkSearch?.data}
                                 loading={networkSearchLoading}
+                                canViewAlerts={canViewAlerts}
                             />
                         ) : (
                             <p className="text-sm text-slate-500">
@@ -715,15 +709,20 @@ function NetworkTab({
     agentId: _agentId,
     data,
     loading,
+    canViewAlerts,
 }: {
     agentId: string;
     data: CmEventSummary[] | undefined;
     loading: boolean;
+    canViewAlerts: boolean;
 }) {
+    const [detailId, setDetailId] = useState<string | null>(null);
+
     return (
         <div className="space-y-4 text-sm">
             <p className="text-slate-600 dark:text-slate-400">
-                Network-related events from <code className="text-xs">POST /api/v1/events/search</code> (filters: <code className="text-xs">agent_id</code> + <code className="text-xs">event_type=network</code>).
+                Network-related events from <code className="text-xs">POST /api/v1/events/search</code> (filters:{' '}
+                <code className="text-xs">agent_id</code> + <code className="text-xs">event_type=network</code>). Click a row for raw JSON.
             </p>
             {loading ? (
                 <Loader2 className="w-8 h-8 animate-spin text-cyan-500" />
@@ -743,7 +742,19 @@ function NetworkTab({
                         </thead>
                         <tbody>
                             {data.map((e) => (
-                                <tr key={e.id} className="border-t border-slate-100 dark:border-slate-800">
+                                <tr
+                                    key={e.id}
+                                    role="button"
+                                    tabIndex={0}
+                                    className="border-t border-slate-100 dark:border-slate-800 cursor-pointer hover:bg-slate-50/90 dark:hover:bg-slate-800/40"
+                                    onClick={() => setDetailId(e.id)}
+                                    onKeyDown={(ev) => {
+                                        if (ev.key === 'Enter' || ev.key === ' ') {
+                                            ev.preventDefault();
+                                            setDetailId(e.id);
+                                        }
+                                    }}
+                                >
                                     <td className="p-2 whitespace-nowrap">{new Date(e.timestamp).toLocaleString()}</td>
                                     <td className="p-2 font-mono">{e.event_type}</td>
                                     <td className="p-2">{e.summary}</td>
@@ -753,6 +764,12 @@ function NetworkTab({
                     </table>
                 </div>
             )}
+
+            <EventDetailModal
+                eventId={detailId}
+                onClose={() => setDetailId(null)}
+                fetchEnabled={canViewAlerts}
+            />
         </div>
     );
 }
@@ -1081,6 +1098,8 @@ function ActivityTab({
     alertsLoading: boolean;
     canViewAlerts: boolean;
 }) {
+    const [detailId, setDetailId] = useState<string | null>(null);
+
     const merged = useMemo(() => {
         const rows: TimelineRow[] = [];
         if (canViewAlerts) {
@@ -1147,13 +1166,22 @@ function ActivityTab({
                             ) : (
                                 <li
                                     key={r.id}
-                                    className="flex items-start gap-3 text-sm border border-slate-200 dark:border-slate-700 rounded-lg p-3"
+                                    role="button"
+                                    tabIndex={0}
+                                    className="flex items-start gap-3 text-sm border border-slate-200 dark:border-slate-700 rounded-lg p-3 cursor-pointer hover:bg-slate-50/90 dark:hover:bg-slate-800/50 transition-colors"
+                                    onClick={() => setDetailId(r.ev.id)}
+                                    onKeyDown={(ev) => {
+                                        if (ev.key === 'Enter' || ev.key === ' ') {
+                                            ev.preventDefault();
+                                            setDetailId(r.ev.id);
+                                        }
+                                    }}
                                 >
                                     <Network className="w-4 h-4 text-cyan-500 shrink-0 mt-0.5" />
-                                    <div>
+                                    <div className="min-w-0 flex-1">
                                         <div className="font-mono text-xs text-cyan-700 dark:text-cyan-300">{r.ev.event_type}</div>
                                         <div className="text-slate-800 dark:text-slate-100">{r.ev.summary}</div>
-                                        <div className="text-xs text-slate-500">{new Date(r.at).toLocaleString()} · CM event</div>
+                                        <div className="text-xs text-slate-500">{new Date(r.at).toLocaleString()} · CM event · click for raw JSON</div>
                                     </div>
                                 </li>
                             )
@@ -1161,6 +1189,12 @@ function ActivityTab({
                     </ul>
                 )}
             </div>
+
+            <EventDetailModal
+                eventId={detailId}
+                onClose={() => setDetailId(null)}
+                fetchEnabled={canViewAlerts}
+            />
         </div>
     );
 }

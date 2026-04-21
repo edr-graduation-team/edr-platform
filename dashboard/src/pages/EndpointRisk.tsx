@@ -417,10 +417,10 @@ export default function EndpointRisk() {
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                     <div>
                         <h1 className="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-gray-900 to-gray-600 dark:from-white dark:to-gray-300">
-                            Endpoint Risk Intelligence
+                            Endpoint Risk
                         </h1>
                         <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                            Live risk posture ranked by context-aware scoring · refreshes every 30s
+                            Ranked endpoint risk powered by <code className="text-xs">GET /api/v1/alerts/endpoint-risk</code> · refreshes every 30s
                         </p>
                     </div>
                     <button

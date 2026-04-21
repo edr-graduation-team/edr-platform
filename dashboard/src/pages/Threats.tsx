@@ -4,7 +4,7 @@ import { Shield, Target, TrendingUp, Eye, ChevronRight, ExternalLink, GitBranch,
 import { alertsApi, type Alert } from '../api/client';
 import { SkeletonKPICards, SkeletonChart } from '../components';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 
 // MITRE ATT&CK Tactics
 const MITRE_TACTICS = [
@@ -364,9 +364,11 @@ export default function Threats() {
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                     <div>
                         <h1 className="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-gray-900 to-gray-600 dark:from-white dark:to-gray-300">
-                            Threat Intelligence
+                            ATT&CK Analytics
                         </h1>
-                        <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Analytics and MITRE ATT&CK visualization</p>
+                        <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                            Analytics view derived from alert telemetry (MITRE ATT&amp;CK tactics/techniques). For triage workflows, use <Link className="underline" to="/alerts">Alerts</Link>.
+                        </p>
                     </div>
                     
                     <div className="flex items-center gap-2">

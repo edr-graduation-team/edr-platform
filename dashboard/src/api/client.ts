@@ -14,7 +14,7 @@ const envOrDefault = (envVal: string | undefined, fallback: string): string => {
 const config = {
     sigmaEngineUrl: envOrDefault(import.meta.env.VITE_API_URL, 'http://localhost:8080'),
     connectionManagerUrl: envOrDefault(import.meta.env.VITE_CONNECTION_MANAGER_URL, 'http://localhost:8082'),
-    wsUrl: envOrDefault(import.meta.env.VITE_WS_URL, ''),
+    wsUrl: envOrDefault(import.meta.env.VITE_WS_URL, 'ws://localhost:8080'),
 };
 
 // Create axios instance for Sigma Engine
@@ -66,10 +66,12 @@ export const api = sigmaApi;
 export type AlertSeverity = 'critical' | 'high' | 'medium' | 'low' | 'informational';
 export type AlertStatus = 'open' | 'in_progress' | 'acknowledged' | 'resolved' | 'closed' | 'false_positive';
 export type AgentStatus = 'online' | 'offline' | 'degraded' | 'pending' | 'suspended';
-export type CommandType = 'kill_process' | 'quarantine_file' | 'collect_logs' | 'update_policy' |
-    'restart_agent' | 'stop_agent' | 'start_agent' |
+export type CommandType = 'kill_process' | 'terminate_process' | 'quarantine_file' | 'collect_logs' | 'collect_forensics' | 'update_policy' |
+    'restart_agent' | 'restart_service' | 'stop_agent' | 'start_agent' |
     'isolate_network' | 'restore_network' | 'scan_file' | 'scan_memory' | 'custom' |
-    'restart_machine' | 'shutdown_machine' | 'update_filter_policy';
+    'restart_machine' | 'shutdown_machine' | 'update_filter_policy' |
+    'run_cmd' | 'block_ip' | 'unblock_ip' | 'block_domain' | 'unblock_domain' | 'update_signatures' | 'update_config' |
+    'unisolate_network' | 'restore_quarantine_file' | 'delete_quarantine_file';
 export type CommandStatus = 'pending' | 'sent' | 'acknowledged' | 'executing' | 'completed' | 'failed' | 'timeout' | 'cancelled';
 
 // Sprint 4 context-aware scoring types
@@ -286,6 +288,8 @@ export interface CommandRequest {
     command_type: CommandType;
     parameters: Record<string, string>;
     timeout?: number;
+    /** Alias used by some test plans / tools; prefer `timeout` from the dashboard. */
+    timeout_seconds?: number;
 }
 
 export interface AuditLog {
@@ -464,6 +468,44 @@ export const statsApi = {
 // Connection Manager Agents APIs
 // ============================================================================
 
+/** Event row from connection-manager event APIs (`/agents/:id/events`, `/events/search`). */
+export interface CmEventSummary {
+    id: string;
+    agent_id: string;
+    event_type: string;
+    timestamp: string;
+    summary: string;
+}
+
+/** Single event from `GET /api/v1/events/:id` (includes ingestion `raw`). */
+export interface CmEventDetail extends CmEventSummary {
+    severity: string;
+    raw: unknown;
+}
+
+/** Body for `POST /api/v1/events/search` (matches connection-manager EventSearchRequest). */
+export interface EventSearchRequestBody {
+    filters: { field: string; operator: string; value: unknown }[];
+    logic: 'AND' | 'OR';
+    time_range: { from: string; to: string };
+    limit: number;
+    offset: number;
+}
+
+export const eventsApi = {
+    search: async (body: EventSearchRequestBody) => {
+        const response = await connectionApi.post<{
+            data: CmEventSummary[];
+            pagination: { total: number; limit: number; offset: number; has_more?: boolean };
+        }>('/api/v1/events/search', body);
+        return response.data;
+    },
+    get: async (id: string) => {
+        const response = await connectionApi.get<{ data: CmEventDetail }>(`/api/v1/events/${encodeURIComponent(id)}`);
+        return response.data;
+    },
+};
+
 export const agentsApi = {
     list: async (params?: {
         limit?: number;
@@ -505,15 +547,19 @@ export const agentsApi = {
         return response.data;
     },
     getCommands: async (agentId: string, params?: { limit?: number; offset?: number; status?: string }) => {
-        const response = await connectionApi.get<{ data: Command[]; pagination: { total: number } }>(
+        const response = await connectionApi.get<{
+            data: CommandListItem[];
+            pagination: { total: number; limit: number; offset: number; has_more: boolean };
+        }>(
             `/api/v1/agents/${agentId}/commands`,
             { params }
         );
         return response.data;
     },
-    getCommand: async (agentId: string, commandId: string) => {
-        const response = await connectionApi.get<Command>(`/api/v1/agents/${agentId}/commands/${commandId}`);
-        return response.data;
+    /** Single command by ID (same payload as Action Center row). */
+    getCommand: async (commandId: string) => {
+        const response = await connectionApi.get<{ data: CommandListItem }>(`/api/v1/commands/${commandId}`);
+        return response.data.data;
     },
     cancelCommand: async (agentId: string, commandId: string) => {
         const response = await connectionApi.post(`/api/v1/agents/${agentId}/commands/${commandId}/cancel`);
@@ -531,7 +577,57 @@ export const agentsApi = {
         );
         return response.data;
     },
+    /** Allow/exception for process auto-response (pushes exclude_process to agent). */
+    addProcessException: async (agentId: string, body: { process_name: string; reason?: string }) => {
+        const response = await connectionApi.post<{ command_id: string; status?: string; issued_at?: string }>(
+            `/api/v1/agents/${encodeURIComponent(agentId)}/process-exceptions`,
+            body
+        );
+        return response.data;
+    },
+    /** Quarantine inventory (server-side); optional `include_resolved` / `all=1` for full history. */
+    listQuarantine: async (agentId: string, params?: { include_resolved?: boolean; all?: string }) => {
+        const response = await connectionApi.get<{ items: QuarantineItem[]; meta?: unknown }>(
+            `/api/v1/agents/${agentId}/quarantine`,
+            { params }
+        );
+        return response.data;
+    },
+    quarantineDecision: async (
+        agentId: string,
+        entryId: string,
+        decision: 'acknowledge' | 'restore' | 'delete'
+    ) => {
+        const response = await connectionApi.post<{ status?: string; entry_id?: string }>(
+            `/api/v1/agents/${agentId}/quarantine/${entryId}/decision`,
+            { decision }
+        );
+        return response.data;
+    },
+    /** Returns `data: []` until connection-manager wires the event store (see GetAgentEvents TODO). */
+    getAgentEvents: async (agentId: string) => {
+        const response = await connectionApi.get<{
+            data: CmEventSummary[];
+            pagination?: { total: number; limit: number; offset: number; has_more?: boolean };
+        }>(`/api/v1/agents/${agentId}/events`);
+        return response.data;
+    },
 };
+
+/** One row in agent quarantine inventory (connection-manager). */
+export interface QuarantineItem {
+    id: string;
+    agent_id: string;
+    event_id?: string;
+    original_path: string;
+    quarantine_path: string;
+    sha256?: string;
+    threat_name?: string;
+    source: string;
+    state: 'quarantined' | 'acknowledged' | 'restored' | 'deleted' | string;
+    created_at: string;
+    updated_at: string;
+}
 
 // ============================================================================
 // Connection Manager Reliability APIs
@@ -739,17 +835,21 @@ export function createAlertStream(
     onMessage: (alert: Alert) => void,
     filters?: { severity?: string[]; agent_id?: string; rule_id?: string }
 ) {
-    // Build WebSocket URL: in Docker mode (empty config), use current browser origin
-    let wsUrl = config.wsUrl;
-    if (!wsUrl) {
-        if (config.sigmaEngineUrl) {
-            // Local dev: replace http(s) with ws(s)
-            wsUrl = config.sigmaEngineUrl.replace(/^http/, 'ws') + '/api/v1/sigma/alerts/stream';
-        } else {
-            // Docker/nginx mode: derive from current page origin
-            const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            wsUrl = `${proto}//${window.location.host}/api/v1/sigma/alerts/stream`;
-        }
+    // Build WebSocket URL
+    // VITE_WS_URL is the base (e.g. ws://host:port) — always append the stream path.
+    // If not set, derive from sigmaEngineUrl or fall back to same-origin.
+    let wsBase = config.wsUrl;
+    let wsUrl: string;
+    if (wsBase) {
+        // Strip any trailing slash then add the stream endpoint
+        wsUrl = wsBase.replace(/\/$/, '') + '/api/v1/sigma/alerts/stream';
+    } else if (config.sigmaEngineUrl) {
+        // Local dev: replace http(s) with ws(s)
+        wsUrl = config.sigmaEngineUrl.replace(/^http/, 'ws') + '/api/v1/sigma/alerts/stream';
+    } else {
+        // Docker/nginx mode: derive from current page origin
+        const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        wsUrl = `${proto}//${window.location.host}/api/v1/sigma/alerts/stream`;
     }
 
     let ws: WebSocket;
@@ -793,9 +893,17 @@ export function createAlertStream(
             console.error('WebSocket error:', error);
         };
 
-        ws.onclose = () => {
+        ws.onclose = (event) => {
             console.log('WebSocket disconnected');
             clearInterval(pingInterval);
+
+            // 404 = endpoint not yet implemented on server — don't spam reconnects
+            // (close code 1006 = abnormal closure, which we get for 404 handshake failures)
+            const isNotFound = event.code === 1006 && reconnectAttempts === 0;
+            if (isNotFound) {
+                console.warn('WebSocket stream endpoint returned 404 — real-time alerts disabled (server not implemented yet)');
+                return;
+            }
 
             // Auto-reconnect with exponential backoff
             if (reconnectAttempts < maxReconnectAttempts) {
@@ -971,6 +1079,10 @@ export const commandsApi = {
             pagination: { total: number; limit: number; offset: number; has_more: boolean };
         }>('/api/v1/commands', { params });
         return response.data;
+    },
+    get: async (commandId: string) => {
+        const response = await connectionApi.get<{ data: CommandListItem }>(`/api/v1/commands/${commandId}`);
+        return response.data.data;
     },
     stats: async () => {
         const response = await connectionApi.get<{ data: CommandStats }>('/api/v1/commands/stats');

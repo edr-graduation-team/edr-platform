@@ -228,8 +228,10 @@ export default function Stats() {
         <div>
             <div className="flex justify-between items-center mb-8">
                 <div className="flex flex-col">
-                    <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Statistics & Reports</h1>
-                    <p className="text-sm font-medium text-slate-500 dark:text-slate-400 mt-1">Historical Data & Threat Analysis</p>
+                    <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Reports & Statistics</h1>
+                    <p className="text-sm font-medium text-slate-500 dark:text-slate-400 mt-1">
+                        Historical trends and exports from <code className="text-xs">/api/v1/*/stats</code> endpoints.
+                    </p>
                 </div>
 
                 {/* Export Controls */}
@@ -593,7 +595,7 @@ export default function Stats() {
                             Sigma Engine
                         </span>
                         <button
-                            onClick={() => navigate('/settings?tab=reliability')}
+                            onClick={() => navigate('/settings/reliability')}
                             className="text-[11px] font-semibold px-2.5 py-1 rounded-md border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-900/40 transition-colors"
                         >
                             View Ingestion Reliability

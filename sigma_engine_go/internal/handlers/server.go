@@ -10,6 +10,7 @@ import (
 
 	"github.com/edr-platform/sigma-engine/internal/analytics"
 	"github.com/edr-platform/sigma-engine/internal/application/scoring"
+	"github.com/edr-platform/sigma-engine/internal/automation"
 	"github.com/edr-platform/sigma-engine/internal/infrastructure/database"
 	"github.com/edr-platform/sigma-engine/internal/infrastructure/logger"
 	"github.com/gorilla/mux"
@@ -175,6 +176,20 @@ func (s *Server) SetPerformanceMetrics(provider PerformanceMetricsProvider) {
 // Safe to call before Start(); may be called after NewServer.
 func (s *Server) WireCorrelationAPI(mgr *analytics.CorrelationManager) {
 	RegisterCorrelationRoutes(s.apiV1, mgr)
+}
+
+// WireAutomationAPI registers playbook, escalation, and notification HTTP routes.
+// Pass the same instances used by the Kafka event loop so API changes affect live automation.
+// Safe to call before Start(). Nil arguments skip wiring.
+func (s *Server) WireAutomationAPI(
+	notifier *automation.NotificationManager,
+	playbooks *automation.PlaybookManager,
+	escalations *automation.EscalationManager,
+) {
+	if s.apiV1 == nil || notifier == nil || playbooks == nil || escalations == nil {
+		return
+	}
+	NewAutomationHandler(playbooks, escalations, notifier).RegisterRoutes(s.apiV1)
 }
 
 // corsMiddlewareConfigurable adds CORS headers using configured origin.

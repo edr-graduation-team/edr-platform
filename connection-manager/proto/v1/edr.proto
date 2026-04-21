@@ -382,10 +382,18 @@ enum CommandType {
   COMMAND_TYPE_UPDATE_AGENT = 6;
   COMMAND_TYPE_TERMINATE_PROCESS = 7;
   COMMAND_TYPE_ADJUST_RATE = 8;
-  // RUN_CMD = 9 is reserved for dynamic shell commands
+  COMMAND_TYPE_RUN_CMD = 9; // Whitelisted diagnostic commands (agent-enforced)
   COMMAND_TYPE_RESTART = 10;          // Restart the machine (OS-level reboot)
   COMMAND_TYPE_SHUTDOWN = 11;         // Shutdown the machine (OS-level power off)
   COMMAND_TYPE_UPDATE_FILTER_POLICY = 12; // Push new event filtering rules to agent
+  COMMAND_TYPE_QUARANTINE_FILE = 13;
+  COMMAND_TYPE_BLOCK_IP = 14;
+  COMMAND_TYPE_UNBLOCK_IP = 15;
+  COMMAND_TYPE_BLOCK_DOMAIN = 16;
+  COMMAND_TYPE_UNBLOCK_DOMAIN = 17;
+  COMMAND_TYPE_UPDATE_SIGNATURES = 18;
+  COMMAND_TYPE_RESTORE_QUARANTINE_FILE = 19;
+  COMMAND_TYPE_DELETE_QUARANTINE_FILE = 20;
 }
 
 // CommandResult - Agent-to-server feedback for a completed command (C2 loop closure)

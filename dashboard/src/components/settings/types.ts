@@ -17,6 +17,12 @@ export const SETTINGS_NAV: SettingsNavItem[] = [
     { id: 'roles', label: 'Roles & Permissions', icon: 'Shield', description: 'Access control', requiredRole: ['admin', 'security'] },
 ];
 
+export function filterSettingsNavByRole(userRole?: string): SettingsNavItem[] {
+    return SETTINGS_NAV.filter(
+        (item) => !item.requiredRole || (!!userRole && item.requiredRole.includes(userRole))
+    );
+}
+
 export const ROLE_COLORS: Record<string, { bg: string; text: string; border: string; dot: string }> = {
     admin:      { bg: 'bg-red-50 dark:bg-red-500/10',    text: 'text-red-700 dark:text-red-400',    border: 'border-red-200 dark:border-red-500/20',    dot: 'bg-red-500 dark:bg-red-400' },
     security:   { bg: 'bg-purple-50 dark:bg-purple-500/10', text: 'text-purple-700 dark:text-purple-400', border: 'border-purple-200 dark:border-purple-500/20', dot: 'bg-purple-500 dark:bg-purple-400' },

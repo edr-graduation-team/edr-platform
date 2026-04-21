@@ -13,6 +13,7 @@
 package collectors
 
 import (
+	"context"
 	"path/filepath"
 	"strings"
 
@@ -79,6 +80,34 @@ func (c *ETWCollector) handleFileIo(pid uint32, opcode uint8, filePath string) {
 	// `context_quality_score` inputs.
 	sid, user, elevated, integrity := getPrivileges(pid)
 	cmdLine := getCmdLine(pid)
+
+	if c.fileAutoResp != nil && (opcode == fileIoCreate || opcode == fileIoWrite) {
+		base := map[string]interface{}{
+			"action":          action,
+			"path":            filePath,
+			"name":            name,
+			"directory":       dir,
+			"extension":       ext,
+			"pid":             pid,
+			"process_name":    procName,
+			"process_path":    procPath,
+			"user_name":       user,
+			"user_sid":        sid,
+			"command_line":    cmdLine,
+			"is_elevated":     elevated,
+			"integrity_level": integrity,
+		}
+		if alt, stop := c.fileAutoResp.EvaluateAndAct(context.Background(), filePath, opcode, pid, base); stop {
+			if alt != nil {
+				if c.filter != nil && c.filter.ShouldFilter(alt) {
+					return
+				}
+				c.send(alt)
+			}
+			c.fileEvents.Add(1)
+			return
+		}
+	}
 
 	evt := event.NewEvent(event.EventTypeFile, severity, map[string]interface{}{
 		"action":          action,

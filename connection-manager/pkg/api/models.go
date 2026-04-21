@@ -2,6 +2,7 @@
 package api
 
 import (
+	"encoding/json"
 	"time"
 
 	"github.com/google/uuid"
@@ -176,9 +177,11 @@ type AgentStatsResponse struct {
 
 // CommandRequest for executing a command.
 type CommandRequest struct {
-	CommandType string            `json:"command_type" validate:"required,oneof=kill_process quarantine_file collect_logs update_policy restart_agent restart_machine shutdown_machine isolate_network restore_network scan_file scan_memory custom update_agent adjust_rate run_cmd"`
+	CommandType string            `json:"command_type" validate:"required,oneof=kill_process terminate_process quarantine_file restore_quarantine_file delete_quarantine_file collect_logs collect_forensics update_policy update_config update_filter_policy restart_agent restart_service stop_agent stop_service start_agent start_service restart_machine shutdown_machine isolate_network isolate restore_network unisolate_network unisolate scan_file scan_memory custom update_agent adjust_rate run_cmd block_ip unblock_ip block_domain unblock_domain update_signatures"`
 	Parameters  map[string]string `json:"parameters"`
 	Timeout     int               `json:"timeout" validate:"min=0,max=3600"`
+	// Compatibility with external test plans and older clients.
+	TimeoutSeconds int `json:"timeout_seconds" validate:"min=0,max=3600"`
 }
 
 // CommandResponse for command execution.
@@ -186,6 +189,12 @@ type CommandResponse struct {
 	CommandID string    `json:"command_id"`
 	Status    string    `json:"status"`
 	IssuedAt  time.Time `json:"issued_at"`
+}
+
+// ProcessExceptionRequest asks the server to push an allow-exception to an endpoint.
+type ProcessExceptionRequest struct {
+	ProcessName string `json:"process_name" validate:"required,min=3"`
+	Reason      string `json:"reason"`
 }
 
 // CommandListResponse for command history.
@@ -450,6 +459,17 @@ type EventSummary struct {
 	EventType string    `json:"event_type"`
 	Timestamp time.Time `json:"timestamp"`
 	Summary   string    `json:"summary"`
+}
+
+// EventDetail is a single stored event including the ingestion JSON payload.
+type EventDetail struct {
+	ID        uuid.UUID       `json:"id"`
+	AgentID   uuid.UUID       `json:"agent_id"`
+	EventType string          `json:"event_type"`
+	Severity  string          `json:"severity"`
+	Timestamp time.Time       `json:"timestamp"`
+	Summary   string          `json:"summary"`
+	Raw       json.RawMessage `json:"raw"`
 }
 
 // EventExportRequest for exporting events.

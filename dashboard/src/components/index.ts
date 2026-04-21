@@ -1,6 +1,8 @@
 // Shared UI Components
 export { ToastProvider, useToast, type Toast, type ToastType } from './Toast';
 export { Modal, ConfirmDialog } from './Modal';
+export { EventDetailModal, EventDetailBody, formatEventRaw } from './EventDetailModal';
+export { AgentDeepDivePanel } from './AgentDeepDivePanel';
 export {
     Skeleton,
     SkeletonCard,

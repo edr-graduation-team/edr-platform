@@ -30,8 +30,10 @@ type Handlers struct {
 	enrollmentTokenRepo repository.EnrollmentTokenRepository // optional: nil when DB unavailable
 	registry            *handlers.AgentRegistry              // real-time agent command routing
 	commandRepo         repository.CommandRepository         // C2 command persistence
+	quarantineRepo      repository.QuarantineRepository      // optional quarantine inventory
 	auditRepo           repository.AuditLogRepository        // audit log querying
 	alertRepo           repository.AlertRepository           // alert querying and stats
+	eventRepo           repository.EventRepository           // event search/list (durable store)
 	userRepo            repository.UserRepository            // user CRUD
 	roleRepo            repository.RoleRepository            // RBAC role/permission management
 	contextPolicyRepo   repository.ContextPolicyRepository   // context-aware policy controls
@@ -85,9 +87,19 @@ func (h *Handlers) SetAlertRepo(repo repository.AlertRepository) {
 	h.alertRepo = repo
 }
 
+// SetEventRepo sets the EventRepository for event search/list.
+func (h *Handlers) SetEventRepo(repo repository.EventRepository) {
+	h.eventRepo = repo
+}
+
 // SetCommandRepo sets the CommandRepository for C2 persistence.
 func (h *Handlers) SetCommandRepo(repo repository.CommandRepository) {
 	h.commandRepo = repo
+}
+
+// SetQuarantineRepo sets the quarantine inventory repository.
+func (h *Handlers) SetQuarantineRepo(repo repository.QuarantineRepository) {
+	h.quarantineRepo = repo
 }
 
 // SetUserRepo sets the UserRepository for user CRUD operations.

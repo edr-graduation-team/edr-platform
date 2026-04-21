@@ -32,40 +32,41 @@ func NewAutomationHandler(
 	}
 }
 
-// RegisterRoutes registers automation API routes.
+// RegisterRoutes registers automation API routes on the /api/v1 subrouter
+// (paths are relative, e.g. /sigma/playbooks → GET /api/v1/sigma/playbooks).
 func (h *AutomationHandler) RegisterRoutes(r *mux.Router) {
 	// Playbooks
-	r.HandleFunc("/api/v1/sigma/playbooks", h.ListPlaybooks).Methods("GET")
-	r.HandleFunc("/api/v1/sigma/playbooks", h.CreatePlaybook).Methods("POST")
-	r.HandleFunc("/api/v1/sigma/playbooks/{id}", h.GetPlaybook).Methods("GET")
-	r.HandleFunc("/api/v1/sigma/playbooks/{id}", h.UpdatePlaybook).Methods("PUT")
-	r.HandleFunc("/api/v1/sigma/playbooks/{id}", h.DeletePlaybook).Methods("DELETE")
-	r.HandleFunc("/api/v1/sigma/playbooks/{id}/test", h.TestPlaybook).Methods("POST")
-	r.HandleFunc("/api/v1/sigma/playbooks/{id}/history", h.GetPlaybookHistory).Methods("GET")
+	r.HandleFunc("/sigma/playbooks", h.ListPlaybooks).Methods("GET")
+	r.HandleFunc("/sigma/playbooks", h.CreatePlaybook).Methods("POST")
+	r.HandleFunc("/sigma/playbooks/{id}", h.GetPlaybook).Methods("GET")
+	r.HandleFunc("/sigma/playbooks/{id}", h.UpdatePlaybook).Methods("PUT")
+	r.HandleFunc("/sigma/playbooks/{id}", h.DeletePlaybook).Methods("DELETE")
+	r.HandleFunc("/sigma/playbooks/{id}/test", h.TestPlaybook).Methods("POST")
+	r.HandleFunc("/sigma/playbooks/{id}/history", h.GetPlaybookHistory).Methods("GET")
 
 	// Escalation Rules
-	r.HandleFunc("/api/v1/sigma/escalation-rules", h.ListEscalationRules).Methods("GET")
-	r.HandleFunc("/api/v1/sigma/escalation-rules", h.CreateEscalationRule).Methods("POST")
-	r.HandleFunc("/api/v1/sigma/escalation-rules/{id}", h.GetEscalationRule).Methods("GET")
-	r.HandleFunc("/api/v1/sigma/escalation-rules/{id}", h.UpdateEscalationRule).Methods("PUT")
-	r.HandleFunc("/api/v1/sigma/escalation-rules/{id}", h.DeleteEscalationRule).Methods("DELETE")
-	r.HandleFunc("/api/v1/sigma/escalation-rules/{id}/test", h.TestEscalationRule).Methods("POST")
+	r.HandleFunc("/sigma/escalation-rules", h.ListEscalationRules).Methods("GET")
+	r.HandleFunc("/sigma/escalation-rules", h.CreateEscalationRule).Methods("POST")
+	r.HandleFunc("/sigma/escalation-rules/{id}", h.GetEscalationRule).Methods("GET")
+	r.HandleFunc("/sigma/escalation-rules/{id}", h.UpdateEscalationRule).Methods("PUT")
+	r.HandleFunc("/sigma/escalation-rules/{id}", h.DeleteEscalationRule).Methods("DELETE")
+	r.HandleFunc("/sigma/escalation-rules/{id}/test", h.TestEscalationRule).Methods("POST")
 
 	// Escalation History
-	r.HandleFunc("/api/v1/sigma/alerts/{id}/escalations", h.GetAlertEscalations).Methods("GET")
-	r.HandleFunc("/api/v1/sigma/escalations/history", h.GetEscalationHistory).Methods("GET")
+	r.HandleFunc("/sigma/alerts/{id}/escalations", h.GetAlertEscalations).Methods("GET")
+	r.HandleFunc("/sigma/escalations/history", h.GetEscalationHistory).Methods("GET")
 
 	// Notifications
-	r.HandleFunc("/api/v1/sigma/notifications/config", h.GetNotificationConfig).Methods("GET")
-	r.HandleFunc("/api/v1/sigma/notifications/config", h.ConfigureNotifications).Methods("POST", "PUT")
-	r.HandleFunc("/api/v1/sigma/notifications/slack/send", h.SendSlackTest).Methods("POST")
-	r.HandleFunc("/api/v1/sigma/notifications/teams/send", h.SendTeamsTest).Methods("POST")
-	r.HandleFunc("/api/v1/sigma/notifications/email/send", h.SendEmailTest).Methods("POST")
-	r.HandleFunc("/api/v1/sigma/notifications/logs", h.GetNotificationLogs).Methods("GET")
-	r.HandleFunc("/api/v1/sigma/notifications/stats", h.GetNotificationStats).Methods("GET")
+	r.HandleFunc("/sigma/notifications/config", h.GetNotificationConfig).Methods("GET")
+	r.HandleFunc("/sigma/notifications/config", h.ConfigureNotifications).Methods("POST", "PUT")
+	r.HandleFunc("/sigma/notifications/slack/send", h.SendSlackTest).Methods("POST")
+	r.HandleFunc("/sigma/notifications/teams/send", h.SendTeamsTest).Methods("POST")
+	r.HandleFunc("/sigma/notifications/email/send", h.SendEmailTest).Methods("POST")
+	r.HandleFunc("/sigma/notifications/logs", h.GetNotificationLogs).Methods("GET")
+	r.HandleFunc("/sigma/notifications/stats", h.GetNotificationStats).Methods("GET")
 
 	// Automation overview
-	r.HandleFunc("/api/v1/sigma/automation/status", h.GetAutomationStatus).Methods("GET")
+	r.HandleFunc("/sigma/automation/status", h.GetAutomationStatus).Methods("GET")
 }
 
 // --- Playbook Handlers ---

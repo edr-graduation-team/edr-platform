@@ -491,10 +491,32 @@ func (h *Handlers) GetEventStats(c echo.Context) error {
 // GetEvent returns a single event.
 func (h *Handlers) GetEvent(c echo.Context) error {
 	idStr := c.Param("id")
-	if _, err := uuid.Parse(idStr); err != nil {
+	eventID, err := uuid.Parse(idStr)
+	if err != nil {
 		return errorResponse(c, http.StatusBadRequest, "INVALID_ID", "Invalid event ID format")
 	}
-	return errorResponse(c, http.StatusNotFound, "NOT_FOUND", "Event not found")
+	if h.eventRepo == nil {
+		return errorResponse(c, http.StatusServiceUnavailable, "DB_UNAVAILABLE", "Event repository is not available")
+	}
+	row, err := h.eventRepo.GetByID(c.Request().Context(), eventID)
+	if err != nil {
+		return errorResponse(c, http.StatusInternalServerError, "FETCH_FAILED", err.Error())
+	}
+	if row == nil {
+		return errorResponse(c, http.StatusNotFound, "NOT_FOUND", "Event not found")
+	}
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"data": EventDetail{
+			ID:        row.ID,
+			AgentID:   row.AgentID,
+			EventType: row.EventType,
+			Severity:  row.Severity,
+			Timestamp: row.Timestamp,
+			Summary:   row.Summary,
+			Raw:       row.Raw,
+		},
+		"meta": responseMeta(c),
+	})
 }
 
 // ExportEvents exports events to CSV/JSON.

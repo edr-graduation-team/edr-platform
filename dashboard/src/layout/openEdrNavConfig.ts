@@ -15,14 +15,13 @@ export function isSocPath(pathname: string): boolean {
     return SOC_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`));
 }
 
+/** Hub tabs — Cloud / Verdict SaaS views omitted for self-hosted endpoint focus (routes may still exist). */
 export const DASHBOARD_MAIN_TABS: ContextTab[] = [
     { to: '/dashboards/service', label: 'Service' },
     { to: '/dashboards/endpoint', label: 'Endpoint' },
-    { to: '/dashboards/cloud', label: 'Cloud' },
     { to: '/dashboards/audit', label: 'Audit' },
     { to: '/dashboards/endpoint-compliance', label: 'Endpoint Compliance' },
     { to: '/dashboards/ctem-compliance', label: 'CTEM Compliance' },
-    { to: '/dashboards/verdict-cloud', label: 'Xcitium Verdict Cloud' },
 ];
 
 export const DASHBOARD_MORE_TABS: ContextTab[] = [
@@ -34,7 +33,6 @@ export const DASHBOARD_MORE_TABS: ContextTab[] = [
 
 export const SECURITY_MODULE_TABS: ContextTab[] = [
     { to: '/security/endpoint-zero-trust', label: 'Endpoint Zero Trust' },
-    { to: '/security/cloud-zero-trust', label: 'Cloud — Zero Trust' },
     { to: '/security/siem-x', label: 'SIEM — X' },
     { to: '/security/threat-labs', label: 'Threat Labs' },
 ];
@@ -63,19 +61,16 @@ export const ITSM_TABS: ContextTab[] = [
     { to: '/itsm/integrations', label: 'Integrations' },
 ];
 
+/** RMM / licenses / billing / staff removed from nav — not in self-hosted MVP scope (URLs unchanged for bookmarks). */
 export const MANAGEMENT_TABS: ContextTab[] = [
     { to: '/management/devices', label: 'Device Management' },
     { to: '/management/profiles', label: 'Profile Management' },
-    { to: '/management/rmm', label: 'RMM' },
     { to: '/management/patch', label: 'Patch Management' },
     { to: '/management/vulnerability', label: 'Vulnerability' },
     { to: '/management/network', label: 'Network' },
     { to: '/management/app-control', label: 'Application Control' },
-    { to: '/management/staff', label: 'Staff' },
     { to: '/management/account', label: 'Account' },
     { to: '/management/users', label: 'Users' },
-    { to: '/management/licenses', label: 'Licenses' },
-    { to: '/management/billing', label: 'Billing' },
 ];
 
 export function isDashboardMorePath(pathname: string): boolean {

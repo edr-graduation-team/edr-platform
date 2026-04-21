@@ -577,6 +577,14 @@ export const agentsApi = {
         );
         return response.data;
     },
+    /** Allow/exception for process auto-response (pushes exclude_process to agent). */
+    addProcessException: async (agentId: string, body: { process_name: string; reason?: string }) => {
+        const response = await connectionApi.post<{ command_id: string; status?: string; issued_at?: string }>(
+            `/api/v1/agents/${encodeURIComponent(agentId)}/process-exceptions`,
+            body
+        );
+        return response.data;
+    },
     /** Quarantine inventory (server-side); optional `include_resolved` / `all=1` for full history. */
     listQuarantine: async (agentId: string, params?: { include_resolved?: boolean; all?: string }) => {
         const response = await connectionApi.get<{ items: QuarantineItem[]; meta?: unknown }>(

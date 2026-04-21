@@ -1069,34 +1069,59 @@ function ResponseTab({
     return (
         <div className="space-y-8">
             <div>
-                <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100 mb-3 flex items-center gap-2">
+                <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100 mb-4 flex items-center gap-2">
                     <Terminal className="w-4 h-4" /> Execute command
                 </h3>
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                    <div className="space-y-3">
-                        <label className="block text-xs font-semibold text-slate-500 uppercase">Command</label>
-                        <select
-                            className="w-full rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-2 text-sm"
-                            value={cmdType}
-                            onChange={(e) => setCmdType(e.target.value as CommandType)}
-                            disabled={!canExec}
-                        >
-                            {RESPONSE_OPTIONS.map((o) => (
-                                <option key={o.value} value={o.value}>
-                                    {o.label}
-                                </option>
-                            ))}
-                        </select>
-                        <label className="block text-xs font-semibold text-slate-500 uppercase">Timeout (seconds)</label>
-                        <input
-                            className="w-full rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-2 text-sm"
-                            type="number"
-                            min={0}
-                            max={3600}
-                            value={fields.timeout ?? '300'}
-                            onChange={(e) => patch('timeout', e.target.value)}
-                            disabled={!canExec}
-                        />
+                <div className="grid grid-cols-1 xl:grid-cols-12 gap-6">
+                    <div className="xl:col-span-7 space-y-3">
+                        <label className="block text-xs font-bold tracking-wider text-slate-500 uppercase mb-2">Select Action</label>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
+                            {RESPONSE_OPTIONS.map((o) => {
+                                const isSelected = cmdType === o.value;
+                                return (
+                                    <button
+                                        key={o.value}
+                                        type="button"
+                                        disabled={!canExec}
+                                        onClick={() => setCmdType(o.value)}
+                                        className={`flex flex-col items-start p-3 rounded-xl border text-left transition-all ${
+                                            isSelected
+                                                ? 'border-cyan-500 bg-cyan-50 dark:bg-cyan-900/20 shadow-sm ring-1 ring-cyan-500'
+                                                : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/50 hover:border-slate-300 dark:hover:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-800'
+                                        } ${!canExec ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                    >
+                                        <div className="flex items-center justify-between w-full">
+                                            <span className={`text-sm font-medium ${isSelected ? 'text-cyan-700 dark:text-cyan-400 font-semibold' : 'text-slate-700 dark:text-slate-300'}`}>
+                                                {o.label}
+                                            </span>
+                                            {o.destructive && (
+                                                <AlertTriangle className={`w-3.5 h-3.5 shrink-0 ${isSelected ? 'text-rose-500' : 'text-slate-400'}`} />
+                                            )}
+                                        </div>
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    </div>
+
+                    <div className="xl:col-span-5 bg-slate-50 dark:bg-slate-900/30 p-5 rounded-2xl border border-slate-200 dark:border-slate-700/60 flex flex-col">
+                        <h4 className="text-sm font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2 mb-4">
+                            <Settings className="w-4 h-4 text-slate-400" /> Parameters
+                        </h4>
+                        
+                        <div className="space-y-4 flex-1">
+                            <div>
+                                <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Timeout (seconds)</label>
+                                <input
+                                    className="w-full rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-2 text-sm focus:ring-2 focus:ring-cyan-500/20 focus:border-cyan-500 transition-colors"
+                                    type="number"
+                                    min={0}
+                                    max={3600}
+                                    value={fields.timeout ?? '300'}
+                                    onChange={(e) => patch('timeout', e.target.value)}
+                                    disabled={!canExec}
+                                />
+                            </div>
 
                         {(cmdType === 'kill_process' || cmdType === 'terminate_process') && (
                             <>
@@ -1202,19 +1227,22 @@ function ResponseTab({
                         )}
 
                         {(cmdType === 'restart_machine' || cmdType === 'shutdown_machine') && (
-                            <p className="text-xs text-amber-600 dark:text-amber-400">You will be asked to confirm — these actions affect the whole host.</p>
+                            <p className="text-xs text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 p-3 rounded-lg border border-amber-200 dark:border-amber-800/30 font-medium">You will be asked to confirm — these actions affect the whole host.</p>
                         )}
+                        </div>
 
-                        <button
-                            type="button"
-                            className="btn btn-primary w-full sm:w-auto"
-                            disabled={!canExec || execMutation.isPending}
-                            onClick={onSubmit}
-                        >
-                            {execMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin inline mr-2" /> : null}
-                            Send command
-                        </button>
-                        {!canExec && <p className="text-xs text-rose-500">Your role cannot execute remote commands.</p>}
+                        <div className="pt-5 mt-5 border-t border-slate-200 dark:border-slate-700/60 flex items-center justify-between">
+                            {!canExec && <span className="text-xs text-rose-500 font-medium">Your role cannot execute remote commands.</span>}
+                            <button
+                                type="button"
+                                disabled={!canExec || execMutation.isPending}
+                                onClick={onSubmit}
+                                className="ml-auto flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white shadow-sm disabled:opacity-50 transition-all"
+                            >
+                                {execMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Terminal className="w-4 h-4" />}
+                                Send command
+                            </button>
+                        </div>
                     </div>
                 </div>
             </div>

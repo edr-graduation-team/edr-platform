@@ -355,7 +355,7 @@ export default function Threats() {
     }
 
     return (
-        <div className="relative flex flex-col min-h-[calc(100vh-5rem)] lg:min-h-[calc(100vh-3.5rem)] -mx-4 sm:-mx-6 lg:-mx-8 -my-4 sm:-my-6 lg:-my-8 p-4 sm:p-6 lg:p-8 bg-slate-50 dark:bg-gradient-to-br dark:from-slate-900 dark:via-[#0b1120] dark:to-slate-900 transition-colors">
+        <div className="relative flex flex-col min-h-[calc(100vh-5rem)] lg:min-h-[calc(100vh-3.5rem)] -mx-4 sm:-mx-6 lg:-mx-8 -my-4 sm:-my-6 lg:-my-8 p-4 sm:p-6 lg:p-8 bg-slate-200 dark:bg-gradient-to-br dark:from-slate-900 dark:via-[#0b1120] dark:to-slate-900 transition-colors">
             {/* Ambient Glow */}
             <div className="absolute top-0 right-0 w-[600px] h-[600px] pointer-events-none mix-blend-screen" style={{ background: 'radial-gradient(circle, rgba(244,63,94,0.05) 0%, transparent 70%)' }} />
             <div className="absolute bottom-0 left-0 w-[600px] h-[600px] pointer-events-none mix-blend-screen" style={{ background: 'radial-gradient(circle, rgba(99,102,241,0.05) 0%, transparent 70%)' }} />
@@ -474,3 +474,4 @@ export default function Threats() {
         </div>
     );
 }
+

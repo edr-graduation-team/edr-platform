@@ -688,7 +688,7 @@ export default function Endpoints() {
     return (
         <div
             data-section-id="management-devices-root"
-            className="relative flex flex-col min-h-[calc(100vh-2rem)] lg:min-h-[calc(100vh-1rem)] h-full -mx-4 sm:-mx-6 lg:-mx-8 -my-4 sm:-my-6 lg:-my-8 p-4 sm:p-6 lg:p-8 bg-slate-50 dark:bg-gradient-to-br dark:from-slate-900 dark:via-[#0b1120] dark:to-slate-900 transition-colors overflow-hidden"
+            className="relative flex flex-col min-h-[calc(100vh-2rem)] lg:min-h-[calc(100vh-1rem)] h-full -mx-4 sm:-mx-6 lg:-mx-8 -my-4 sm:-my-6 lg:-my-8 p-4 sm:p-6 lg:p-8 bg-slate-200 dark:bg-gradient-to-br dark:from-slate-900 dark:via-[#0b1120] dark:to-slate-900 transition-colors overflow-hidden"
         >
             {/* Background ambient glow effect for Endpoints interface */}
             <div className="absolute top-1/4 right-1/4 w-[600px] h-[600px] pointer-events-none -translate-y-1/2 translate-x-1/3" style={{ background: 'radial-gradient(circle, rgba(59,130,246,0.08) 0%, transparent 70%)' }} />
@@ -698,7 +698,7 @@ export default function Endpoints() {
                     <div>
                         <h1 className="text-2xl sm:text-3xl font-bold text-slate-900 dark:text-white tracking-tight">Devices (Fleet)</h1>
                         <p className="text-sm text-slate-500 mt-1">
-                            Fleet inventory powered by <code className="text-xs">GET /api/v1/agents</code>. Open a device for response, activity, network, and configuration tabs.
+                            Fleet inventory for Open a device for response, activity, network, and configuration tabs.
                         </p>
                     </div>
                 {agents.length > 0 && (() => {
@@ -1114,3 +1114,5 @@ export default function Endpoints() {
         </div>
     );
 }
+
+

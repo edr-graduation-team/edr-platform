@@ -32,7 +32,7 @@ import {
     SECURITY_MODULE_TABS,
     SOC_CONTEXT_TABS,
     isSocPath,
-} from './openEdrNavConfig';
+} from './PlatformNavConfig';
 
 const navLinkBase =
     'text-[13px] font-medium px-3 py-2 rounded-md transition-colors whitespace-nowrap';
@@ -260,7 +260,7 @@ function filterSocTabs() {
     });
 }
 
-export const OpenEdrAppShell = memo(function OpenEdrAppShell({ children }: { children: ReactNode }) {
+export const PlatformAppShell = memo(function PlatformAppShell({ children }: { children: ReactNode }) {
     const location = useLocation();
     const pathname = location.pathname;
     const [openId, setOpenId] = useState<string | null>(null);
@@ -704,3 +704,4 @@ export const OpenEdrAppShell = memo(function OpenEdrAppShell({ children }: { chi
         </div>
     );
 });
+

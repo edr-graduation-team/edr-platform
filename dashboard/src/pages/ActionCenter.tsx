@@ -293,7 +293,7 @@ export default function ActionCenter() {
     const currentPage = page + 1;
 
     return (
-        <div className="relative flex flex-col min-h-[calc(100vh-2rem)] lg:min-h-[calc(100vh-1rem)] h-full -mx-4 sm:-mx-6 lg:-mx-8 -my-4 sm:-my-6 lg:-my-8 p-4 sm:p-6 lg:p-8 bg-slate-50 dark:bg-gradient-to-br dark:from-slate-900 dark:via-[#0b1120] dark:to-slate-900 transition-colors overflow-hidden">
+        <div className="relative flex flex-col min-h-[calc(100vh-2rem)] lg:min-h-[calc(100vh-1rem)] h-full -mx-4 sm:-mx-6 lg:-mx-8 -my-4 sm:-my-6 lg:-my-8 p-4 sm:p-6 lg:p-8 bg-slate-200 dark:bg-gradient-to-br dark:from-slate-900 dark:via-[#0b1120] dark:to-slate-900 transition-colors overflow-hidden">
             {/* Background ambient glow setup */}
             <div className="absolute top-0 right-0 w-[500px] h-[500px] pointer-events-none mix-blend-screen" style={{ background: 'radial-gradient(circle, rgba(6,182,212,0.08) 0%, transparent 70%)' }} />
 
@@ -306,7 +306,7 @@ export default function ActionCenter() {
                             Command Center
                         </h1>
                         <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                            Fleet-wide command history powered by <code className="text-xs">GET /api/v1/commands</code>. Start new commands from a device’s <strong>Response</strong> tab.
+                            Fleet-wide command history. Start new commands from a device’s <strong>Response</strong> tab.
                         </p>
                     </div>
                     
@@ -460,3 +460,5 @@ export default function ActionCenter() {
         </div>
     );
 }
+
+

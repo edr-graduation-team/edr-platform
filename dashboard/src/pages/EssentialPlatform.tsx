@@ -3,7 +3,7 @@ import { Shield, Server, Activity, Terminal, Search, Lock } from 'lucide-react';
 
 export default function EssentialPlatform() {
     return (
-        <div className="relative flex flex-col min-h-[calc(100vh-2rem)] -mx-4 sm:-mx-6 lg:-mx-8 -my-4 sm:-my-6 lg:-my-8 p-4 sm:p-6 lg:p-8 bg-slate-50 dark:bg-gradient-to-br dark:from-slate-900 dark:via-[#0b1120] dark:to-slate-900">
+        <div className="relative flex flex-col min-h-[calc(100vh-2rem)] -mx-4 sm:-mx-6 lg:-mx-8 -my-4 sm:-my-6 lg:-my-8 p-4 sm:p-6 lg:p-8 bg-slate-200 dark:bg-gradient-to-br dark:from-slate-900 dark:via-[#0b1120] dark:to-slate-900">
             <div className=" w-full space-y-5">
                 <div className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-white/70 dark:bg-slate-900/40 backdrop-blur p-6 sm:p-8">
                     <div className="flex items-start gap-3">
@@ -116,4 +116,5 @@ export default function EssentialPlatform() {
         </div>
     );
 }
+
 

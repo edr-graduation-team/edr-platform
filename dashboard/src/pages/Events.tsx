@@ -119,7 +119,7 @@ export default function Events() {
     }
 
     return (
-        <div className="relative flex flex-col min-h-[calc(100vh-2rem)] -mx-4 sm:-mx-6 lg:-mx-8 -my-4 sm:-my-6 lg:-my-8 p-4 sm:p-6 lg:p-8 bg-slate-50 dark:bg-gradient-to-br dark:from-slate-900 dark:via-[#0b1120] dark:to-slate-900">
+        <div className="relative flex flex-col min-h-[calc(100vh-2rem)] -mx-4 sm:-mx-6 lg:-mx-8 -my-4 sm:-my-6 lg:-my-8 p-4 sm:p-6 lg:p-8 bg-slate-200 dark:bg-gradient-to-br dark:from-slate-900 dark:via-[#0b1120] dark:to-slate-900">
             <div className=" w-full space-y-4">
                 <div className="flex items-start gap-3">
                     <div className="p-2 rounded-xl border border-cyan-500/20 bg-cyan-500/10 text-cyan-700 dark:text-cyan-300">
@@ -128,8 +128,8 @@ export default function Events() {
                     <div className="flex-1">
                         <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Telemetry Search</h1>
                         <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-                            Search stored telemetry via <code className="text-xs">POST /api/v1/events/search</code>. Click a row for{' '}
-                            <code className="text-xs">GET /api/v1/events/:id</code> raw payload.
+                            Search stored telemetry via the event search panel. Click a row for{' '}
+                            its raw payload.
                         </p>
                     </div>
                     <Link
@@ -219,7 +219,7 @@ export default function Events() {
                         <AlertTriangle className="w-5 h-5 mt-0.5 shrink-0" />
                         <div>
                             Failed to search events. If the status is 405, the reverse proxy must forward{' '}
-                            <code className="text-xs">/api/v1/events/</code> to connection-manager (see dashboard{' '}
+                            network access to the connection manager (see dashboard{' '}
                             <code className="text-xs">nginx.conf</code>).
                         </div>
                     </div>
@@ -281,4 +281,6 @@ export default function Events() {
         </div>
     );
 }
+
+
 

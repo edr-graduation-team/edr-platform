@@ -87,7 +87,7 @@ export function EventDetailModal({ eventId, onClose, fetchEnabled = true }: Even
                 </div>
             ) : eventId && detailQ.isError ? (
                 <div className="text-sm text-rose-700 dark:text-rose-300">
-                    Could not load event. Confirm <code className="text-xs">GET /api/v1/events/:id</code> is reachable (same nginx rules as search).
+                    Could not load event. Confirm the connection is active.
                 </div>
             ) : eventId && detailQ.data?.data ? (
                 <EventDetailBody ev={detailQ.data.data} />
@@ -95,3 +95,4 @@ export function EventDetailModal({ eventId, onClose, fetchEnabled = true }: Even
         </Modal>
     );
 }
+

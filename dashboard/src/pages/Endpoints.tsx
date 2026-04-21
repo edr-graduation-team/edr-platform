@@ -1366,7 +1366,13 @@ export default function Endpoints() {
                                     {/* Card Header */}
                                     <div className="flex items-center gap-3">
                                         <span className={`w-3 h-3 rounded-full shrink-0 ${pulseCls}`} />
-                                        <span className="font-bold text-slate-800 dark:text-white text-sm truncate flex-1">{agent.hostname}</span>
+                                        <Link
+                                            to={`/management/devices/${agent.id}`}
+                                            className="font-bold text-slate-800 dark:text-white text-sm truncate flex-1 hover:text-primary-600 dark:hover:text-primary-400"
+                                            onClick={(e) => e.stopPropagation()}
+                                        >
+                                            {agent.hostname}
+                                        </Link>
                                         <span className="text-lg" title={agent.os_type}>{osIcon}</span>
                                     </div>
                                     {/* Health bar */}
@@ -1453,7 +1459,13 @@ export default function Endpoints() {
                                                 <div className="flex items-start gap-2 min-w-0">
                                                     <div className={`w-1 self-stretch min-h-[2rem] rounded-full shrink-0 ${expandedAgentId === agent.id ? 'bg-primary-500' : 'bg-transparent'}`} />
                                                     <div className="min-w-0">
-                                                        <p className="font-medium text-slate-900 dark:text-white truncate">{agent.hostname}</p>
+                                                        <Link
+                                                            to={`/management/devices/${agent.id}`}
+                                                            className="font-medium text-slate-900 dark:text-white truncate block hover:text-primary-600 dark:hover:text-primary-400"
+                                                            onClick={(e) => e.stopPropagation()}
+                                                        >
+                                                            {agent.hostname}
+                                                        </Link>
                                                         <p className="text-[11px] text-slate-500 truncate">
                                                             {agent.ip_addresses?.[0] || agent.id.slice(0, 8)}
                                                             {agent.agent_version ? ` · v${agent.agent_version}` : ''}

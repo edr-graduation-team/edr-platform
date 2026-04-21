@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import React, { useState, useEffect } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import {
     Zap, CheckCircle2, Clock, XCircle, AlertTriangle,
     ChevronDown, ChevronRight, RefreshCw, Terminal,
@@ -125,7 +125,13 @@ const CommandRow = React.memo(function CommandRow({ command: item }: { command: 
                 <div className="flex flex-col min-w-0 gap-1.5 justify-center">
                     <div className="flex items-center gap-2 text-slate-600 dark:text-slate-300 text-xs font-semibold">
                         <Monitor className="w-4 h-4 text-slate-400" />
-                        <span className="truncate">{item.agent_hostname || 'Unknown Host'}</span>
+                        <Link
+                            to={`/management/devices/${item.agent_id}`}
+                            className="truncate text-cyan-700 dark:text-cyan-400 hover:underline"
+                            title="Open device detail"
+                        >
+                            {item.agent_hostname || 'Unknown Host'}
+                        </Link>
                     </div>
                     <div className="flex items-center gap-2 text-slate-500 dark:text-slate-400 text-[11px] font-mono" title="Agent ID">
                         <span className="font-bold text-slate-400">{'>_'}</span>
@@ -175,7 +181,7 @@ const CommandRow = React.memo(function CommandRow({ command: item }: { command: 
 
                     <div className="mt-4">
                         <div className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">Parameters</div>
-                        <pre className="bg-slate-100 dark:bg-slate-900/60 p-3 rounded-md text-slate-700 dark:text-slate-200 whitespace-pre-wrap break-words overflow-y-auto max-h-64 text-xs">
+                        <pre className="bg-slate-100 dark:bg-slate-900/60 p-3 rounded-md text-slate-700 dark:text-slate-200 whitespace-pre-wrap break-words overflow-y-auto max-h-80 text-xs">
                             {JSON.stringify(item.parameters || {}, null, 2)}
                         </pre>
                     </div>
@@ -185,7 +191,7 @@ const CommandRow = React.memo(function CommandRow({ command: item }: { command: 
                             <div className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider mb-1 flex items-center gap-1">
                                 <Terminal className="w-3.5 h-3.5" /> Result Output
                             </div>
-                            <pre className="bg-slate-900 p-3 rounded-md text-slate-100 whitespace-pre-wrap break-words overflow-y-auto max-h-64 text-xs">
+                            <pre className="bg-slate-900 p-3 rounded-md text-slate-100 whitespace-pre-wrap break-words overflow-y-auto max-h-[28rem] text-xs">
                                 {typeof item.result === 'object' ? JSON.stringify(item.result, null, 2) : String(item.result)}
                             </pre>
                         </div>
@@ -194,7 +200,7 @@ const CommandRow = React.memo(function CommandRow({ command: item }: { command: 
                     {item.error_message && (
                         <div className="mt-4">
                             <div className="text-xs font-semibold text-rose-600 dark:text-rose-400 uppercase tracking-wider mb-1">Error</div>
-                            <pre className="bg-slate-500/10 dark:bg-rose-500/20 p-3 rounded-md text-rose-700 dark:text-rose-300 whitespace-pre-wrap break-words overflow-y-auto max-h-64 text-xs">
+                            <pre className="bg-slate-500/10 dark:bg-rose-500/20 p-3 rounded-md text-rose-700 dark:text-rose-300 whitespace-pre-wrap break-words overflow-y-auto max-h-[28rem] text-xs">
                                 {item.error_message}
                             </pre>
                         </div>
@@ -311,6 +317,22 @@ export default function ActionCenter() {
                             {isFetching && !commandsLoading && <RefreshCw className="w-4 h-4 animate-spin text-cyan-500" />}
                             Last updated: {new Date(lastUpdated).toLocaleTimeString()}
                         </span>
+                        {authApi.canExecuteCommands() && (
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    const aid = debouncedAgentId?.trim();
+                                    if (aid) {
+                                        navigate(`/management/devices/${aid}?tab=response`);
+                                    } else {
+                                        showToast('Enter an Agent ID in Search Endpoints, or open Device Management and pick a host.', 'info');
+                                    }
+                                }}
+                                className="px-3 py-2 text-sm font-semibold rounded-lg border border-cyan-500/40 bg-cyan-500/10 text-cyan-800 dark:text-cyan-300 hover:bg-cyan-500/20 transition-colors"
+                            >
+                                New command
+                            </button>
+                        )}
                         <button
                             onClick={handleRefresh}
                             className="p-2 border border-slate-200 dark:border-slate-700 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 transition-colors bg-white/60 dark:bg-slate-900/60 backdrop-blur"

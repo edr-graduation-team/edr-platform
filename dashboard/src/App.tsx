@@ -9,7 +9,8 @@ import { OpenEdrAppShell } from './layout/OpenEdrAppShell';
 import './index.css';
 
 // Lazy load pages for better performance
-const Dashboard = lazy(() => import('./pages/Dashboard'));
+const EssentialPlatform = lazy(() => import('./pages/EssentialPlatform'));
+const SecurityPosture = lazy(() => import('./pages/Dashboard'));
 const Alerts = lazy(() => import('./pages/Alerts'));
 const Rules = lazy(() => import('./pages/Rules'));
 const Stats = lazy(() => import('./pages/Stats'));
@@ -26,34 +27,26 @@ const ActionCenter = lazy(() => import('./pages/ActionCenter'));
 const AgentDeployment = lazy(() => import('./pages/AgentDeployment'));
 
 const DashboardsLayout = lazy(() => import('./pages/parity/DashboardsLayout'));
-const DashboardServicePage = lazy(() => import('./pages/parity/dashboardPages').then((m) => ({ default: m.DashboardServicePage })));
 const DashboardEndpointPage = lazy(() => import('./pages/parity/dashboardPages').then((m) => ({ default: m.DashboardEndpointPage })));
 const DashboardCloudPage = lazy(() => import('./pages/parity/dashboardPages').then((m) => ({ default: m.DashboardCloudPage })));
 const DashboardAuditRedirect = lazy(() => import('./pages/parity/dashboardPages').then((m) => ({ default: m.DashboardAuditRedirect })));
 const DashboardEndpointCompliancePage = lazy(() => import('./pages/parity/dashboardPages').then((m) => ({ default: m.DashboardEndpointCompliancePage })));
-const DashboardCtemPage = lazy(() => import('./pages/parity/dashboardPages').then((m) => ({ default: m.DashboardCtemPage })));
 const DashboardVerdictCloudPage = lazy(() => import('./pages/parity/dashboardPages').then((m) => ({ default: m.DashboardVerdictCloudPage })));
-const DashboardRoiPage = lazy(() => import('./pages/parity/dashboardPages').then((m) => ({ default: m.DashboardRoiPage })));
 const DashboardReportsPage = lazy(() => import('./pages/parity/dashboardPages').then((m) => ({ default: m.DashboardReportsPage })));
 const DashboardNotificationsPage = lazy(() => import('./pages/parity/dashboardPages').then((m) => ({ default: m.DashboardNotificationsPage })));
 
 const SecurityEndpointZeroTrustPage = lazy(() => import('./pages/parity/paritySectionPages').then((m) => ({ default: m.SecurityEndpointZeroTrustPage })));
-const SecurityCloudZeroTrustPage = lazy(() => import('./pages/parity/paritySectionPages').then((m) => ({ default: m.SecurityCloudZeroTrustPage })));
 const SecuritySiemPage = lazy(() => import('./pages/parity/paritySectionPages').then((m) => ({ default: m.SecuritySiemPage })));
-const SecurityThreatLabsPage = lazy(() => import('./pages/parity/paritySectionPages').then((m) => ({ default: m.SecurityThreatLabsPage })));
 const ManagedSecurityOverviewPage = lazy(() => import('./pages/parity/paritySectionPages').then((m) => ({ default: m.ManagedSecurityOverviewPage })));
 const ManagedSecurityIncidentsPage = lazy(() => import('./pages/parity/paritySectionPages').then((m) => ({ default: m.ManagedSecurityIncidentsPage })));
-const ManagedSecuritySlaPage = lazy(() => import('./pages/parity/paritySectionPages').then((m) => ({ default: m.ManagedSecuritySlaPage })));
 const ItsmTicketsPage = lazy(() => import('./pages/parity/paritySectionPages').then((m) => ({ default: m.ItsmTicketsPage })));
 const ItsmPlaybooksPage = lazy(() => import('./pages/parity/paritySectionPages').then((m) => ({ default: m.ItsmPlaybooksPage })));
 const ItsmAutomationsPage = lazy(() => import('./pages/parity/paritySectionPages').then((m) => ({ default: m.ItsmAutomationsPage })));
 const ItsmIntegrationsPage = lazy(() => import('./pages/parity/paritySectionPages').then((m) => ({ default: m.ItsmIntegrationsPage })));
-const ManagementProfilesPage = lazy(() => import('./pages/parity/paritySectionPages').then((m) => ({ default: m.ManagementProfilesPage })));
 const ManagementNetworkPage = lazy(() => import('./pages/parity/paritySectionPages').then((m) => ({ default: m.ManagementNetworkPage })));
 const ManagementStaffPage = lazy(() => import('./pages/parity/paritySectionPages').then((m) => ({ default: m.ManagementStaffPage })));
 const ManagementAccountPage = lazy(() => import('./pages/parity/paritySectionPages').then((m) => ({ default: m.ManagementAccountPage })));
 const ManagementRmmPage = lazy(() => import('./pages/parity/paritySectionPages').then((m) => ({ default: m.ManagementRmmPage })));
-const ManagementPatchPage = lazy(() => import('./pages/parity/paritySectionPages').then((m) => ({ default: m.ManagementPatchPage })));
 const ManagementVulnPage = lazy(() => import('./pages/parity/paritySectionPages').then((m) => ({ default: m.ManagementVulnPage })));
 const ManagementAppControlPage = lazy(() => import('./pages/parity/paritySectionPages').then((m) => ({ default: m.ManagementAppControlPage })));
 const ManagementLicensesPage = lazy(() => import('./pages/parity/paritySectionPages').then((m) => ({ default: m.ManagementLicensesPage })));
@@ -146,7 +139,7 @@ function AppRoutes() {
             {/* Dashboard & Stats: all authenticated users */}
             <Route path="/" element={
               <ProtectedRoute>
-                <Dashboard />
+                <EssentialPlatform />
               </ProtectedRoute>
             } />
             <Route path="/stats" element={
@@ -292,13 +285,13 @@ function AppRoutes() {
               </ProtectedRoute>
             }>
               <Route index element={<Navigate to="endpoint" replace />} />
-              <Route path="service" element={<DashboardServicePage />} />
+              <Route path="service" element={<SecurityPosture />} />
               <Route path="endpoint" element={<DashboardEndpointPage />} />
               <Route path="cloud" element={<DashboardCloudPage />} />
               <Route path="audit" element={<DashboardAuditRedirect />} />
               <Route path="endpoint-compliance" element={<DashboardEndpointCompliancePage />} />
-              <Route path="ctem-compliance" element={<DashboardCtemPage />} />
-              <Route path="ctem" element={<Navigate to="ctem-compliance" replace />} />
+              <Route path="ctem-compliance" element={<Navigate to="endpoint" replace />} />
+              <Route path="ctem" element={<Navigate to="endpoint" replace />} />
               <Route path="verdict-cloud" element={<DashboardVerdictCloudPage />} />
               <Route path="reports" element={<DashboardReportsPage />} />
               <Route path="notifications" element={<DashboardNotificationsPage />} />
@@ -307,18 +300,18 @@ function AppRoutes() {
                   <AuditLogs />
                 </ProtectedRoute>
               } />
-              <Route path="roi" element={<DashboardRoiPage />} />
+              <Route path="roi" element={<Navigate to="endpoint" replace />} />
             </Route>
 
             <Route path="/security/endpoint-zero-trust" element={<ProtectedRoute><SecurityEndpointZeroTrustPage /></ProtectedRoute>} />
-            <Route path="/security/cloud-zero-trust" element={<ProtectedRoute><SecurityCloudZeroTrustPage /></ProtectedRoute>} />
             <Route path="/security/siem-x" element={<ProtectedRoute><SecuritySiemPage /></ProtectedRoute>} />
-            <Route path="/security/threat-labs" element={<ProtectedRoute><SecurityThreatLabsPage /></ProtectedRoute>} />
+            <Route path="/security/cloud-zero-trust" element={<Navigate to="/security/endpoint-zero-trust" replace />} />
+            <Route path="/security/threat-labs" element={<Navigate to="/security/siem-x" replace />} />
 
             <Route path="/managed-security" element={<Navigate to="/managed-security/overview" replace />} />
             <Route path="/managed-security/overview" element={<ProtectedRoute><ManagedSecurityOverviewPage /></ProtectedRoute>} />
             <Route path="/managed-security/incidents" element={<ProtectedRoute><ManagedSecurityIncidentsPage /></ProtectedRoute>} />
-            <Route path="/managed-security/sla" element={<ProtectedRoute><ManagedSecuritySlaPage /></ProtectedRoute>} />
+            <Route path="/managed-security/sla" element={<Navigate to="/managed-security/overview" replace />} />
 
             <Route path="/itsm/tickets" element={<ProtectedRoute><ItsmTicketsPage /></ProtectedRoute>} />
             <Route path="/itsm/playbooks" element={<ProtectedRoute><ItsmPlaybooksPage /></ProtectedRoute>} />
@@ -335,9 +328,9 @@ function AppRoutes() {
                 <Endpoints />
               </ProtectedRoute>
             } />
-            <Route path="/management/profiles" element={<ProtectedRoute><ManagementProfilesPage /></ProtectedRoute>} />
+            <Route path="/management/profiles" element={<Navigate to="/management/devices" replace />} />
             <Route path="/management/rmm" element={<ProtectedRoute><ManagementRmmPage /></ProtectedRoute>} />
-            <Route path="/management/patch" element={<ProtectedRoute><ManagementPatchPage /></ProtectedRoute>} />
+            <Route path="/management/patch" element={<Navigate to="/management/devices" replace />} />
             <Route path="/management/vulnerability" element={<ProtectedRoute><ManagementVulnPage /></ProtectedRoute>} />
             <Route path="/management/network" element={<ProtectedRoute><ManagementNetworkPage /></ProtectedRoute>} />
             <Route path="/management/app-control" element={<ProtectedRoute><ManagementAppControlPage /></ProtectedRoute>} />

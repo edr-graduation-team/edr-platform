@@ -228,8 +228,10 @@ export default function Stats() {
         <div>
             <div className="flex justify-between items-center mb-8">
                 <div className="flex flex-col">
-                    <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Statistics & Reports</h1>
-                    <p className="text-sm font-medium text-slate-500 dark:text-slate-400 mt-1">Historical Data & Threat Analysis</p>
+                    <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Reports & Statistics</h1>
+                    <p className="text-sm font-medium text-slate-500 dark:text-slate-400 mt-1">
+                        Historical trends and exports from <code className="text-xs">/api/v1/*/stats</code> endpoints.
+                    </p>
                 </div>
 
                 {/* Export Controls */}

@@ -641,7 +641,7 @@ export default function Dashboard() {
                         Security Posture
                     </h1>
                     <p className="text-sm text-slate-400 mt-1 flex items-center gap-2">
-                        Live Threat Monitoring &amp; System Pulse
+                        Live posture view powered by <code className="text-xs">/api/v1/sigma/stats/alerts</code> and <code className="text-xs">/api/v1/agents/stats</code>
                         <LiveIndicator label="Live" color="emerald" />
                     </p>
                 </div>

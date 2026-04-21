@@ -1256,8 +1256,10 @@ export default function Alerts() {
             <div className="relative flex-1 flex flex-col min-h-0 space-y-4 lg:space-y-6 max-w-[1600px] mx-auto w-full">
                 <div className="flex items-center justify-between shrink-0">
                     <div>
-                        <h1 className="text-3xl font-bold text-slate-900 dark:text-white tracking-tight">Alerts</h1>
-                        <p className="text-sm text-slate-500 mt-1">Deep triage and historic threat analysis</p>
+                        <h1 className="text-3xl font-bold text-slate-900 dark:text-white tracking-tight">Alerts (Triage)</h1>
+                        <p className="text-sm text-slate-500 mt-1">
+                            Analyst triage queue powered by <code className="text-xs">GET /api/v1/sigma/alerts</code> (filters, status changes, and context drill-down).
+                        </p>
                     </div>
                     <div className="flex items-center gap-2 text-sm text-slate-500 bg-white/50 dark:bg-slate-800/50 px-3 py-1.5 rounded-full border border-slate-200 dark:border-slate-700/50 backdrop-blur-sm shadow-sm">
                         <TrendingUp className="w-4 h-4 text-cyan-600 dark:text-cyan-400" />

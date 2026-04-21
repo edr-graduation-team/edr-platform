@@ -19,8 +19,7 @@ export default function DashboardsLayout() {
                 <div>
                     <h1 className="text-xl font-bold text-gray-900 dark:text-white">Dashboards</h1>
                     <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
-                        Service and Endpoint tabs use live connection-manager and Sigma stats; other views may use parity
-                        fallbacks until APIs exist.
+                        Live dashboards are powered by connection-manager and Sigma stats; “Reports” pages may use placeholder UX until dedicated APIs exist.
                     </p>
                 </div>
             </div>

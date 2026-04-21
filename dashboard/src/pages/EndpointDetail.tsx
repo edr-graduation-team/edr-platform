@@ -362,13 +362,13 @@ export default function EndpointDetail() {
                             to={`/responses?agent_id=${encodeURIComponent(agent.id)}`}
                             className="px-3 py-1 rounded-lg text-xs font-semibold bg-cyan-500/10 text-cyan-700 dark:text-cyan-300 border border-cyan-500/20 hover:bg-cyan-500/20"
                         >
-                            Action Center (filtered)
+                            Command Center (filtered)
                         </Link>
                         <Link
                             to={`/events?agent_id=${encodeURIComponent(agent.id)}`}
                             className="px-3 py-1 rounded-lg text-xs font-semibold bg-slate-500/10 text-slate-700 dark:text-slate-300 border border-slate-500/20 hover:bg-slate-500/20"
                         >
-                            Events (filtered)
+                            Telemetry Search (filtered)
                         </Link>
                     </div>
                 </div>

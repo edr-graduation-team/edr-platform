@@ -896,3 +896,48 @@ html, body, #root {
   from { opacity: 0; }
   to   { opacity: 1; }
 }
+
+/* ============================================================
+   CUSTOM SCROLLBAR (Better Visibility & Contrast)
+   ============================================================ */
+::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.03);
+}
+
+.dark ::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.7); /* slate-400 */
+  border-radius: 6px;
+  border: 3px solid var(--edr-bg);
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(100, 116, 139, 0.9); /* slate-500 */
+}
+
+.dark ::-webkit-scrollbar-thumb {
+  background: rgba(100, 116, 139, 0.8); /* slate-500 */
+  border: 3px solid var(--edr-bg);
+}
+
+.dark ::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(148, 163, 184, 1); /* slate-400 */
+}
+
+/* Also ensure horizontal scrollbars look consistent */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  border-width: 2px;
+}

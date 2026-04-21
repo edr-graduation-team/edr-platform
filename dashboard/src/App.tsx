@@ -16,6 +16,7 @@ const Stats = lazy(() => import('./pages/Stats'));
 const Login = lazy(() => import('./pages/Login'));
 const Settings = lazy(() => import('./pages/Settings'));
 const Endpoints = lazy(() => import('./pages/Endpoints'));
+const EndpointDetail = lazy(() => import('./pages/EndpointDetail'));
 const EndpointRisk = lazy(() => import('./pages/EndpointRisk'));
 const Threats = lazy(() => import('./pages/Threats'));
 const AuditLogs = lazy(() => import('./pages/AuditLogs'));
@@ -316,6 +317,11 @@ function AppRoutes() {
             <Route path="/itsm/automations" element={<ProtectedRoute><ItsmAutomationsPage /></ProtectedRoute>} />
             <Route path="/itsm/integrations" element={<ProtectedRoute><ItsmIntegrationsPage /></ProtectedRoute>} />
 
+            <Route path="/management/devices/:agentId" element={
+              <ProtectedRoute roles={['admin', 'security', 'analyst', 'operations', 'viewer']}>
+                <EndpointDetail />
+              </ProtectedRoute>
+            } />
             <Route path="/management/devices" element={
               <ProtectedRoute roles={['admin', 'security', 'analyst', 'operations', 'viewer']}>
                 <Endpoints />

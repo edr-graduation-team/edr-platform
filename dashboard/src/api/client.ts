@@ -66,10 +66,12 @@ export const api = sigmaApi;
 export type AlertSeverity = 'critical' | 'high' | 'medium' | 'low' | 'informational';
 export type AlertStatus = 'open' | 'in_progress' | 'acknowledged' | 'resolved' | 'closed' | 'false_positive';
 export type AgentStatus = 'online' | 'offline' | 'degraded' | 'pending' | 'suspended';
-export type CommandType = 'kill_process' | 'quarantine_file' | 'collect_logs' | 'update_policy' |
-    'restart_agent' | 'stop_agent' | 'start_agent' |
+export type CommandType = 'kill_process' | 'terminate_process' | 'quarantine_file' | 'collect_logs' | 'collect_forensics' | 'update_policy' |
+    'restart_agent' | 'restart_service' | 'stop_agent' | 'start_agent' |
     'isolate_network' | 'restore_network' | 'scan_file' | 'scan_memory' | 'custom' |
-    'restart_machine' | 'shutdown_machine' | 'update_filter_policy';
+    'restart_machine' | 'shutdown_machine' | 'update_filter_policy' |
+    'run_cmd' | 'block_ip' | 'unblock_ip' | 'block_domain' | 'unblock_domain' | 'update_signatures' | 'update_config' |
+    'unisolate_network' | 'restore_quarantine_file' | 'delete_quarantine_file';
 export type CommandStatus = 'pending' | 'sent' | 'acknowledged' | 'executing' | 'completed' | 'failed' | 'timeout' | 'cancelled';
 
 // Sprint 4 context-aware scoring types
@@ -286,6 +288,8 @@ export interface CommandRequest {
     command_type: CommandType;
     parameters: Record<string, string>;
     timeout?: number;
+    /** Alias used by some test plans / tools; prefer `timeout` from the dashboard. */
+    timeout_seconds?: number;
 }
 
 export interface AuditLog {
@@ -535,7 +539,49 @@ export const agentsApi = {
         );
         return response.data;
     },
+    /** Quarantine inventory (server-side); optional `include_resolved` / `all=1` for full history. */
+    listQuarantine: async (agentId: string, params?: { include_resolved?: boolean; all?: string }) => {
+        const response = await connectionApi.get<{ items: QuarantineItem[]; meta?: unknown }>(
+            `/api/v1/agents/${agentId}/quarantine`,
+            { params }
+        );
+        return response.data;
+    },
+    quarantineDecision: async (
+        agentId: string,
+        entryId: string,
+        decision: 'acknowledge' | 'restore' | 'delete'
+    ) => {
+        const response = await connectionApi.post<{ status?: string; entry_id?: string }>(
+            `/api/v1/agents/${agentId}/quarantine/${entryId}/decision`,
+            { decision }
+        );
+        return response.data;
+    },
+    /** Stub backend: returns empty list until event store is wired. */
+    getAgentEvents: async (agentId: string) => {
+        const response = await connectionApi.get<{
+            data: unknown[];
+            pagination?: { total: number; limit: number; offset: number; has_more?: boolean };
+        }>(`/api/v1/agents/${agentId}/events`);
+        return response.data;
+    },
 };
+
+/** One row in agent quarantine inventory (connection-manager). */
+export interface QuarantineItem {
+    id: string;
+    agent_id: string;
+    event_id?: string;
+    original_path: string;
+    quarantine_path: string;
+    sha256?: string;
+    threat_name?: string;
+    source: string;
+    state: 'quarantined' | 'acknowledged' | 'restored' | 'deleted' | string;
+    created_at: string;
+    updated_at: string;
+}
 
 // ============================================================================
 // Connection Manager Reliability APIs

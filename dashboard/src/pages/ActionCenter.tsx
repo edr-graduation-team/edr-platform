@@ -6,7 +6,8 @@ import {
     ChevronDown, ChevronRight, RefreshCw, Terminal,
     Monitor, Search, X, Activity
 } from 'lucide-react';
-import { commandsApi, type CommandListItem, type CommandStats } from '../api/client';
+import { authApi, commandsApi, type CommandListItem, type CommandStats } from '../api/client';
+import { useToast } from '../components';
 import { useDebounce } from '../hooks/useDebounce';
 
 const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string; icon: React.ElementType }> = {
@@ -231,6 +232,8 @@ const CommandRow = React.memo(function CommandRow({ command: item }: { command: 
 });
 
 export default function ActionCenter() {
+    const navigate = useNavigate();
+    const { showToast } = useToast();
     const [searchParams] = useSearchParams();
     const [filters, setFilters] = useState<{
         status?: string;

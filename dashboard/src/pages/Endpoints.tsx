@@ -5,7 +5,8 @@ import { Link } from 'react-router-dom';
 import {
     Search, Monitor, Wifi, WifiOff, AlertTriangle, ChevronDown,
     Play, Shield, FileX, Folder, RefreshCw, X, Check, Clock, Loader2, Power, ShieldAlert, Square, Zap,
-    LayoutGrid, List, PanelLeft, Building2, Layers, UserPlus, Terminal
+    LayoutGrid, List, PanelLeft, Building2, Layers, UserPlus, Terminal,
+    Ban, ShieldOff, Globe, Globe2, Download, Settings, Trash2, ArchiveRestore, Wrench, PackageSearch,
 } from 'lucide-react';
 import {
     agentsApi,
@@ -20,18 +21,31 @@ import { useDebounce } from '../hooks/useDebounce';
 // Command definitions
 const COMMAND_DEFINITIONS: Record<CommandType, { label: string; icon: typeof Play; description: string; color: string }> = {
     kill_process: { label: 'Kill Process', icon: X, description: 'Terminate a running process', color: 'text-red-500' },
+    terminate_process: { label: 'Terminate Process', icon: X, description: 'Alternate name for kill/terminate pipeline', color: 'text-red-500' },
     quarantine_file: { label: 'Quarantine File', icon: FileX, description: 'Move file to quarantine', color: 'text-orange-500' },
     collect_logs: { label: 'Collect Logs', icon: Folder, description: 'Gather forensic logs', color: 'text-blue-500' },
+    collect_forensics: { label: 'Collect Forensics', icon: PackageSearch, description: 'Collect logs, hashes, and artifacts', color: 'text-blue-600' },
     update_policy: { label: 'Update Policy', icon: Shield, description: 'Apply new security policy', color: 'text-indigo-500' },
     restart_agent: { label: 'Restart Agent', icon: RefreshCw, description: 'Restart EDR agent service', color: 'text-amber-500' },
+    restart_service: { label: 'Restart Service', icon: Wrench, description: 'Restart a named OS/agent service', color: 'text-amber-600' },
     stop_agent: { label: 'Stop Agent', icon: Square, description: 'Stop the EDR agent service', color: 'text-red-500' },
     start_agent: { label: 'Start Agent', icon: Play, description: 'Start / re-enable the EDR agent service', color: 'text-green-500' },
     restart_machine: { label: 'Restart Machine', icon: RefreshCw, description: 'Reboot the endpoint machine (OS-level restart)', color: 'text-red-500' },
     shutdown_machine: { label: 'Shutdown Machine', icon: Power, description: 'Power off the endpoint machine (OS-level shutdown)', color: 'text-red-700' },
     isolate_network: { label: 'Isolate Network', icon: WifiOff, description: 'Block all network traffic', color: 'text-red-600' },
+    unisolate_network: { label: 'Un-isolate Network', icon: Wifi, description: 'Lift network isolation', color: 'text-green-500' },
     restore_network: { label: 'Restore Network', icon: Wifi, description: 'Restore network connectivity', color: 'text-green-500' },
     scan_file: { label: 'Scan File', icon: Search, description: 'Scan a specific file', color: 'text-purple-500' },
     scan_memory: { label: 'Scan Memory', icon: Monitor, description: 'Perform memory analysis', color: 'text-cyan-500' },
+    run_cmd: { label: 'Run Command', icon: Terminal, description: 'Run whitelisted diagnostic command', color: 'text-slate-600' },
+    block_ip: { label: 'Block IP', icon: Ban, description: 'Add firewall block for an IP', color: 'text-rose-600' },
+    unblock_ip: { label: 'Unblock IP', icon: ShieldOff, description: 'Remove IP block', color: 'text-emerald-600' },
+    block_domain: { label: 'Block Domain', icon: Globe, description: 'Block DNS/domain', color: 'text-rose-600' },
+    unblock_domain: { label: 'Unblock Domain', icon: Globe2, description: 'Remove domain block', color: 'text-emerald-600' },
+    update_signatures: { label: 'Update Signatures', icon: Download, description: 'Pull signature / intel bundle', color: 'text-indigo-500' },
+    update_config: { label: 'Update Config', icon: Settings, description: 'Hot-reload agent configuration key', color: 'text-slate-600' },
+    restore_quarantine_file: { label: 'Restore Quarantine File', icon: ArchiveRestore, description: 'Restore file from quarantine', color: 'text-green-600' },
+    delete_quarantine_file: { label: 'Delete Quarantine File', icon: Trash2, description: 'Permanently delete quarantined file', color: 'text-red-600' },
     custom: { label: 'Custom Command', icon: Zap, description: 'Execute custom command', color: 'text-gray-500' },
     update_filter_policy: { label: 'Update Filter Policy', icon: Shield, description: 'Push new filtering rules to agent', color: 'text-teal-500' },
 };

@@ -320,7 +320,7 @@ export default function EndpointDetail() {
     const lastCmd = recentCmds?.data?.[0];
 
     return (
-        <div className="relative flex flex-col min-h-[calc(100vh-2rem)] -mx-4 sm:-mx-6 lg:-mx-8 -my-4 sm:-my-6 lg:-my-8 p-4 sm:p-6 lg:p-8 bg-slate-50 dark:bg-gradient-to-br dark:from-slate-900 dark:via-[#0b1120] dark:to-slate-900">
+        <div className="relative flex flex-col min-h-[calc(100vh-2rem)] -mx-4 sm:-mx-6 lg:-mx-8 -my-4 sm:-my-6 lg:-my-8 p-4 sm:p-6 lg:p-8 bg-slate-200 dark:bg-gradient-to-br dark:from-slate-900 dark:via-[#0b1120] dark:to-slate-900">
             <div className=" w-full space-y-4">
                 <div className="flex flex-wrap items-start gap-4">
                     <button
@@ -452,7 +452,7 @@ export default function EndpointDetail() {
                         ) : (
                             <p className="text-sm text-slate-500">
                                 Event search requires <code className="text-xs">alerts:read</code> (same guard as{' '}
-                                <code className="text-xs">POST /api/v1/events/search</code> on the server).
+                                event search permissions).
                             </p>
                         ))}
 
@@ -635,7 +635,7 @@ function OverviewTab({
                 </h3>
                 {cmEvents.length === 0 ? (
                     <p className="text-sm text-slate-500">
-                        No raw events in the latest fetch — confirm the agent is ingesting and that <code className="text-xs">GET /api/v1/agents/:id/events</code> returns rows. Open the full Events view for filters and raw JSON per event.
+                        No raw events in the latest fetch. Open the full Events view for filters and raw JSON per event.
                     </p>
                 ) : (
                     <ul className="text-sm space-y-1">
@@ -721,7 +721,7 @@ function ConfigurationTab({ agent }: { agent: Agent }) {
     return (
         <div className="space-y-6 text-sm">
             <p className="text-slate-600 dark:text-slate-400">
-                Read-only view of labels and metadata returned by <code className="text-xs">GET /api/v1/agents/:id</code>. Full policy editing belongs on the Response tab (e.g. update_filter_policy).
+                Read-only view of labels and metadata. Full policy editing belongs on the Response tab.
             </p>
             <div>
                 <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100 mb-2 flex items-center gap-2">
@@ -758,7 +758,7 @@ function ConfigurationTab({ agent }: { agent: Agent }) {
             <div className="rounded-lg border border-slate-200 dark:border-slate-700 p-4 bg-white/60 dark:bg-slate-900/40">
                 <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100 mb-2">Filter policy</h3>
                 <p className="text-xs text-slate-500 mb-2">
-                    Push a new policy via <code className="text-xs">POST /api/v1/agents/:id/filter-policy</code> (implemented as a command on the agent).
+                    Push a new policy to the agent.
                 </p>
                 <textarea
                     className="w-full rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-950 px-3 py-2 text-xs font-mono min-h-[180px]"
@@ -798,7 +798,7 @@ function ConfigurationTab({ agent }: { agent: Agent }) {
                 <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100 mb-2">Process exceptions</h3>
                 <p className="text-xs text-slate-500 mb-3">
                     Allow a process name to bypass <strong>process auto-response</strong>. This calls{' '}
-                    <code className="text-xs">POST /api/v1/agents/:id/process-exceptions</code> and pushes{' '}
+                    an internal exception update and pushes{' '}
                     <code className="text-xs">exclude_process</code> to the agent at runtime.
                 </p>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -906,7 +906,7 @@ function NetworkTab({ agentId, canViewAlerts }: { agentId: string; canViewAlerts
                 <p className="text-slate-600 dark:text-slate-400 max-w-3xl">
                     Network telemetry via <code className="text-xs">POST /api/v1/events/search</code> — filters{' '}
                     <code className="text-xs">agent_id</code> + <code className="text-xs">event_type=network</code>. Click a row for raw JSON (
-                    <code className="text-xs">GET /api/v1/events/:id</code>).
+                    raw event requests).
                 </p>
                 <div className="flex flex-wrap items-center gap-2 shrink-0">
                     <Link
@@ -971,7 +971,7 @@ function NetworkTab({ agentId, canViewAlerts }: { agentId: string; canViewAlerts
                     <Link className="text-cyan-600 dark:text-cyan-400 underline" to={eventsPageHref}>
                         Events
                     </Link>
-                    . If the list stays empty, confirm nginx proxies <code className="text-xs">/api/v1/events/</code> to connection-manager.
+                    . If the list stays empty, confirm network connectivity to the connection manager.
                 </div>
             ) : (
                 <>
@@ -1403,7 +1403,7 @@ function ActivityTab({
                     <Loader2 className="w-6 h-6 animate-spin text-cyan-500" />
                 ) : merged.length === 0 ? (
                     <p className="text-sm text-slate-500">
-                        No timeline entries yet. Alerts need Sigma data; raw events need <code className="text-xs">GET /api/v1/agents/:id/events</code> populated on the server.
+                        No timeline entries yet. Alerts need Sigma data; raw events need telemetry data populated.
                     </p>
                 ) : (
                     <ul className="space-y-2">
@@ -1465,3 +1465,5 @@ function ActivityTab({
         </div>
     );
 }
+
+

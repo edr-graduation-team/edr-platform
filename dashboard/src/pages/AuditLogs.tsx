@@ -77,7 +77,7 @@ function affectedObjectLabel(log: AuditLog): string {
     return log.resource_type || '—';
 }
 
-/** OpenEDR-style log creation timestamp */
+/** Standard log creation timestamp */
 function formatLogDate(iso: string): string {
     try {
         const d = new Date(iso);
@@ -373,11 +373,11 @@ export default function AuditLogs() {
             data-section-id="dashboard-audit-logs-root"
             className="flex flex-col min-h-0 w-full  gap-0"
         >
-            {/* Title — compact, above OpenEDR-style toolbar */}
+            {/* Title — compact, above Standard toolbar */}
             <div className="mb-3 shrink-0">
                 <h1 className="text-xl font-bold text-gray-900 dark:text-white">Audit Logs</h1>
                 <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                    Platform activity (OpenEDR-style grid — columns align with Xcitium audit viewer)
+                    Platform activity (Standard grid — columns align with Platform audit viewer)
                 </p>
             </div>
 
@@ -458,7 +458,7 @@ export default function AuditLogs() {
                 </div>
             </div>
 
-            {/* Filter panel — OpenEDR “cover” style */}
+            {/* Filter panel — Platform “cover” style */}
             {filterPanelOpen && (
                 <div className="border border-gray-200 dark:border-gray-700 border-t-0 rounded-b-lg bg-white dark:bg-slate-900/90 p-4 space-y-4 shadow-sm">
                     <div className="flex flex-wrap gap-4 items-end">
@@ -695,7 +695,7 @@ export default function AuditLogs() {
                     </div>
                 )}
 
-                {/* Pagination — OpenEDR style */}
+                {/* Pagination — Platform style */}
                 {!isLoading && logs.length > 0 && (
                     <div className="flex flex-wrap items-center justify-between gap-3 px-3 py-2 border-t border-gray-200 dark:border-gray-700 bg-gray-50/80 dark:bg-slate-900/60 text-[12px] text-gray-500">
                         <div className="flex items-center gap-2">
@@ -747,3 +747,4 @@ export default function AuditLogs() {
         </div>
     );
 }
+

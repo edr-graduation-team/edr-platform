@@ -1,5 +1,5 @@
 /**
- * OpenEDR-parity API calls (same base as Sigma Engine: `/api/v1`).
+ * Platform API calls (same base as Sigma Engine: `/api/v1`).
  * Consumers should wrap with `withParityFallback` or `useParityQuery` for silent mock on 404/network.
  */
 import { sigmaApi } from '../client';
@@ -133,3 +133,4 @@ export const parityApi = {
     getBillingSummary: (params?: Record<string, string>) =>
         get('/api/v1/management/billing/summary', params),
 };
+

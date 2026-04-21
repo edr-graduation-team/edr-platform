@@ -4,7 +4,7 @@ import { Shield } from 'lucide-react';
 import { Suspense, lazy } from 'react';
 import { ToastProvider } from './components';
 import { authApi } from './api/client';
-import { OpenEdrAppShell } from './layout/OpenEdrAppShell';
+import { PlatformAppShell } from './layout/PlatformAppShell';
 
 import './index.css';
 
@@ -114,11 +114,11 @@ function ProtectedRoute({ children, roles }: { children: React.ReactNode; roles?
 
 function Layout({ children }: { children: React.ReactNode }) {
   return (
-    <OpenEdrAppShell>
+    <PlatformAppShell>
       <Suspense fallback={<PageLoader />}>
         {children}
       </Suspense>
-    </OpenEdrAppShell>
+    </PlatformAppShell>
   );
 }
 
@@ -278,7 +278,7 @@ function AppRoutes() {
                 />
             </Route>
 
-            {/* OpenEDR-parity hub (APIs on Sigma `/api/v1/...`; 404 → silent mock in UI) */}
+            {/* Platform hub (APIs on Sigma `/api/v1/...`; 404 → silent mock in UI) */}
             <Route path="/dashboards" element={
               <ProtectedRoute>
                 <DashboardsLayout />
@@ -358,4 +358,5 @@ export default function App() {
     </QueryClientProvider>
   );
 }
+
 

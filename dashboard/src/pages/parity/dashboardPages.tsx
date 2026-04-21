@@ -42,9 +42,9 @@ export function DashboardServicePage() {
             <div>
                 <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Service summary</h2>
                 <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                    From <code className="text-xs">GET /api/v1/commands/stats</code>,{' '}
-                    <code className="text-xs">/api/v1/sigma/stats/alerts</code>, and{' '}
-                    <code className="text-xs">/api/v1/reliability</code>.
+                    From command metrics,{' '}
+                    sigma alert metrics, and{' '}
+                    reliability data.
                 </p>
             </div>
 
@@ -149,8 +149,8 @@ export function DashboardEndpointPage() {
             <div>
                 <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Endpoint summary</h2>
                 <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                    From <code className="text-xs">GET /api/v1/agents/stats</code> and{' '}
-                    <code className="text-xs">GET /api/v1/alerts/endpoint-risk</code>.
+                    From agent metrics and{' '}
+                    endpoint risk scoring.
                 </p>
             </div>
 
@@ -323,14 +323,14 @@ export function DashboardCtemPage() {
         <div className="space-y-6">
             <GenericParityView
                 title="CTEM exposure summary"
-                missingApi="/api/v1/ctem/exposure-summary"
+                missingApi="true"
                 queryKey={['parity', 'ctem', 'exposure']}
                 fetcher={() => parityApi.getCtemExposureSummary()}
                 mock={mocks.mockCtemExposure}
             />
             <GenericParityView
                 title="CTEM findings"
-                missingApi="/api/v1/ctem/findings"
+                missingApi="true"
                 queryKey={['parity', 'ctem', 'findings']}
                 fetcher={() => parityApi.getCtemFindings()}
                 mock={mocks.mockCtemFindings.data}
@@ -348,7 +348,7 @@ export function DashboardRoiPage() {
     return (
         <GenericParityView
             title="ROI dashboard"
-            missingApi="/api/v1/dashboard/roi"
+            missingApi="true"
             queryKey={['parity', 'dashboard', 'roi']}
             fetcher={() => parityApi.getRoi()}
             mock={mocks.mockRoi}
@@ -382,7 +382,7 @@ export function DashboardReportsPage() {
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                 <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900/40 p-4 space-y-2">
                     <div className="font-semibold text-gray-900 dark:text-white">Fleet snapshot</div>
-                    <div className="text-xs text-gray-500">From <code className="text-xs">GET /api/v1/agents/stats</code>.</div>
+                    <div className="text-xs text-gray-500">From agent metrics.</div>
                     <button
                         type="button"
                         className="px-3 py-2 rounded-lg text-sm font-semibold bg-cyan-600 hover:bg-cyan-700 text-white disabled:opacity-50"
@@ -395,7 +395,7 @@ export function DashboardReportsPage() {
 
                 <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900/40 p-4 space-y-2">
                     <div className="font-semibold text-gray-900 dark:text-white">Command operations</div>
-                    <div className="text-xs text-gray-500">From <code className="text-xs">GET /api/v1/commands/stats</code>.</div>
+                    <div className="text-xs text-gray-500">From command metrics.</div>
                     <button
                         type="button"
                         className="px-3 py-2 rounded-lg text-sm font-semibold bg-cyan-600 hover:bg-cyan-700 text-white disabled:opacity-50"
@@ -408,7 +408,7 @@ export function DashboardReportsPage() {
 
                 <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900/40 p-4 space-y-2">
                     <div className="font-semibold text-gray-900 dark:text-white">Alert summary</div>
-                    <div className="text-xs text-gray-500">From <code className="text-xs">/api/v1/sigma/stats/alerts</code>.</div>
+                    <div className="text-xs text-gray-500">From alert metrics.</div>
                     <button
                         type="button"
                         className="px-3 py-2 rounded-lg text-sm font-semibold bg-cyan-600 hover:bg-cyan-700 text-white disabled:opacity-50"
@@ -445,7 +445,7 @@ export function DashboardNotificationsPage() {
     return (
         <div className="rounded-xl border border-dashed border-gray-300 dark:border-gray-600 p-8 text-center text-gray-500 dark:text-gray-400">
             <p className="font-medium text-gray-700 dark:text-gray-300">Notifications</p>
-            <p className="text-sm mt-2">In-app notification center — wiring to `/api/v1/...` when ready.</p>
+            <p className="text-sm mt-2">In-app notification center — coming soon.</p>
             <p className="text-sm mt-4 text-left max-w-md mx-auto text-gray-600 dark:text-gray-300">
                 For now, monitor <Link className="text-cyan-600 dark:text-cyan-400 font-medium" to="/alerts">Alerts</Link>
                 {' '}and <Link className="text-cyan-600 dark:text-cyan-400 font-medium" to="/">Overview</Link> live streams.
@@ -453,3 +453,4 @@ export function DashboardNotificationsPage() {
         </div>
     );
 }
+

@@ -1249,7 +1249,7 @@ export default function Alerts() {
 
     return (
         <>
-        <div className="relative flex flex-col min-h-[calc(100vh-2rem)] lg:min-h-[calc(100vh-1rem)] h-full -mx-4 sm:-mx-6 lg:-mx-8 -my-4 sm:-my-6 lg:-my-8 p-4 sm:p-6 lg:p-8 bg-slate-50 dark:bg-gradient-to-br dark:from-slate-900 dark:via-[#0b1120] dark:to-slate-900 transition-colors overflow-hidden">
+        <div className="relative flex flex-col min-h-[calc(100vh-2rem)] lg:min-h-[calc(100vh-1rem)] h-full -mx-4 sm:-mx-6 lg:-mx-8 -my-4 sm:-my-6 lg:-my-8 p-4 sm:p-6 lg:p-8 bg-slate-200 dark:bg-gradient-to-br dark:from-slate-900 dark:via-[#0b1120] dark:to-slate-900 transition-colors overflow-hidden">
             {/* Background ambient glow */}
             <div className="absolute top-0 left-1/4 w-[800px] h-[500px] pointer-events-none -translate-y-1/2" style={{ background: 'radial-gradient(circle, rgba(6,182,212,0.08) 0%, transparent 70%)' }} />
 
@@ -1258,7 +1258,7 @@ export default function Alerts() {
                     <div>
                         <h1 className="text-3xl font-bold text-slate-900 dark:text-white tracking-tight">Alerts (Triage)</h1>
                         <p className="text-sm text-slate-500 mt-1">
-                            Analyst triage queue powered by <code className="text-xs">GET /api/v1/sigma/alerts</code> (filters, status changes, and context drill-down).
+                            Analyst triage queue.
                         </p>
                     </div>
                     <div className="flex items-center gap-2 text-sm text-slate-500 bg-white/50 dark:bg-slate-800/50 px-3 py-1.5 rounded-full border border-slate-200 dark:border-slate-700/50 backdrop-blur-sm shadow-sm">
@@ -1563,4 +1563,6 @@ export default function Alerts() {
         </>
     );
 }
+
+
 

@@ -46,8 +46,8 @@ export function SecurityEndpointZeroTrustPage() {
             <div>
                 <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Endpoint Zero Trust</h2>
                 <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                    Practical posture view for self-hosted EDR. Uses <code className="text-xs">/api/v1/agents/stats</code> and{' '}
-                    <code className="text-xs">/api/v1/alerts/endpoint-risk</code>.
+                    Practical posture view for self-hosted EDR. Uses agent metrics and{' '}
+                    endpoint risk scores.
                 </p>
             </div>
 
@@ -91,7 +91,7 @@ export function SecurityCloudZeroTrustPage() {
     return (
         <GenericParityView
             title="Cloud Security — Zero Trust"
-            missingApi="/api/v1/security/posture/cloud"
+            missingApi="true"
             queryKey={['parity', 'security', 'posture', 'cloud']}
             fetcher={() => parityApi.getSecurityPostureCloud()}
             mock={mocks.mockSecurityPostureCloud}
@@ -193,7 +193,7 @@ export function SecurityThreatLabsPage() {
     return (
         <GenericParityView
             title="Threat Labs — IOC feed"
-            missingApi={['/api/v1/threat-labs/iocs', '/api/v1/threat-labs/iocs/search']}
+            missingApi="true"
             queryKey={['parity', 'threat-labs', 'iocs']}
             fetcher={() => parityApi.getThreatLabsIocs()}
             mock={mocks.mockThreatLabsIocs.data}
@@ -296,7 +296,7 @@ export function ManagedSecuritySlaPage() {
     return (
         <GenericParityView
             title="Managed Security — SLA"
-            missingApi="/api/v1/managed-security/sla"
+            missingApi="true"
             queryKey={['parity', 'managed', 'sla']}
             fetcher={() => parityApi.getManagedSla()}
             mock={mocks.mockManagedSla}
@@ -308,7 +308,7 @@ export function ItsmTicketsPage() {
     return (
         <GenericParityView
             title="ITSM — tickets"
-            missingApi={['/api/v1/itsm/tickets', '/api/v1/itsm/tickets (POST)']}
+            missingApi="true"
             queryKey={['parity', 'itsm', 'tickets']}
             fetcher={() => parityApi.getItsmTickets()}
             mock={mocks.mockItsmTickets}
@@ -526,7 +526,7 @@ export function ItsmAutomationsPage() {
             <div>
                 <h2 className="text-lg font-semibold text-gray-900 dark:text-white">ITSM — automations</h2>
                 <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                    Lightweight automations implemented on top of the existing response command pipeline (<code className="text-xs">POST /api/v1/agents/:id/commands</code>).
+                    Lightweight automations implemented on top of the existing response command pipeline .
                 </p>
             </div>
 
@@ -586,7 +586,7 @@ export function ManagementDevicesPage() {
         <GenericParityView
             title="Device management"
             description="Aligned with `/management/devices` — can mirror `/api/v1/agents` later."
-            missingApi="/api/v1/management/devices"
+            missingApi="true"
             queryKey={['parity', 'management', 'devices']}
             fetcher={() => parityApi.getManagementDevices()}
             mock={mocks.mockManagementDevices}
@@ -679,7 +679,7 @@ export function ManagementProfilesPage() {
     return (
         <GenericParityView
             title="Profile management"
-            missingApi="/api/v1/management/profiles"
+            missingApi="true"
             queryKey={['parity', 'management', 'profiles']}
             fetcher={() => parityApi.getManagementProfiles()}
             mock={mocks.mockManagementProfiles.data}
@@ -696,14 +696,14 @@ export function ManagementPatchPage() {
         <div className="space-y-6">
             <GenericParityView
                 title="Patch — overview"
-                missingApi="/api/v1/patch/overview"
+                missingApi="true"
                 queryKey={['parity', 'patch', 'overview']}
                 fetcher={() => parityApi.getPatchOverview()}
                 mock={mocks.mockPatchOverview}
             />
             <GenericParityView
                 title="Patch — missing"
-                missingApi="/api/v1/patch/missing"
+                missingApi="true"
                 queryKey={['parity', 'patch', 'missing']}
                 fetcher={() => parityApi.getPatchMissing()}
                 mock={mocks.mockPatchMissing.data}
@@ -886,3 +886,4 @@ export function ManagementLicensesPage() {
 export function ManagementBillingPage() {
     return <SelfHostedOutOfScope title="Billing" />;
 }
+

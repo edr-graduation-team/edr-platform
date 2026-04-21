@@ -1,4 +1,4 @@
-/** Context (second-row) tabs + path helpers for OpenEDR-style shell. */
+/** Context (second-row) tabs + path helpers for Standard shell. */
 
 export type ContextTab = { to: string; label: string; end?: boolean };
 
@@ -71,3 +71,4 @@ export const MANAGEMENT_TABS: ContextTab[] = [
 export function isDashboardMorePath(_pathname: string): boolean {
     return false;
 }
+

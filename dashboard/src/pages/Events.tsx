@@ -2,10 +2,27 @@ import { useQuery } from '@tanstack/react-query';
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { Activity, AlertTriangle, ChevronLeft, ChevronRight, Loader2, Search } from 'lucide-react';
-import { authApi, eventsApi, type CmEventSummary } from '../api/client';
+import { authApi, eventsApi, type CmEventDetail, type CmEventSummary } from '../api/client';
+import { Modal } from '../components/Modal';
 import { useDebounce } from '../hooks/useDebounce';
 
 const DEFAULT_LIMIT = 50;
+
+function formatEventRaw(raw: unknown): string {
+    if (raw === null || raw === undefined) return '';
+    if (typeof raw === 'string') {
+        try {
+            return JSON.stringify(JSON.parse(raw), null, 2);
+        } catch {
+            return raw;
+        }
+    }
+    try {
+        return JSON.stringify(raw, null, 2);
+    } catch {
+        return String(raw);
+    }
+}
 
 function isoDaysAgo(days: number) {
     return new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
@@ -59,6 +76,7 @@ export default function Events() {
     const [from, setFrom] = useState(() => sp.get('from') || isoDaysAgo(7));
     const [to, setTo] = useState(() => sp.get('to') || new Date().toISOString());
     const [page, setPage] = useState(() => Math.max(1, parseInt(sp.get('page') || '1', 10) || 1));
+    const [detailId, setDetailId] = useState<string | null>(null);
 
     useEffect(() => {
         // keep URL in sync (bookmarkable)
@@ -100,6 +118,14 @@ export default function Events() {
         retry: 1,
     });
 
+    const detailQ = useQuery({
+        queryKey: ['event-detail', detailId],
+        queryFn: () => eventsApi.get(detailId!),
+        enabled: canView && !!detailId,
+        staleTime: 30_000,
+        retry: 1,
+    });
+
     const rows: CmEventSummary[] = q.data?.data ?? [];
     const total = q.data?.pagination?.total ?? 0;
     const totalPages = Math.max(1, Math.ceil(total / DEFAULT_LIMIT));
@@ -126,7 +152,8 @@ export default function Events() {
                     <div className="flex-1">
                         <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Events</h1>
                         <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-                            Advanced search via <code className="text-xs">POST /api/v1/events/search</code>. (Backend currently returns an empty list until event storage is wired.)
+                            Search stored telemetry via <code className="text-xs">POST /api/v1/events/search</code>. Click a row for{' '}
+                            <code className="text-xs">GET /api/v1/events/:id</code> raw payload.
                         </p>
                     </div>
                     <Link
@@ -215,7 +242,9 @@ export default function Events() {
                     <div className="rounded-xl border border-rose-200 dark:border-rose-900/50 bg-rose-50/80 dark:bg-rose-950/20 p-5 text-sm text-rose-900 dark:text-rose-200 flex items-start gap-3">
                         <AlertTriangle className="w-5 h-5 mt-0.5 shrink-0" />
                         <div>
-                            Failed to search events. This endpoint is guarded and may not be wired yet.
+                            Failed to search events. If the status is 405, the reverse proxy must forward{' '}
+                            <code className="text-xs">/api/v1/events/</code> to connection-manager (see dashboard{' '}
+                            <code className="text-xs">nginx.conf</code>).
                         </div>
                     </div>
                 ) : rows.length === 0 ? (
@@ -235,7 +264,19 @@ export default function Events() {
                             </thead>
                             <tbody>
                                 {rows.map((e) => (
-                                    <tr key={e.id} className="border-t border-slate-100 dark:border-slate-800">
+                                    <tr
+                                        key={e.id}
+                                        role="button"
+                                        tabIndex={0}
+                                        className="border-t border-slate-100 dark:border-slate-800 cursor-pointer hover:bg-slate-50/80 dark:hover:bg-slate-800/40"
+                                        onClick={() => setDetailId(e.id)}
+                                        onKeyDown={(ev) => {
+                                            if (ev.key === 'Enter' || ev.key === ' ') {
+                                                ev.preventDefault();
+                                                setDetailId(e.id);
+                                            }
+                                        }}
+                                    >
                                         <td className="p-3 whitespace-nowrap text-xs font-mono text-slate-500">
                                             {new Date(e.timestamp).toLocaleString()}
                                         </td>
@@ -243,6 +284,7 @@ export default function Events() {
                                             <Link
                                                 className="text-cyan-700 dark:text-cyan-300 hover:underline font-mono text-xs"
                                                 to={`/management/devices/${encodeURIComponent(e.agent_id)}?tab=activity`}
+                                                onClick={(ev) => ev.stopPropagation()}
                                             >
                                                 {e.agent_id.slice(0, 8)}…
                                             </Link>
@@ -257,6 +299,65 @@ export default function Events() {
                 )}
 
                 <Pagination page={page} totalPages={totalPages} onPage={setPage} />
+
+                <Modal
+                    isOpen={!!detailId}
+                    onClose={() => setDetailId(null)}
+                    title="Event details"
+                    size="xl"
+                    closeOnOverlayClick
+                >
+                    {detailId && detailQ.isLoading ? (
+                        <div className="flex justify-center py-12">
+                            <Loader2 className="w-8 h-8 animate-spin text-cyan-500" />
+                        </div>
+                    ) : detailId && detailQ.isError ? (
+                        <div className="text-sm text-rose-700 dark:text-rose-300">
+                            Could not load event. Confirm <code className="text-xs">GET /api/v1/events/:id</code> is reachable (same nginx rules as search).
+                        </div>
+                    ) : detailId && detailQ.data?.data ? (
+                        <EventDetailBody ev={detailQ.data.data} />
+                    ) : null}
+                </Modal>
+            </div>
+        </div>
+    );
+}
+
+function EventDetailBody({ ev }: { ev: CmEventDetail }) {
+    return (
+        <div className="space-y-3 text-sm text-slate-700 dark:text-slate-200">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs font-mono">
+                <div>
+                    <span className="text-slate-500 uppercase tracking-wide">id</span>
+                    <div className="break-all">{ev.id}</div>
+                </div>
+                <div>
+                    <span className="text-slate-500 uppercase tracking-wide">agent_id</span>
+                    <div className="break-all">{ev.agent_id}</div>
+                </div>
+                <div>
+                    <span className="text-slate-500 uppercase tracking-wide">event_type</span>
+                    <div>{ev.event_type}</div>
+                </div>
+                <div>
+                    <span className="text-slate-500 uppercase tracking-wide">severity</span>
+                    <div>{ev.severity}</div>
+                </div>
+                <div className="sm:col-span-2">
+                    <span className="text-slate-500 uppercase tracking-wide">timestamp</span>
+                    <div>{new Date(ev.timestamp).toISOString()}</div>
+                </div>
+                <div className="sm:col-span-2">
+                    <span className="text-slate-500 uppercase tracking-wide">summary</span>
+                    <div>{ev.summary}</div>
+                </div>
+            </div>
+            <div>
+                <div className="text-xs font-semibold text-slate-500 uppercase mb-1">raw</div>
+                <pre className="max-h-[60vh] overflow-auto rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-950 text-slate-100 p-3 text-xs leading-relaxed">
+                    {formatEventRaw(ev.raw) || '(empty)'}
+                </pre>
             </div>
         </div>
     );

@@ -3,11 +3,13 @@ package repository
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -49,10 +51,22 @@ type EventSearchRequest struct {
 	Offset    int
 }
 
+// EventDetail is one row from `events` including JSONB raw.
+type EventDetail struct {
+	ID        uuid.UUID
+	AgentID   uuid.UUID
+	EventType string
+	Severity  string
+	Timestamp time.Time
+	Summary   string
+	Raw       json.RawMessage
+}
+
 type EventRepository interface {
 	InsertMany(ctx context.Context, rows []EventInsert) error
 	Search(ctx context.Context, req EventSearchRequest) ([]EventRow, int, error)
 	ListByAgent(ctx context.Context, agentID uuid.UUID, limit, offset int) ([]EventRow, int, error)
+	GetByID(ctx context.Context, id uuid.UUID) (*EventDetail, error)
 }
 
 type PostgresEventRepository struct {
@@ -231,3 +245,20 @@ func (r *PostgresEventRepository) Search(ctx context.Context, req EventSearchReq
 	return out, total, nil
 }
 
+func (r *PostgresEventRepository) GetByID(ctx context.Context, id uuid.UUID) (*EventDetail, error) {
+	const q = `
+		SELECT id, agent_id, event_type, severity, ts, summary, raw
+		FROM events
+		WHERE id = $1`
+	var d EventDetail
+	err := r.db.QueryRow(ctx, q, id).Scan(
+		&d.ID, &d.AgentID, &d.EventType, &d.Severity, &d.Timestamp, &d.Summary, &d.Raw,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("get event: %w", err)
+	}
+	return &d, nil
+}

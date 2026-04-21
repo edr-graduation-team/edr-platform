@@ -621,7 +621,7 @@ function OverviewTab({
                 </h3>
                 {cmEvents.length === 0 ? (
                     <p className="text-sm text-slate-500">
-                        No raw events yet — <code className="text-xs">GET /api/v1/agents/:id/events</code> returns an empty list until the event store is wired in connection-manager.
+                        No raw events in the latest fetch — confirm the agent is ingesting and that <code className="text-xs">GET /api/v1/agents/:id/events</code> returns rows. Open the full Events view for filters and raw JSON per event.
                     </p>
                 ) : (
                     <ul className="text-sm space-y-1">
@@ -729,7 +729,7 @@ function NetworkTab({
                 <Loader2 className="w-8 h-8 animate-spin text-cyan-500" />
             ) : !data || data.length === 0 ? (
                 <div className="rounded-lg border border-dashed border-slate-300 dark:border-slate-600 p-4 text-slate-500">
-                    No network events in this window. The connection-manager search handler currently returns an empty list until the event database is integrated — the UI will populate automatically once the backend is wired.
+                    No network events in this window. Widen the time range on the Events page or generate telemetry; if search stays empty, verify nginx proxies <code className="text-xs">/api/v1/events/</code> to connection-manager.
                 </div>
             ) : (
                 <div className="overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-700">

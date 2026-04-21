@@ -2,6 +2,7 @@
 package api
 
 import (
+	"encoding/json"
 	"time"
 
 	"github.com/google/uuid"
@@ -458,6 +459,17 @@ type EventSummary struct {
 	EventType string    `json:"event_type"`
 	Timestamp time.Time `json:"timestamp"`
 	Summary   string    `json:"summary"`
+}
+
+// EventDetail is a single stored event including the ingestion JSON payload.
+type EventDetail struct {
+	ID        uuid.UUID       `json:"id"`
+	AgentID   uuid.UUID       `json:"agent_id"`
+	EventType string          `json:"event_type"`
+	Severity  string          `json:"severity"`
+	Timestamp time.Time       `json:"timestamp"`
+	Summary   string          `json:"summary"`
+	Raw       json.RawMessage `json:"raw"`
 }
 
 // EventExportRequest for exporting events.

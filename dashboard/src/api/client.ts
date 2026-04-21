@@ -477,6 +477,12 @@ export interface CmEventSummary {
     summary: string;
 }
 
+/** Single event from `GET /api/v1/events/:id` (includes ingestion `raw`). */
+export interface CmEventDetail extends CmEventSummary {
+    severity: string;
+    raw: unknown;
+}
+
 /** Body for `POST /api/v1/events/search` (matches connection-manager EventSearchRequest). */
 export interface EventSearchRequestBody {
     filters: { field: string; operator: string; value: unknown }[];
@@ -492,6 +498,10 @@ export const eventsApi = {
             data: CmEventSummary[];
             pagination: { total: number; limit: number; offset: number; has_more?: boolean };
         }>('/api/v1/events/search', body);
+        return response.data;
+    },
+    get: async (id: string) => {
+        const response = await connectionApi.get<{ data: CmEventDetail }>(`/api/v1/events/${encodeURIComponent(id)}`);
         return response.data;
     },
 };

@@ -3,14 +3,16 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import {
     ArrowLeft, Activity, Terminal, Shield, HardDrive, Clock, Loader2,
-    Server, Network, AlertTriangle, CheckCircle2, XCircle,
+    Server, Network, AlertTriangle, CheckCircle2, XCircle, Settings,
 } from 'lucide-react';
 import {
     agentsApi,
     alertsApi,
     authApi,
+    eventsApi,
     type Agent,
     type Alert,
+    type CmEventSummary,
     type CommandListItem,
     type CommandRequest,
     type CommandType,
@@ -29,16 +31,34 @@ function getEffectiveStatus(agent: Agent): Agent['status'] {
     return agent.status;
 }
 
-type DetailTab = 'summary' | 'response' | 'quarantine' | 'activity' | 'network' | 'software';
+type DetailTab =
+    | 'overview'
+    | 'response'
+    | 'quarantine'
+    | 'activity'
+    | 'network'
+    | 'configuration'
+    | 'software';
 
 const TAB_LABELS: { id: DetailTab; label: string }[] = [
-    { id: 'summary', label: 'Summary' },
-    { id: 'response', label: 'Response / Command Center' },
+    { id: 'overview', label: 'Overview' },
+    { id: 'response', label: 'Response' },
     { id: 'quarantine', label: 'Quarantine' },
-    { id: 'activity', label: 'Activity / Timeline' },
+    { id: 'activity', label: 'Activity' },
     { id: 'network', label: 'Network' },
-    { id: 'software', label: 'Software inventory' },
+    { id: 'configuration', label: 'Configuration' },
+    { id: 'software', label: 'Software' },
 ];
+
+/** Legacy `?tab=summary` from earlier builds → Overview. */
+const LEGACY_TAB_MAP: Record<string, DetailTab> = { summary: 'overview' };
+
+function normalizeTab(raw: string | null): DetailTab | null {
+    if (!raw) return null;
+    if (LEGACY_TAB_MAP[raw]) return LEGACY_TAB_MAP[raw];
+    if (TAB_LABELS.some((t) => t.id === (raw as DetailTab))) return raw as DetailTab;
+    return null;
+}
 
 const RESPONSE_OPTIONS: { value: CommandType; label: string; destructive?: boolean }[] = [
     { value: 'kill_process', label: 'Kill / terminate process' },
@@ -136,14 +156,14 @@ export default function EndpointDetail() {
     const { showToast } = useToast();
     const [searchParams, setSearchParams] = useSearchParams();
 
-    const tabFromUrl = searchParams.get('tab') as DetailTab | null;
-    const [tab, setTab] = useState<DetailTab>(() =>
-        tabFromUrl && TAB_LABELS.some((t) => t.id === tabFromUrl) ? tabFromUrl : 'summary'
-    );
+    const [tab, setTab] = useState<DetailTab>(() => {
+        const n = normalizeTab(searchParams.get('tab'));
+        return n ?? 'overview';
+    });
 
     useEffect(() => {
-        const t = searchParams.get('tab') as DetailTab | null;
-        if (t && TAB_LABELS.some((x) => x.id === t)) setTab(t);
+        const n = normalizeTab(searchParams.get('tab'));
+        if (n) setTab(n);
     }, [searchParams]);
 
     const setTabAndUrl = useCallback(
@@ -186,10 +206,12 @@ export default function EndpointDetail() {
         return rows.find((r) => r.agent_id === agentId);
     }, [riskPayload, agentId]);
 
+    const canViewAlerts = authApi.canViewAlerts();
+
     const { data: recentCmds } = useQuery({
-        queryKey: ['agent-commands', agentId, 'summary'],
+        queryKey: ['agent-commands', agentId, 'overview'],
         queryFn: () => agentsApi.getCommands(agentId, { limit: 5 }),
-        enabled: !!agentId && tab === 'summary',
+        enabled: !!agentId && tab === 'overview',
     });
 
     const { data: cmdPage, isLoading: cmdsLoading } = useQuery({
@@ -207,13 +229,38 @@ export default function EndpointDetail() {
     const { data: eventsPayload } = useQuery({
         queryKey: ['agent-events', agentId],
         queryFn: () => agentsApi.getAgentEvents(agentId),
-        enabled: !!agentId && tab === 'activity',
+        enabled: !!agentId && (tab === 'activity' || tab === 'overview'),
+    });
+
+    const { data: overviewAlerts, isLoading: overviewAlertsLoading } = useQuery({
+        queryKey: ['sigma-alerts-overview', agentId],
+        queryFn: () => alertsApi.list({ agent_id: agentId, limit: 6, order: 'desc' }),
+        enabled: !!agentId && tab === 'overview' && canViewAlerts,
     });
 
     const { data: alertsForAgent, isLoading: alertsLoading } = useQuery({
         queryKey: ['sigma-alerts', agentId],
         queryFn: () => alertsApi.list({ agent_id: agentId, limit: 80, order: 'desc' }),
-        enabled: !!agentId && tab === 'activity',
+        enabled: !!agentId && tab === 'activity' && canViewAlerts,
+    });
+
+    const { data: networkSearch, isLoading: networkSearchLoading } = useQuery({
+        queryKey: ['events-search-network', agentId],
+        queryFn: () =>
+            eventsApi.search({
+                filters: [
+                    { field: 'agent_id', operator: 'equals', value: agentId },
+                    { field: 'event_type', operator: 'equals', value: 'network' },
+                ],
+                logic: 'AND',
+                time_range: {
+                    from: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
+                    to: new Date().toISOString(),
+                },
+                limit: 50,
+                offset: 0,
+            }),
+        enabled: !!agentId && tab === 'network' && canViewAlerts,
     });
 
     const execMutation = useMutation({
@@ -365,13 +412,16 @@ export default function EndpointDetail() {
                 </div>
 
                 <div className="bg-white/80 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700 rounded-xl p-4 sm:p-6 shadow-sm">
-                    {tab === 'summary' && (
-                        <SummaryTab
+                    {tab === 'overview' && (
+                        <OverviewTab
                             agent={agent}
                             eff={eff}
                             riskRow={riskRow}
                             recent={recentCmds?.data || []}
                             lastCmd={lastCmd}
+                            overviewAlerts={overviewAlerts?.alerts ?? []}
+                            overviewAlertsLoading={overviewAlertsLoading}
+                            cmEvents={eventsPayload?.data || []}
                         />
                     )}
 
@@ -414,18 +464,25 @@ export default function EndpointDetail() {
                             events={eventsPayload?.data || []}
                             alerts={alertsForAgent?.alerts || []}
                             alertsLoading={alertsLoading}
+                            canViewAlerts={canViewAlerts}
                         />
                     )}
 
-                    {tab === 'network' && (
-                        <div className="text-sm text-slate-600 dark:text-slate-400 space-y-2">
-                            <p className="font-medium text-slate-800 dark:text-slate-200">Network activity</p>
-                            {/* TODO: Wire when events/search is connected to event store (filter event_type=network + agent_id). */}
-                            <p>
-                                Event-based network telemetry will appear here once <code className="text-xs">POST /api/v1/events/search</code> is wired to the event database.
+                    {tab === 'network' &&
+                        (canViewAlerts ? (
+                            <NetworkTab
+                                agentId={agentId}
+                                data={networkSearch?.data}
+                                loading={networkSearchLoading}
+                            />
+                        ) : (
+                            <p className="text-sm text-slate-500">
+                                Event search requires <code className="text-xs">alerts:read</code> (same guard as{' '}
+                                <code className="text-xs">POST /api/v1/events/search</code> on the server).
                             </p>
-                        </div>
-                    )}
+                        ))}
+
+                    {tab === 'configuration' && <ConfigurationTab agent={agent} />}
 
                     {tab === 'software' && (
                         <div className="text-sm text-slate-600 dark:text-slate-400 space-y-2">
@@ -461,19 +518,27 @@ export default function EndpointDetail() {
     );
 }
 
-function SummaryTab({
+function OverviewTab({
     agent,
     eff,
     riskRow,
     recent,
     lastCmd,
+    overviewAlerts,
+    overviewAlertsLoading,
+    cmEvents,
 }: {
     agent: Agent;
     eff: string;
     riskRow?: EndpointRiskSummary;
     recent: CommandListItem[];
     lastCmd?: CommandListItem;
+    overviewAlerts: Alert[];
+    overviewAlertsLoading: boolean;
+    cmEvents: CmEventSummary[];
 }) {
+    const tagEntries = Object.entries(agent.tags || {});
+
     return (
         <div className="space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -505,6 +570,7 @@ function SummaryTab({
                         <div className="flex justify-between gap-2"><dt className="text-slate-500">Agent</dt><dd className="text-right">v{agent.agent_version || '—'}</dd></div>
                         <div className="flex justify-between gap-2"><dt className="text-slate-500">Last seen</dt><dd className="text-right">{new Date(agent.last_seen).toLocaleString()}</dd></div>
                         <div className="flex justify-between gap-2"><dt className="text-slate-500">IPs</dt><dd className="text-right break-all">{(agent.ip_addresses || []).join(', ') || '—'}</dd></div>
+                        <div className="flex justify-between gap-2"><dt className="text-slate-500">Tags</dt><dd className="text-right break-all">{tagEntries.length ? tagEntries.map(([k, v]) => `${k}=${v}`).join(', ') : '—'}</dd></div>
                     </dl>
                 </div>
                 <div>
@@ -521,6 +587,47 @@ function SummaryTab({
                         <p className="text-slate-500 text-sm">No commands yet.</p>
                     )}
                 </div>
+            </div>
+
+            <div>
+                <h3 className="text-sm font-bold text-slate-700 dark:text-slate-200 mb-2 flex items-center gap-2">
+                    <Shield className="w-4 h-4" /> Recent Sigma alerts
+                </h3>
+                {overviewAlertsLoading ? (
+                    <Loader2 className="w-6 h-6 animate-spin text-cyan-500" />
+                ) : overviewAlerts.length === 0 ? (
+                    <p className="text-sm text-slate-500">No recent alerts for this device (or you lack alerts access).</p>
+                ) : (
+                    <ul className="space-y-2">
+                        {overviewAlerts.map((a) => (
+                            <li key={a.id} className="text-sm border border-slate-200 dark:border-slate-700 rounded-lg p-2 flex justify-between gap-2">
+                                <span className="font-medium text-slate-900 dark:text-slate-100 truncate">{a.rule_title || a.rule_id || 'Alert'}</span>
+                                <span className="text-xs text-slate-500 shrink-0">{a.severity || '—'}</span>
+                            </li>
+                        ))}
+                    </ul>
+                )}
+            </div>
+
+            <div>
+                <h3 className="text-sm font-bold text-slate-700 dark:text-slate-200 mb-2 flex items-center gap-2">
+                    <Network className="w-4 h-4" /> Telemetry snapshot (connection-manager)
+                </h3>
+                {cmEvents.length === 0 ? (
+                    <p className="text-sm text-slate-500">
+                        No raw events yet — <code className="text-xs">GET /api/v1/agents/:id/events</code> returns an empty list until the event store is wired in connection-manager.
+                    </p>
+                ) : (
+                    <ul className="text-sm space-y-1">
+                        {cmEvents.slice(0, 5).map((e) => (
+                            <li key={e.id} className="flex flex-wrap gap-x-2 border border-slate-100 dark:border-slate-800 rounded px-2 py-1">
+                                <span className="font-mono text-xs text-cyan-700 dark:text-cyan-300">{e.event_type}</span>
+                                <span className="text-slate-600 dark:text-slate-400">{e.summary}</span>
+                                <span className="text-xs text-slate-400 ml-auto">{new Date(e.timestamp).toLocaleString()}</span>
+                            </li>
+                        ))}
+                    </ul>
+                )}
             </div>
 
             <div>
@@ -550,6 +657,96 @@ function SummaryTab({
                     </table>
                 </div>
             </div>
+        </div>
+    );
+}
+
+function ConfigurationTab({ agent }: { agent: Agent }) {
+    const meta = agent.metadata || {};
+    const filterPolicy = meta.filter_policy_json || meta.filter_policy;
+
+    return (
+        <div className="space-y-6 text-sm">
+            <p className="text-slate-600 dark:text-slate-400">
+                Read-only view of labels and metadata returned by <code className="text-xs">GET /api/v1/agents/:id</code>. Full policy editing belongs on the Response tab (e.g. update_filter_policy).
+            </p>
+            <div>
+                <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100 mb-2 flex items-center gap-2">
+                    <Settings className="w-4 h-4" /> Tags
+                </h3>
+                {Object.keys(agent.tags || {}).length === 0 ? (
+                    <p className="text-slate-500">No tags.</p>
+                ) : (
+                    <pre className="text-xs bg-slate-100 dark:bg-slate-900 p-3 rounded-lg overflow-auto max-h-40">
+                        {JSON.stringify(agent.tags, null, 2)}
+                    </pre>
+                )}
+            </div>
+            <div>
+                <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100 mb-2">Metadata</h3>
+                {Object.keys(meta).length === 0 ? (
+                    <p className="text-slate-500">No metadata.</p>
+                ) : (
+                    <pre className="text-xs bg-slate-100 dark:bg-slate-900 p-3 rounded-lg overflow-auto max-h-64">
+                        {JSON.stringify(meta, null, 2)}
+                    </pre>
+                )}
+            </div>
+            {filterPolicy && (
+                <div>
+                    <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100 mb-2">Filter policy hint</h3>
+                    <p className="text-xs text-slate-500 mb-1">If the agent stores a serialized policy in metadata, it is shown here for review.</p>
+                    <pre className="text-xs bg-slate-100 dark:bg-slate-900 p-3 rounded-lg overflow-auto max-h-48 whitespace-pre-wrap break-all">
+                        {typeof filterPolicy === 'string' ? filterPolicy : JSON.stringify(filterPolicy, null, 2)}
+                    </pre>
+                </div>
+            )}
+        </div>
+    );
+}
+
+function NetworkTab({
+    agentId: _agentId,
+    data,
+    loading,
+}: {
+    agentId: string;
+    data: CmEventSummary[] | undefined;
+    loading: boolean;
+}) {
+    return (
+        <div className="space-y-4 text-sm">
+            <p className="text-slate-600 dark:text-slate-400">
+                Network-related events from <code className="text-xs">POST /api/v1/events/search</code> (filters: <code className="text-xs">agent_id</code> + <code className="text-xs">event_type=network</code>).
+            </p>
+            {loading ? (
+                <Loader2 className="w-8 h-8 animate-spin text-cyan-500" />
+            ) : !data || data.length === 0 ? (
+                <div className="rounded-lg border border-dashed border-slate-300 dark:border-slate-600 p-4 text-slate-500">
+                    No network events in this window. The connection-manager search handler currently returns an empty list until the event database is integrated — the UI will populate automatically once the backend is wired.
+                </div>
+            ) : (
+                <div className="overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-700">
+                    <table className="w-full text-left text-xs">
+                        <thead className="bg-slate-100 dark:bg-slate-800/80 text-slate-600 uppercase">
+                            <tr>
+                                <th className="p-2">Time</th>
+                                <th className="p-2">Type</th>
+                                <th className="p-2">Summary</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {data.map((e) => (
+                                <tr key={e.id} className="border-t border-slate-100 dark:border-slate-800">
+                                    <td className="p-2 whitespace-nowrap">{new Date(e.timestamp).toLocaleString()}</td>
+                                    <td className="p-2 font-mono">{e.event_type}</td>
+                                    <td className="p-2">{e.summary}</td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+            )}
         </div>
     );
 }
@@ -863,70 +1060,98 @@ function QuarantineTab({
     );
 }
 
+type TimelineRow =
+    | { kind: 'alert'; at: number; id: string; alert: Alert }
+    | { kind: 'event'; at: number; id: string; ev: CmEventSummary };
+
 function ActivityTab({
     events,
     alerts,
     alertsLoading,
+    canViewAlerts,
 }: {
-    events: unknown[];
+    events: CmEventSummary[];
     alerts: Alert[];
     alertsLoading: boolean;
+    canViewAlerts: boolean;
 }) {
     const merged = useMemo(() => {
-        const rows: { t: 'alert'; at: number; label: string; severity?: string; id: string }[] = [];
-        for (const a of alerts) {
-            const ts = new Date(a.timestamp || a.updated_at || a.created_at).getTime();
-            rows.push({
-                t: 'alert',
-                at: Number.isFinite(ts) ? ts : 0,
-                label: a.rule_title || a.rule_id || 'Alert',
-                severity: a.severity,
-                id: a.id,
-            });
+        const rows: TimelineRow[] = [];
+        if (canViewAlerts) {
+            for (const a of alerts) {
+                const ts = new Date(a.timestamp || a.updated_at || a.created_at).getTime();
+                rows.push({
+                    kind: 'alert',
+                    at: Number.isFinite(ts) ? ts : 0,
+                    id: `alert-${a.id}`,
+                    alert: a,
+                });
+            }
+        }
+        for (const e of events) {
+            const ts = new Date(e.timestamp).getTime();
+            rows.push({ kind: 'event', at: Number.isFinite(ts) ? ts : 0, id: `ev-${e.id}`, ev: e });
         }
         rows.sort((a, b) => b.at - a.at);
         return rows;
-    }, [alerts]);
+    }, [alerts, events, canViewAlerts]);
 
     return (
         <div className="space-y-6">
             <div>
                 <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100 mb-2 flex items-center gap-2">
-                    <Network className="w-4 h-4" /> Endpoint events (connection-manager)
+                    <Activity className="w-4 h-4" /> Timeline (Sigma + connection-manager events)
                 </h3>
-                {events.length === 0 ? (
+                {!canViewAlerts && (
+                    <p className="text-sm text-amber-700 dark:text-amber-300 mb-2">
+                        Sigma alerts are hidden — your role does not include alerts read. Connection-manager events still appear below when available.
+                    </p>
+                )}
+                {alertsLoading && canViewAlerts ? (
+                    <Loader2 className="w-6 h-6 animate-spin text-cyan-500" />
+                ) : merged.length === 0 ? (
                     <p className="text-sm text-slate-500">
-                        Event telemetry view coming soon — <code className="text-xs">GET /api/v1/agents/:id/events</code> is not wired to the event store yet.
+                        No timeline entries yet. Alerts need Sigma data; raw events need <code className="text-xs">GET /api/v1/agents/:id/events</code> populated on the server.
                     </p>
                 ) : (
-                    <pre className="text-xs bg-slate-100 dark:bg-slate-900 p-3 rounded-lg overflow-auto max-h-48">{JSON.stringify(events, null, 2)}</pre>
-                )}
-            </div>
-
-            <div>
-                <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100 mb-2 flex items-center gap-2">
-                    <Shield className="w-4 h-4" /> Sigma alerts (this device)
-                </h3>
-                {alertsLoading ? <Loader2 className="w-6 h-6 animate-spin text-cyan-500" /> : merged.length === 0 ? (
-                    <p className="text-sm text-slate-500">No alerts for this agent in the current window.</p>
-                ) : (
                     <ul className="space-y-2">
-                        {merged.map((r) => (
-                            <li key={r.id} className="flex items-start gap-3 text-sm border border-slate-200 dark:border-slate-700 rounded-lg p-3">
-                                {r.severity === 'critical' || r.severity === 'high' ? (
-                                    <XCircle className="w-4 h-4 text-rose-500 shrink-0 mt-0.5" />
-                                ) : (
-                                    <CheckCircle2 className="w-4 h-4 text-slate-400 shrink-0 mt-0.5" />
-                                )}
-                                <div>
-                                    <div className="font-medium text-slate-900 dark:text-slate-100">{r.label}</div>
-                                    <div className="text-xs text-slate-500">{new Date(r.at).toLocaleString()} · {r.severity || '—'}</div>
-                                    <Link className="text-xs text-cyan-600 hover:underline mt-1 inline-block" to="/alerts">
-                                        Open Alerts
-                                    </Link>
-                                </div>
-                            </li>
-                        ))}
+                        {merged.map((r) =>
+                            r.kind === 'alert' ? (
+                                <li
+                                    key={r.id}
+                                    className="flex items-start gap-3 text-sm border border-slate-200 dark:border-slate-700 rounded-lg p-3"
+                                >
+                                    {r.alert.severity === 'critical' || r.alert.severity === 'high' ? (
+                                        <XCircle className="w-4 h-4 text-rose-500 shrink-0 mt-0.5" />
+                                    ) : (
+                                        <CheckCircle2 className="w-4 h-4 text-slate-400 shrink-0 mt-0.5" />
+                                    )}
+                                    <div>
+                                        <div className="font-medium text-slate-900 dark:text-slate-100">
+                                            {r.alert.rule_title || r.alert.rule_id || 'Alert'}
+                                        </div>
+                                        <div className="text-xs text-slate-500">
+                                            {new Date(r.at).toLocaleString()} · Sigma · {r.alert.severity || '—'}
+                                        </div>
+                                        <Link className="text-xs text-cyan-600 hover:underline mt-1 inline-block" to="/alerts">
+                                            Open Alerts
+                                        </Link>
+                                    </div>
+                                </li>
+                            ) : (
+                                <li
+                                    key={r.id}
+                                    className="flex items-start gap-3 text-sm border border-slate-200 dark:border-slate-700 rounded-lg p-3"
+                                >
+                                    <Network className="w-4 h-4 text-cyan-500 shrink-0 mt-0.5" />
+                                    <div>
+                                        <div className="font-mono text-xs text-cyan-700 dark:text-cyan-300">{r.ev.event_type}</div>
+                                        <div className="text-slate-800 dark:text-slate-100">{r.ev.summary}</div>
+                                        <div className="text-xs text-slate-500">{new Date(r.at).toLocaleString()} · CM event</div>
+                                    </div>
+                                </li>
+                            )
+                        )}
                     </ul>
                 )}
             </div>

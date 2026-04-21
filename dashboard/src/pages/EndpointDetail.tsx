@@ -4,6 +4,7 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
     ArrowLeft, Activity, Terminal, Shield, HardDrive, Clock, Loader2,
     Server, Network, AlertTriangle, CheckCircle2, XCircle, Settings,
+    RefreshCw, ChevronLeft, ChevronRight,
 } from 'lucide-react';
 import {
     agentsApi,
@@ -19,8 +20,8 @@ import {
     type EndpointRiskSummary,
     type QuarantineItem,
 } from '../api/client';
-import { AgentDeepDivePanel, EventDetailModal, Modal, useToast } from '../components';
-import { getEffectiveStatus } from '../utils/agentDisplay';
+import { EventDetailModal, Modal, useToast } from '../components';
+import { formatRelativeTime, getEffectiveStatus } from '../utils/agentDisplay';
 
 type DetailTab =
     | 'overview'
@@ -235,25 +236,6 @@ export default function EndpointDetail() {
         enabled: !!agentId && tab === 'activity' && canViewAlerts,
     });
 
-    const { data: networkSearch, isLoading: networkSearchLoading } = useQuery({
-        queryKey: ['events-search-network', agentId],
-        queryFn: () =>
-            eventsApi.search({
-                filters: [
-                    { field: 'agent_id', operator: 'equals', value: agentId },
-                    { field: 'event_type', operator: 'equals', value: 'network' },
-                ],
-                logic: 'AND',
-                time_range: {
-                    from: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
-                    to: new Date().toISOString(),
-                },
-                limit: 50,
-                offset: 0,
-            }),
-        enabled: !!agentId && tab === 'network' && canViewAlerts,
-    });
-
     const execMutation = useMutation({
         mutationFn: (req: CommandRequest) => agentsApi.executeCommand(agentId, req),
         onSuccess: (data) => {
@@ -391,8 +373,6 @@ export default function EndpointDetail() {
                     </div>
                 </div>
 
-                <AgentDeepDivePanel agent={agent} />
-
                 <div className="flex flex-wrap gap-1 border-b border-slate-200 dark:border-slate-700 pb-px">
                     {TAB_LABELS.map(({ id, label }) => (
                         <button
@@ -469,12 +449,7 @@ export default function EndpointDetail() {
 
                     {tab === 'network' &&
                         (canViewAlerts ? (
-                            <NetworkTab
-                                agentId={agentId}
-                                data={networkSearch?.data}
-                                loading={networkSearchLoading}
-                                canViewAlerts={canViewAlerts}
-                            />
+                            <NetworkTab agentId={agentId} canViewAlerts={canViewAlerts} />
                         ) : (
                             <p className="text-sm text-slate-500">
                                 Event search requires <code className="text-xs">alerts:read</code> (same guard as{' '}
@@ -538,6 +513,15 @@ function OverviewTab({
     cmEvents: CmEventSummary[];
 }) {
     const tagEntries = Object.entries(agent.tags || {});
+    const eventsCollected = agent.events_collected || agent.events_delivered || 0;
+    const eventsDropped = agent.events_dropped || 0;
+    const eventsDelivered = agent.events_delivered || 0;
+    const dropRate = eventsCollected > 0 ? (eventsDropped / eventsCollected) * 100 : 0;
+    const deliveryRate = eventsCollected > 0 ? (eventsDelivered / eventsCollected) * 100 : 0;
+    const certExpiry = agent.cert_expires_at ? new Date(agent.cert_expires_at) : null;
+    const certDaysLeft = certExpiry ? Math.ceil((certExpiry.getTime() - Date.now()) / 86400000) : null;
+    const cpuPct = agent.cpu_usage || 0;
+    const memPct = agent.memory_mb && agent.memory_used_mb ? Math.min(100, (agent.memory_used_mb / agent.memory_mb) * 100) : 0;
 
     return (
         <div className="space-y-6">
@@ -571,6 +555,9 @@ function OverviewTab({
                         <div className="flex justify-between gap-2"><dt className="text-slate-500">Last seen</dt><dd className="text-right">{new Date(agent.last_seen).toLocaleString()}</dd></div>
                         <div className="flex justify-between gap-2"><dt className="text-slate-500">IPs</dt><dd className="text-right break-all">{(agent.ip_addresses || []).join(', ') || '—'}</dd></div>
                         <div className="flex justify-between gap-2"><dt className="text-slate-500">Tags</dt><dd className="text-right break-all">{tagEntries.length ? tagEntries.map(([k, v]) => `${k}=${v}`).join(', ') : '—'}</dd></div>
+                        <div className="flex justify-between gap-2"><dt className="text-slate-500">Installed</dt><dd className="text-right">{agent.installed_date ? new Date(agent.installed_date).toLocaleDateString() : '—'}</dd></div>
+                        <div className="flex justify-between gap-2"><dt className="text-slate-500">Enrolled</dt><dd className="text-right">{agent.created_at ? new Date(agent.created_at).toLocaleDateString() : '—'}</dd></div>
+                        <div className="flex justify-between gap-2"><dt className="text-slate-500">Cert ID</dt><dd className="text-right font-mono text-xs break-all">{agent.current_cert_id || '—'}</dd></div>
                     </dl>
                 </div>
                 <div>
@@ -586,6 +573,42 @@ function OverviewTab({
                     ) : (
                         <p className="text-slate-500 text-sm">No commands yet.</p>
                     )}
+                </div>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                <div className="rounded-lg border border-slate-200 dark:border-slate-700 p-4 bg-slate-50/80 dark:bg-slate-800/40">
+                    <div className="text-xs font-semibold text-slate-500 uppercase mb-2 flex items-center gap-2">
+                        <Network className="w-4 h-4" /> Network & mTLS
+                    </div>
+                    <div className="text-sm space-y-1.5">
+                        <div className="flex justify-between gap-2"><span className="text-slate-500">Heartbeat age</span><span>{formatRelativeTime(agent.last_seen)}</span></div>
+                        <div className="flex justify-between gap-2"><span className="text-slate-500">IPs</span><span className="text-right break-all">{(agent.ip_addresses || []).join(', ') || '—'}</span></div>
+                        <div className="flex justify-between gap-2"><span className="text-slate-500">mTLS</span><span>{certDaysLeft != null ? (certDaysLeft > 0 ? `Valid (${certDaysLeft}d)` : 'Expired') : '—'}</span></div>
+                        <div className="flex justify-between gap-2"><span className="text-slate-500">Expiry</span><span>{certExpiry ? certExpiry.toLocaleDateString() : '—'}</span></div>
+                    </div>
+                </div>
+                <div className="rounded-lg border border-slate-200 dark:border-slate-700 p-4 bg-slate-50/80 dark:bg-slate-800/40">
+                    <div className="text-xs font-semibold text-slate-500 uppercase mb-2 flex items-center gap-2">
+                        <HardDrive className="w-4 h-4" /> Health & QoS
+                    </div>
+                    <div className="text-sm space-y-1.5">
+                        <div className="flex justify-between gap-2"><span className="text-slate-500">Events collected</span><span className="font-mono text-xs">{eventsCollected.toLocaleString()}</span></div>
+                        <div className="flex justify-between gap-2"><span className="text-slate-500">Delivered</span><span className="font-mono text-xs">{eventsDelivered.toLocaleString()}</span></div>
+                        <div className="flex justify-between gap-2"><span className="text-slate-500">Dropped</span><span className="font-mono text-xs">{eventsDropped.toLocaleString()}</span></div>
+                        <div className="flex justify-between gap-2"><span className="text-slate-500">Drop rate</span><span className="font-mono text-xs">{dropRate.toFixed(1)}%</span></div>
+                        <div className="flex justify-between gap-2"><span className="text-slate-500">Delivery</span><span className="font-mono text-xs">{deliveryRate.toFixed(1)}%</span></div>
+                    </div>
+                </div>
+                <div className="rounded-lg border border-slate-200 dark:border-slate-700 p-4 bg-slate-50/80 dark:bg-slate-800/40">
+                    <div className="text-xs font-semibold text-slate-500 uppercase mb-2 flex items-center gap-2">
+                        <Settings className="w-4 h-4" /> Resource usage
+                    </div>
+                    <div className="text-sm space-y-1.5">
+                        <div className="flex justify-between gap-2"><span className="text-slate-500">CPU</span><span className="font-mono text-xs">{cpuPct.toFixed(1)}%</span></div>
+                        <div className="flex justify-between gap-2"><span className="text-slate-500">Memory</span><span className="font-mono text-xs">{agent.memory_used_mb || 0} / {agent.memory_mb || '—'} MB ({memPct.toFixed(0)}%)</span></div>
+                        <div className="flex justify-between gap-2"><span className="text-slate-500">Queue depth</span><span className="font-mono text-xs">{(agent.queue_depth || 0).toLocaleString()}</span></div>
+                    </div>
                 </div>
             </div>
 
@@ -664,6 +687,35 @@ function OverviewTab({
 function ConfigurationTab({ agent }: { agent: Agent }) {
     const meta = agent.metadata || {};
     const filterPolicy = meta.filter_policy_json || meta.filter_policy;
+    const { showToast } = useToast();
+    const canPushPolicy = authApi.canPushPolicy();
+    const queryClient = useQueryClient();
+    const [policyJson, setPolicyJson] = useState(
+        JSON.stringify(
+            {
+                exclude_processes: ['svchost.exe'],
+                exclude_event_ids: [4, 7, 15, 22],
+                trusted_hashes: [],
+                rate_limit: { enabled: true, default_max_eps: 500, critical_bypass: true },
+            },
+            null,
+            2
+        )
+    );
+    const [policyError, setPolicyError] = useState('');
+
+    const policyMutation = useMutation({
+        mutationFn: async () => {
+            const parsed = JSON.parse(policyJson);
+            return agentsApi.updateFilterPolicy(agent.id, parsed);
+        },
+        onSuccess: (data) => {
+            showToast(`Filter policy pushed (Command ID: ${data.command_id})`, 'success');
+            queryClient.invalidateQueries({ queryKey: ['agent', agent.id] });
+            queryClient.invalidateQueries({ queryKey: ['agent-commands', agent.id] });
+        },
+        onError: (e: Error) => showToast(e.message || 'Policy push failed', 'error'),
+    });
 
     return (
         <div className="space-y-6 text-sm">
@@ -701,75 +753,247 @@ function ConfigurationTab({ agent }: { agent: Agent }) {
                     </pre>
                 </div>
             )}
+
+            <div className="rounded-lg border border-slate-200 dark:border-slate-700 p-4 bg-white/60 dark:bg-slate-900/40">
+                <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100 mb-2">Filter policy</h3>
+                <p className="text-xs text-slate-500 mb-2">
+                    Push a new policy via <code className="text-xs">POST /api/v1/agents/:id/filter-policy</code> (implemented as a command on the agent).
+                </p>
+                <textarea
+                    className="w-full rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-950 px-3 py-2 text-xs font-mono min-h-[180px]"
+                    value={policyJson}
+                    onChange={(e) => {
+                        setPolicyJson(e.target.value);
+                        setPolicyError('');
+                    }}
+                    spellCheck={false}
+                    disabled={!canPushPolicy}
+                />
+                {policyError ? <p className="text-xs text-rose-600 mt-2">{policyError}</p> : null}
+                <div className="flex items-center justify-end gap-2 mt-3">
+                    {!canPushPolicy ? (
+                        <span className="text-xs text-slate-500">Missing permission to push policy.</span>
+                    ) : null}
+                    <button
+                        type="button"
+                        disabled={!canPushPolicy || policyMutation.isPending}
+                        onClick={() => {
+                            try {
+                                JSON.parse(policyJson);
+                            } catch {
+                                setPolicyError('Invalid JSON — check syntax before pushing');
+                                return;
+                            }
+                            policyMutation.mutate();
+                        }}
+                        className="px-3 py-2 rounded-lg text-xs font-semibold bg-cyan-600 hover:bg-cyan-700 text-white disabled:opacity-50"
+                    >
+                        {policyMutation.isPending ? 'Pushing…' : 'Push policy to agent'}
+                    </button>
+                </div>
+            </div>
         </div>
     );
 }
 
-function NetworkTab({
-    agentId: _agentId,
-    data,
-    loading,
-    canViewAlerts,
-}: {
-    agentId: string;
-    data: CmEventSummary[] | undefined;
-    loading: boolean;
-    canViewAlerts: boolean;
-}) {
+const NETWORK_PAGE_SIZE = 25;
+
+function NetworkTab({ agentId, canViewAlerts }: { agentId: string; canViewAlerts: boolean }) {
+    const queryClient = useQueryClient();
     const [detailId, setDetailId] = useState<string | null>(null);
+    const [rangeDays, setRangeDays] = useState<7 | 30 | 90>(30);
+    const [page, setPage] = useState(1);
+
+    const { from, to } = useMemo(() => {
+        const toDate = new Date();
+        const fromDate = new Date(Date.now() - rangeDays * 24 * 60 * 60 * 1000);
+        return { from: fromDate.toISOString(), to: toDate.toISOString() };
+    }, [rangeDays]);
+
+    useEffect(() => {
+        setPage(1);
+    }, [rangeDays]);
+
+    const offset = (page - 1) * NETWORK_PAGE_SIZE;
+
+    const networkSearch = useQuery({
+        queryKey: ['events-search-network', agentId, from, to, offset, NETWORK_PAGE_SIZE],
+        queryFn: () =>
+            eventsApi.search({
+                filters: [
+                    { field: 'agent_id', operator: 'equals', value: agentId },
+                    { field: 'event_type', operator: 'equals', value: 'network' },
+                ],
+                logic: 'AND',
+                time_range: { from, to },
+                limit: NETWORK_PAGE_SIZE,
+                offset,
+            }),
+        enabled: !!agentId && canViewAlerts,
+        staleTime: 15_000,
+        retry: 1,
+    });
+
+    const rows = networkSearch.data?.data ?? [];
+    const total = networkSearch.data?.pagination?.total ?? 0;
+    const loading = networkSearch.isLoading;
+    const totalPages = Math.max(1, Math.ceil(total / NETWORK_PAGE_SIZE));
+
+    useEffect(() => {
+        if (page > totalPages) setPage(totalPages);
+    }, [page, totalPages]);
+
+    const eventsPageHref = useMemo(() => {
+        const p = new URLSearchParams();
+        p.set('agent_id', agentId);
+        p.set('event_type', 'network');
+        p.set('from', from);
+        p.set('to', to);
+        p.set('page', '1');
+        return `/events?${p.toString()}`;
+    }, [agentId, from, to]);
+
+    const refetchNetwork = () => {
+        void queryClient.invalidateQueries({ queryKey: ['events-search-network', agentId] });
+    };
 
     return (
         <div className="space-y-4 text-sm">
-            <p className="text-slate-600 dark:text-slate-400">
-                Network-related events from <code className="text-xs">POST /api/v1/events/search</code> (filters:{' '}
-                <code className="text-xs">agent_id</code> + <code className="text-xs">event_type=network</code>). Click a row for raw JSON.
-            </p>
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                <p className="text-slate-600 dark:text-slate-400 max-w-3xl">
+                    Network telemetry via <code className="text-xs">POST /api/v1/events/search</code> — filters{' '}
+                    <code className="text-xs">agent_id</code> + <code className="text-xs">event_type=network</code>. Click a row for raw JSON (
+                    <code className="text-xs">GET /api/v1/events/:id</code>).
+                </p>
+                <div className="flex flex-wrap items-center gap-2 shrink-0">
+                    <Link
+                        to={eventsPageHref}
+                        className="px-3 py-1.5 rounded-lg text-xs font-semibold border border-slate-200 dark:border-slate-600 bg-white/70 dark:bg-slate-900/50 text-cyan-700 dark:text-cyan-300 hover:bg-slate-100 dark:hover:bg-slate-800"
+                    >
+                        Open in Events
+                    </Link>
+                    <button
+                        type="button"
+                        onClick={refetchNetwork}
+                        disabled={networkSearch.isFetching}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border border-slate-200 dark:border-slate-600 bg-white/70 dark:bg-slate-900/50 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-50"
+                        title="Refresh list"
+                    >
+                        <RefreshCw className={`w-3.5 h-3.5 ${networkSearch.isFetching ? 'animate-spin' : ''}`} />
+                        Refresh
+                    </button>
+                </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+                <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Time range</span>
+                {([7, 30, 90] as const).map((d) => (
+                    <button
+                        key={d}
+                        type="button"
+                        onClick={() => setRangeDays(d)}
+                        className={`px-2.5 py-1 rounded-md text-xs font-medium border transition-colors ${
+                            rangeDays === d
+                                ? 'border-cyan-500/60 bg-cyan-500/10 text-cyan-800 dark:text-cyan-200'
+                                : 'border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+                        }`}
+                    >
+                        Last {d} days
+                    </button>
+                ))}
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500 dark:text-slate-400">
+                <span>
+                    {loading ? 'Loading…' : <>Showing {rows.length} row{rows.length !== 1 ? 's' : ''}</>}
+                    {!loading && total > 0 && (
+                        <>
+                            {' '}
+                            · total <span className="font-mono text-slate-700 dark:text-slate-200">{total}</span> in range
+                        </>
+                    )}
+                </span>
+                <span className="font-mono text-[10px] truncate max-w-[min(100%,420px)]" title={`${from} → ${to}`}>
+                    {from.slice(0, 19)}Z → {to.slice(0, 19)}Z
+                </span>
+            </div>
+
             {loading ? (
-                <Loader2 className="w-8 h-8 animate-spin text-cyan-500" />
-            ) : !data || data.length === 0 ? (
+                <div className="flex justify-center py-12">
+                    <Loader2 className="w-8 h-8 animate-spin text-cyan-500" />
+                </div>
+            ) : rows.length === 0 ? (
                 <div className="rounded-lg border border-dashed border-slate-300 dark:border-slate-600 p-4 text-slate-500">
-                    No network events in this window. Widen the time range on the Events page or generate telemetry; if search stays empty, verify nginx proxies <code className="text-xs">/api/v1/events/</code> to connection-manager.
+                    No network events in this window. Try <strong>Last 90 days</strong>, generate outbound telemetry from the agent, or open{' '}
+                    <Link className="text-cyan-600 dark:text-cyan-400 underline" to={eventsPageHref}>
+                        Events
+                    </Link>
+                    . If the list stays empty, confirm nginx proxies <code className="text-xs">/api/v1/events/</code> to connection-manager.
                 </div>
             ) : (
-                <div className="overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-700">
-                    <table className="w-full text-left text-xs">
-                        <thead className="bg-slate-100 dark:bg-slate-800/80 text-slate-600 uppercase">
-                            <tr>
-                                <th className="p-2">Time</th>
-                                <th className="p-2">Type</th>
-                                <th className="p-2">Summary</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {data.map((e) => (
-                                <tr
-                                    key={e.id}
-                                    role="button"
-                                    tabIndex={0}
-                                    className="border-t border-slate-100 dark:border-slate-800 cursor-pointer hover:bg-slate-50/90 dark:hover:bg-slate-800/40"
-                                    onClick={() => setDetailId(e.id)}
-                                    onKeyDown={(ev) => {
-                                        if (ev.key === 'Enter' || ev.key === ' ') {
-                                            ev.preventDefault();
-                                            setDetailId(e.id);
-                                        }
-                                    }}
-                                >
-                                    <td className="p-2 whitespace-nowrap">{new Date(e.timestamp).toLocaleString()}</td>
-                                    <td className="p-2 font-mono">{e.event_type}</td>
-                                    <td className="p-2">{e.summary}</td>
+                <>
+                    <div className="overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-700">
+                        <table className="w-full text-left text-xs">
+                            <thead className="bg-slate-100 dark:bg-slate-800/80 text-slate-600 uppercase">
+                                <tr>
+                                    <th className="p-2">Time</th>
+                                    <th className="p-2">Type</th>
+                                    <th className="p-2">Summary</th>
                                 </tr>
-                            ))}
-                        </tbody>
-                    </table>
-                </div>
+                            </thead>
+                            <tbody>
+                                {rows.map((e: CmEventSummary) => (
+                                    <tr
+                                        key={e.id}
+                                        role="button"
+                                        tabIndex={0}
+                                        className="border-t border-slate-100 dark:border-slate-800 cursor-pointer hover:bg-slate-50/90 dark:hover:bg-slate-800/40"
+                                        onClick={() => setDetailId(e.id)}
+                                        onKeyDown={(ev) => {
+                                            if (ev.key === 'Enter' || ev.key === ' ') {
+                                                ev.preventDefault();
+                                                setDetailId(e.id);
+                                            }
+                                        }}
+                                    >
+                                        <td className="p-2 whitespace-nowrap">{new Date(e.timestamp).toLocaleString()}</td>
+                                        <td className="p-2 font-mono">{e.event_type}</td>
+                                        <td className="p-2 max-w-xl truncate" title={e.summary}>
+                                            {e.summary}
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+
+                    {totalPages > 1 && (
+                        <div className="flex items-center justify-between gap-3 pt-1">
+                            <button
+                                type="button"
+                                className="inline-flex items-center gap-1 px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-medium disabled:opacity-40"
+                                disabled={page <= 1}
+                                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                            >
+                                <ChevronLeft className="w-4 h-4" /> Prev
+                            </button>
+                            <span className="text-xs text-slate-500">
+                                Page <span className="font-semibold text-slate-700 dark:text-slate-200">{page}</span> / {totalPages}
+                            </span>
+                            <button
+                                type="button"
+                                className="inline-flex items-center gap-1 px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-medium disabled:opacity-40"
+                                disabled={page >= totalPages}
+                                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                            >
+                                Next <ChevronRight className="w-4 h-4" />
+                            </button>
+                        </div>
+                    )}
+                </>
             )}
 
-            <EventDetailModal
-                eventId={detailId}
-                onClose={() => setDetailId(null)}
-                fetchEnabled={canViewAlerts}
-            />
+            <EventDetailModal eventId={detailId} onClose={() => setDetailId(null)} fetchEnabled={canViewAlerts} />
         </div>
     );
 }

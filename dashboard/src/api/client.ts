@@ -468,6 +468,34 @@ export const statsApi = {
 // Connection Manager Agents APIs
 // ============================================================================
 
+/** Event row from connection-manager event APIs (`/agents/:id/events`, `/events/search`). */
+export interface CmEventSummary {
+    id: string;
+    agent_id: string;
+    event_type: string;
+    timestamp: string;
+    summary: string;
+}
+
+/** Body for `POST /api/v1/events/search` (matches connection-manager EventSearchRequest). */
+export interface EventSearchRequestBody {
+    filters: { field: string; operator: string; value: unknown }[];
+    logic: 'AND' | 'OR';
+    time_range: { from: string; to: string };
+    limit: number;
+    offset: number;
+}
+
+export const eventsApi = {
+    search: async (body: EventSearchRequestBody) => {
+        const response = await connectionApi.post<{
+            data: CmEventSummary[];
+            pagination: { total: number; limit: number; offset: number; has_more?: boolean };
+        }>('/api/v1/events/search', body);
+        return response.data;
+    },
+};
+
 export const agentsApi = {
     list: async (params?: {
         limit?: number;
@@ -558,10 +586,10 @@ export const agentsApi = {
         );
         return response.data;
     },
-    /** Stub backend: returns empty list until event store is wired. */
+    /** Returns `data: []` until connection-manager wires the event store (see GetAgentEvents TODO). */
     getAgentEvents: async (agentId: string) => {
         const response = await connectionApi.get<{
-            data: unknown[];
+            data: CmEventSummary[];
             pagination?: { total: number; limit: number; offset: number; has_more?: boolean };
         }>(`/api/v1/agents/${agentId}/events`);
         return response.data;

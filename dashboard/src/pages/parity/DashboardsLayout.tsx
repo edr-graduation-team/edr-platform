@@ -19,8 +19,8 @@ export default function DashboardsLayout() {
                 <div>
                     <h1 className="text-xl font-bold text-gray-900 dark:text-white">Dashboards</h1>
                     <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
-                        OpenEDR-style dashboard family — use the top second menu to switch views; parity APIs fall back to
-                        demo data when unavailable.
+                        Service and Endpoint tabs use live connection-manager and Sigma stats; other views may use parity
+                        fallbacks until APIs exist.
                     </p>
                 </div>
             </div>

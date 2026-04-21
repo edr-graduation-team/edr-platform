@@ -41,6 +41,7 @@ export const SOC_CONTEXT_TABS: ContextTab[] = [
     { to: '/', label: 'Overview' },
     { to: '/stats', label: 'Statistics' },
     { to: '/alerts', label: 'Alerts' },
+    { to: '/events', label: 'Events' },
     { to: '/endpoints', label: 'Endpoints' },
     { to: '/endpoint-risk', label: 'Risk Intelligence' },
     { to: '/threats', label: 'Threats' },

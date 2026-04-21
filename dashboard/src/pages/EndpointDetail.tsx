@@ -391,6 +391,12 @@ export default function EndpointDetail() {
                         >
                             Action Center (filtered)
                         </Link>
+                        <Link
+                            to={`/events?agent_id=${encodeURIComponent(agent.id)}`}
+                            className="px-3 py-1 rounded-lg text-xs font-semibold bg-slate-500/10 text-slate-700 dark:text-slate-300 border border-slate-500/20 hover:bg-slate-500/20"
+                        >
+                            Events (filtered)
+                        </Link>
                     </div>
                 </div>
 

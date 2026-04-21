@@ -49,6 +49,7 @@ type EventHandler struct {
 	agentService  service.AgentService         // Persists status to PostgreSQL
 	commandRepo    repository.CommandRepository    // Re-delivers pending commands on reconnect
 	quarantineRepo repository.QuarantineRepository // Optional: quarantine inventory from telemetry
+	eventRepo      repository.EventRepository      // Optional: durable event store for REST search
 }
 
 // NewEventHandler creates a new event handler.
@@ -90,6 +91,11 @@ func (h *EventHandler) SetCommandRepo(repo repository.CommandRepository) {
 // SetQuarantineRepo sets optional persistence for per-agent quarantine inventory.
 func (h *EventHandler) SetQuarantineRepo(repo repository.QuarantineRepository) {
 	h.quarantineRepo = repo
+}
+
+// SetEventRepo sets optional durable event repository for search/list APIs.
+func (h *EventHandler) SetEventRepo(repo repository.EventRepository) {
+	h.eventRepo = repo
 }
 
 // SetFallbackStore sets the PostgreSQL fallback store.
@@ -712,6 +718,16 @@ func (h *EventHandler) processBatch(ctx context.Context, agentID string, batch *
 	h.noteAutonomousResponseEvents(logger, agentID, batch, events)
 	h.persistQuarantineFromEvents(ctx, agentID, events)
 
+	// 6b. Persist searchable events to PostgreSQL for REST /events/search.
+	// This is independent from Kafka: even when Kafka is enabled, we still
+	// store a searchable subset so the dashboard can investigate without
+	// needing a separate event warehouse.
+	if h.eventRepo != nil {
+		if err := h.persistEventsToDB(ctx, agentID, batch, events); err != nil {
+			logger.WithError(err).Warn("Failed to persist events to DB (search UI may show empty results)")
+		}
+	}
+
 	// 7. Publish each event individually to Kafka (agent_id as partition key). Respect context cancellation.
 	if h.kafkaProducer != nil {
 		for i, ev := range events {
@@ -769,6 +785,71 @@ func (h *EventHandler) processBatch(ctx context.Context, agentID string, batch *
 		ServerStatus: edrv1.ServerStatus_SERVER_STATUS_OK,
 		AckBatchId:   batch.BatchId,
 	}, nil
+}
+
+func (h *EventHandler) persistEventsToDB(ctx context.Context, agentID string, batch *edrv1.EventBatch, events []map[string]interface{}) error {
+	agentUUID, err := uuid.Parse(agentID)
+	if err != nil {
+		return fmt.Errorf("invalid agent_id: %w", err)
+	}
+
+	var batchUUID *uuid.UUID
+	if batch != nil && batch.GetBatchId() != "" {
+		if bid, err := uuid.Parse(batch.GetBatchId()); err == nil {
+			batchUUID = &bid
+		}
+	}
+
+	rows := make([]repository.EventInsert, 0, len(events))
+	for _, ev := range events {
+		raw, err := json.Marshal(ev)
+		if err != nil {
+			continue
+		}
+
+		etype, _ := ev["event_type"].(string)
+		severity, _ := ev["severity"].(string)
+		if severity == "" {
+			severity = "informational"
+		}
+		tsStr, _ := ev["timestamp"].(string)
+		ts, err := time.Parse(time.RFC3339, tsStr)
+		if err != nil {
+			// best-effort: allow timestamp-less persistence to now
+			ts = time.Now().UTC()
+		}
+
+		summary := ""
+		if s, ok := ev["summary"].(string); ok {
+			summary = s
+		} else if data, ok := ev["data"].(map[string]interface{}); ok {
+			// common field used by many agents
+			if s, ok := data["summary"].(string); ok {
+				summary = s
+			}
+		}
+		if summary == "" {
+			summary = fmt.Sprintf("%s event", etype)
+		}
+
+		rows = append(rows, repository.EventInsert{
+			ID:        uuid.New(),
+			AgentID:   agentUUID,
+			BatchID:   batchUUID,
+			EventType: etype,
+			Severity:  severity,
+			Timestamp: ts.UTC(),
+			Summary:   summary,
+			Raw:       raw,
+		})
+	}
+	if len(rows) == 0 {
+		return nil
+	}
+
+	dbCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	return h.eventRepo.InsertMany(dbCtx, rows)
 }
 
 // validateBatch validates the event batch structure.

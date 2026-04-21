@@ -693,7 +693,7 @@ export default function Endpoints() {
             {/* Background ambient glow effect for Endpoints interface */}
             <div className="absolute top-1/4 right-1/4 w-[600px] h-[600px] pointer-events-none -translate-y-1/2 translate-x-1/3" style={{ background: 'radial-gradient(circle, rgba(59,130,246,0.08) 0%, transparent 70%)' }} />
             
-            <div className="relative flex-1 flex flex-col min-h-0 max-w-[1800px] mx-auto w-full space-y-4 lg:space-y-5">
+            <div className="relative flex-1 flex flex-col min-h-0  w-full space-y-4 lg:space-y-5">
                 <div className="flex flex-wrap items-center justify-between gap-3 shrink-0">
                     <div>
                         <h1 className="text-2xl sm:text-3xl font-bold text-slate-900 dark:text-white tracking-tight">Devices (Fleet)</h1>

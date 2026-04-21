@@ -674,15 +674,110 @@ code, pre, .font-mono {
 }
 
 /* ============================================================
-   SCROLLBAR — HIDDEN GLOBALLY
+   SCROLLBAR — HIDDEN GLOBALLY (thin on scrollable panes)
    ============================================================ */
 ::-webkit-scrollbar {
-  display: none;
+  width: 6px;
+  height: 6px;
 }
 
-* {
-  scrollbar-width: none;
-  -ms-overflow-style: none;
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.3);
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.5);
+}
+
+
+
+/* ============================================================
+   FULL-WIDTH PAGE LAYOUT
+   Ensures no legacy sidebar margins, padding, or max-widths
+   survive after the sidebar → top-nav migration.
+   ============================================================ */
+
+/* Root and app shell should fill the viewport */
+html, body, #root {
+  width: 100%;
+  min-height: 100vh;
+  margin: 0;
+  padding: 0;
+  max-width: 100%;
+}
+
+/* Reusable page content wrapper (if used directly in pages) */
+.page-content {
+  width: 100%;
+  max-width: 100%;
+}
+
+/* Responsive grid utilities used across page layouts */
+.grid-kpi {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 1rem;
+}
+
+@media (min-width: 640px) {
+  .grid-kpi {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (min-width: 1024px) {
+  .grid-kpi {
+    grid-template-columns: repeat(4, 1fr);
+  }
+}
+
+/* Ensure cards and tables always fill their grid cell */
+.card {
+  width: 100%;
+  min-width: 0; /* prevent flex/grid overflow */
+}
+
+/* Prevent table cells from overflowing their container */
+.table {
+  table-layout: auto;
+  width: 100%;
+}
+
+/* Responsive table: allow horizontal scroll on small screens */
+.table-responsive {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Page header row — always full width, flex wrap on mobile */
+.page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  width: 100%;
+  margin-bottom: 1.25rem;
+}
+
+/* Section label above groups of cards */
+.section-label {
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #94a3b8;
+  margin-bottom: 0.5rem;
+}
+
+.dark .section-label {
+  color: #475569;
 }
 
 /* ============================================================

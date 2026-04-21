@@ -360,7 +360,7 @@ export default function Threats() {
             <div className="absolute top-0 right-0 w-[600px] h-[600px] pointer-events-none mix-blend-screen" style={{ background: 'radial-gradient(circle, rgba(244,63,94,0.05) 0%, transparent 70%)' }} />
             <div className="absolute bottom-0 left-0 w-[600px] h-[600px] pointer-events-none mix-blend-screen" style={{ background: 'radial-gradient(circle, rgba(99,102,241,0.05) 0%, transparent 70%)' }} />
 
-            <div className="relative max-w-[1600px] mx-auto w-full space-y-6">
+            <div className="relative  w-full space-y-6">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                     <div>
                         <h1 className="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-gray-900 to-gray-600 dark:from-white dark:to-gray-300">

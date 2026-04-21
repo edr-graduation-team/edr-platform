@@ -169,7 +169,7 @@ export default function Rules() {
             <div className="absolute top-0 right-0 w-[500px] h-[500px] pointer-events-none mix-blend-screen" style={{ background: 'radial-gradient(circle, rgba(99,102,241,0.08) 0%, transparent 70%)' }} />
             <div className="absolute bottom-0 left-0 w-[400px] h-[400px] pointer-events-none mix-blend-screen" style={{ background: 'radial-gradient(circle, rgba(16,185,129,0.06) 0%, transparent 70%)' }} />
 
-            <div className="relative flex-1 flex flex-col min-h-0 space-y-5 max-w-[1600px] mx-auto w-full">
+            <div className="relative flex-1 flex flex-col min-h-0 space-y-5  w-full">
 
                 {/* ── Header ── */}
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 shrink-0">

@@ -371,7 +371,7 @@ export default function AuditLogs() {
     return (
         <div
             data-section-id="dashboard-audit-logs-root"
-            className="flex flex-col min-h-0 w-full max-w-[1600px] mx-auto gap-0"
+            className="flex flex-col min-h-0 w-full  gap-0"
         >
             {/* Title — compact, above OpenEDR-style toolbar */}
             <div className="mb-3 shrink-0">

@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link, Navigate } from 'react-router-dom';
 import { parityApi } from '../../api/parity/parityApi';
@@ -181,9 +182,28 @@ export function DashboardEndpointPage() {
 
             <div className="rounded-xl border border-gray-200 dark:border-gray-700 p-4 bg-white dark:bg-gray-800/80">
                 <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">OS distribution</h3>
-                <pre className="text-xs font-mono text-gray-600 dark:text-gray-400 overflow-auto max-h-40">
-                    {JSON.stringify(s.by_os_type, null, 2)}
-                </pre>
+                <div className="space-y-2">
+                    {Object.entries(s.by_os_type ?? {})
+                        .sort((a, b) => b[1] - a[1])
+                        .map(([k, v]) => {
+                            const total = Math.max(1, s.total || 1);
+                            const pct = Math.round((v / total) * 100);
+                            return (
+                                <div key={k} className="flex items-center gap-3">
+                                    <div className="w-28 text-xs font-mono text-gray-700 dark:text-gray-300 uppercase">{k}</div>
+                                    <div className="flex-1 h-2 rounded bg-gray-100 dark:bg-gray-900 overflow-hidden">
+                                        <div className="h-2 bg-cyan-500" style={{ width: `${Math.min(100, pct)}%` }} />
+                                    </div>
+                                    <div className="w-24 text-right text-xs text-gray-500 dark:text-gray-400 font-mono">
+                                        {v} ({pct}%)
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    {Object.keys(s.by_os_type ?? {}).length === 0 && (
+                        <div className="text-xs text-gray-500 dark:text-gray-400">No OS data available.</div>
+                    )}
+                </div>
             </div>
 
             {riskRows.length > 0 && (
@@ -370,13 +390,242 @@ export function DashboardReportsPage() {
         URL.revokeObjectURL(a.href);
     };
 
+    const downloadCsv = (name: string, rows: Record<string, unknown>[]) => {
+        const esc = (v: unknown) => {
+            const s = v === null || v === undefined ? '' : String(v);
+            const q = s.replaceAll('"', '""');
+            return `"${q}"`;
+        };
+        const headers = Array.from(
+            rows.reduce((set, r) => {
+                Object.keys(r).forEach((k) => set.add(k));
+                return set;
+            }, new Set<string>())
+        );
+        const lines = [headers.join(','), ...rows.map((r) => headers.map((h) => esc(r[h])).join(','))];
+        const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `${name}-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.csv`;
+        a.click();
+        URL.revokeObjectURL(a.href);
+    };
+
+    const fetchAllPaged = async <T,>(
+        fetchPage: (offset: number, limit: number) => Promise<{ data: T[]; pagination?: { has_more?: boolean } }>,
+        opts?: { limit?: number; max?: number }
+    ): Promise<T[]> => {
+        const limit = opts?.limit ?? 500;
+        const max = opts?.max ?? 5000;
+        const out: T[] = [];
+        let offset = 0;
+        for (let i = 0; i < 200; i++) {
+            const r = await fetchPage(offset, limit);
+            out.push(...(r.data ?? []));
+            if (!r.pagination?.has_more) break;
+            offset += limit;
+            if (out.length >= max) break;
+        }
+        return out.slice(0, max);
+    };
+
+    const [reportType, setReportType] = useState<'commands' | 'alerts' | 'devices'>('commands');
+    const [agentScope, setAgentScope] = useState<string>('all');
+    const [from, setFrom] = useState<string>(() => new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().slice(0, 16));
+    const [to, setTo] = useState<string>(() => new Date().toISOString().slice(0, 16));
+    const [loading, setLoading] = useState(false);
+    const [err, setErr] = useState<string | null>(null);
+
+    const agentsListQ = useQuery({
+        queryKey: ['agents', 'list', 'reports'],
+        queryFn: async () => {
+            const out = await fetchAllPaged((offset, limit) => agentsApi.list({ offset, limit, sort_by: 'hostname', sort_order: 'asc' }), { max: 2000 });
+            return out;
+        },
+        staleTime: 30_000,
+        retry: 1,
+    });
+
+    const runReport = async (fmt: 'json' | 'csv') => {
+        try {
+            setLoading(true);
+            setErr(null);
+            const fromIso = new Date(from).toISOString();
+            const toIso = new Date(to).toISOString();
+
+            if (reportType === 'commands') {
+                const rows = await fetchAllPaged(
+                    (offset, limit) =>
+                        commandsApi.list({
+                            offset,
+                            limit,
+                            agent_id: agentScope === 'all' ? undefined : agentScope,
+                            sort_by: 'issued_at',
+                            sort_order: 'desc',
+                        }),
+                    { max: 5000 }
+                );
+                const filtered = rows.filter((c: any) => {
+                    const t = new Date(c.issued_at).getTime();
+                    return t >= new Date(fromIso).getTime() && t <= new Date(toIso).getTime();
+                });
+                if (fmt === 'json') downloadJson('report-commands', { from: fromIso, to: toIso, scope: agentScope, rows: filtered });
+                else downloadCsv('report-commands', filtered.map((c: any) => ({
+                    id: c.id,
+                    agent_id: c.agent_id,
+                    agent_hostname: c.agent_hostname,
+                    command_type: c.command_type,
+                    status: c.status,
+                    issued_at: c.issued_at,
+                    issued_by_user: c.issued_by_user,
+                    exit_code: c.exit_code ?? '',
+                    error_message: c.error_message ?? '',
+                })));
+                return;
+            }
+
+            if (reportType === 'alerts') {
+                // Sigma alerts API supports date filtering server-side.
+                const first = await alertsApi.list({
+                    limit: 500,
+                    offset: 0,
+                    agent_id: agentScope === 'all' ? undefined : agentScope,
+                    date_from: fromIso,
+                    date_to: toIso,
+                    sort: 'timestamp',
+                    order: 'desc',
+                });
+                const rows = (first.alerts ?? []).slice(0, 2000);
+                if (fmt === 'json') downloadJson('report-alerts', { from: fromIso, to: toIso, scope: agentScope, rows });
+                else downloadCsv('report-alerts', rows.map((a: any) => ({
+                    id: a.id,
+                    timestamp: a.timestamp,
+                    agent_id: a.agent_id,
+                    rule_title: a.rule_title,
+                    severity: a.severity,
+                    status: a.status,
+                    category: a.category,
+                    risk_score: a.risk_score ?? '',
+                })));
+                return;
+            }
+
+            if (reportType === 'devices') {
+                const allAgents = agentsListQ.data ?? [];
+                const fromT = new Date(fromIso).getTime();
+                const toT = new Date(toIso).getTime();
+                const rows = allAgents.filter((a: any) => {
+                    const t = new Date(a.created_at).getTime();
+                    return t >= fromT && t <= toT;
+                });
+                if (fmt === 'json') downloadJson('report-devices', { from: fromIso, to: toIso, rows });
+                else downloadCsv('report-devices', rows.map((a: any) => ({
+                    id: a.id,
+                    hostname: a.hostname,
+                    os_type: a.os_type,
+                    os_version: a.os_version,
+                    agent_version: a.agent_version,
+                    status: a.status,
+                    created_at: a.created_at,
+                    last_seen: a.last_seen,
+                })));
+            }
+        } catch (e: any) {
+            setErr(e?.message || 'Report failed');
+        } finally {
+            setLoading(false);
+        }
+    };
+
     return (
         <div className="space-y-4">
             <div>
                 <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Reports</h2>
                 <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                    MVP report exports (JSON snapshots) using live APIs. PDF/CSV scheduling can be added later.
+                    Generate filtered reports (JSON/CSV) for commands, alerts, and devices.
                 </p>
+            </div>
+
+            <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900/40 p-4 space-y-3">
+                <div className="grid grid-cols-1 lg:grid-cols-4 gap-3">
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Report type</label>
+                        <select
+                            value={reportType}
+                            onChange={(e) => setReportType(e.target.value as any)}
+                            className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm text-gray-900 dark:text-white"
+                        >
+                            <option value="commands">Executed commands</option>
+                            <option value="alerts">Alerts</option>
+                            <option value="devices">Devices (joined in range)</option>
+                        </select>
+                    </div>
+
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Scope</label>
+                        <select
+                            value={agentScope}
+                            onChange={(e) => setAgentScope(e.target.value)}
+                            className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm text-gray-900 dark:text-white"
+                        >
+                            <option value="all">All endpoints</option>
+                            {(agentsListQ.data ?? []).slice(0, 500).map((a: any) => (
+                                <option key={a.id} value={a.id}>
+                                    {a.hostname} — {a.id}
+                                </option>
+                            ))}
+                        </select>
+                        {agentsListQ.isLoading && (
+                            <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">Loading endpoints…</div>
+                        )}
+                    </div>
+
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">From</label>
+                        <input
+                            type="datetime-local"
+                            value={from}
+                            onChange={(e) => setFrom(e.target.value)}
+                            className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm text-gray-900 dark:text-white"
+                        />
+                    </div>
+
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">To</label>
+                        <input
+                            type="datetime-local"
+                            value={to}
+                            onChange={(e) => setTo(e.target.value)}
+                            className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm text-gray-900 dark:text-white"
+                        />
+                    </div>
+                </div>
+
+                {err && (
+                    <div className="rounded-lg border border-rose-200 dark:border-rose-900/50 bg-rose-50/80 dark:bg-rose-950/20 px-4 py-3 text-sm text-rose-900 dark:text-rose-200">
+                        {err}
+                    </div>
+                )}
+
+                <div className="flex flex-wrap gap-2">
+                    <button
+                        type="button"
+                        className="px-3 py-2 rounded-lg text-sm font-semibold bg-cyan-600 hover:bg-cyan-700 text-white disabled:opacity-50"
+                        disabled={loading}
+                        onClick={() => runReport('json')}
+                    >
+                        Download JSON
+                    </button>
+                    <button
+                        type="button"
+                        className="px-3 py-2 rounded-lg text-sm font-semibold bg-gray-900 hover:bg-black text-white disabled:opacity-50 dark:bg-gray-700 dark:hover:bg-gray-600"
+                        disabled={loading}
+                        onClick={() => runReport('csv')}
+                    >
+                        Download CSV
+                    </button>
+                    {loading && <span className="text-sm text-gray-500 dark:text-gray-400 self-center">Generating…</span>}
+                </div>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">

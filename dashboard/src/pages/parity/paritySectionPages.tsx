@@ -25,8 +25,8 @@ function SelfHostedOutOfScope({ title }: { title: string }) {
                 <Link className="text-cyan-600 dark:text-cyan-400 font-medium hover:underline" to="/responses">
                     Command Center
                 </Link>
-                <Link className="text-cyan-600 dark:text-cyan-400 font-medium hover:underline" to="/settings/users">
-                    Users
+                <Link className="text-cyan-600 dark:text-cyan-400 font-medium hover:underline" to="/system/access/users">
+                    Access
                 </Link>
             </div>
         </div>
@@ -376,9 +376,9 @@ export function ItsmPlaybooksPage() {
     return (
         <div className="space-y-4">
             <div>
-                <h2 className="text-lg font-semibold text-gray-900 dark:text-white">ITSM — playbooks</h2>
+                <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Playbooks</h2>
                 <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                    Curated response playbooks built on the existing command pipeline. For full control, use{' '}
+                    Curated incident response playbooks built on the existing command pipeline. For full control, use{' '}
                     <Link className="text-cyan-600 dark:text-cyan-400 hover:underline font-medium" to="/responses">
                         Command Center
                     </Link>
@@ -524,9 +524,9 @@ export function ItsmAutomationsPage() {
     return (
         <div className="space-y-4">
             <div>
-                <h2 className="text-lg font-semibold text-gray-900 dark:text-white">ITSM — automations</h2>
+                <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Automations</h2>
                 <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                    Lightweight automations implemented on top of the existing response command pipeline .
+                    Lightweight multi-step response automations implemented on top of the command pipeline.
                 </p>
             </div>
 

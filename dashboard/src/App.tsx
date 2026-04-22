@@ -25,6 +25,8 @@ const AuditLogs = lazy(() => import('./pages/AuditLogs'));
 const EnrollmentTokens = lazy(() => import('./pages/EnrollmentTokens'));
 const ActionCenter = lazy(() => import('./pages/ActionCenter'));
 const AgentDeployment = lazy(() => import('./pages/AgentDeployment'));
+const SystemLayout = lazy(() => import('./pages/SystemLayout'));
+const AgentProfiles = lazy(() => import('./pages/AgentProfiles'));
 
 const DashboardsLayout = lazy(() => import('./pages/parity/DashboardsLayout'));
 const DashboardEndpointPage = lazy(() => import('./pages/parity/dashboardPages').then((m) => ({ default: m.DashboardEndpointPage })));
@@ -33,16 +35,14 @@ const DashboardAuditRedirect = lazy(() => import('./pages/parity/dashboardPages'
 const DashboardEndpointCompliancePage = lazy(() => import('./pages/parity/dashboardPages').then((m) => ({ default: m.DashboardEndpointCompliancePage })));
 const DashboardVerdictCloudPage = lazy(() => import('./pages/parity/dashboardPages').then((m) => ({ default: m.DashboardVerdictCloudPage })));
 const DashboardReportsPage = lazy(() => import('./pages/parity/dashboardPages').then((m) => ({ default: m.DashboardReportsPage })));
-const DashboardNotificationsPage = lazy(() => import('./pages/parity/dashboardPages').then((m) => ({ default: m.DashboardNotificationsPage })));
+const SocCorrelationPage = lazy(() => import('./pages/SocCorrelation'));
 
 const SecurityEndpointZeroTrustPage = lazy(() => import('./pages/parity/paritySectionPages').then((m) => ({ default: m.SecurityEndpointZeroTrustPage })));
 const SecuritySiemPage = lazy(() => import('./pages/parity/paritySectionPages').then((m) => ({ default: m.SecuritySiemPage })));
 const ManagedSecurityOverviewPage = lazy(() => import('./pages/parity/paritySectionPages').then((m) => ({ default: m.ManagedSecurityOverviewPage })));
 const ManagedSecurityIncidentsPage = lazy(() => import('./pages/parity/paritySectionPages').then((m) => ({ default: m.ManagedSecurityIncidentsPage })));
-const ItsmTicketsPage = lazy(() => import('./pages/parity/paritySectionPages').then((m) => ({ default: m.ItsmTicketsPage })));
 const ItsmPlaybooksPage = lazy(() => import('./pages/parity/paritySectionPages').then((m) => ({ default: m.ItsmPlaybooksPage })));
 const ItsmAutomationsPage = lazy(() => import('./pages/parity/paritySectionPages').then((m) => ({ default: m.ItsmAutomationsPage })));
-const ItsmIntegrationsPage = lazy(() => import('./pages/parity/paritySectionPages').then((m) => ({ default: m.ItsmIntegrationsPage })));
 const ManagementNetworkPage = lazy(() => import('./pages/parity/paritySectionPages').then((m) => ({ default: m.ManagementNetworkPage })));
 const ManagementStaffPage = lazy(() => import('./pages/parity/paritySectionPages').then((m) => ({ default: m.ManagementStaffPage })));
 const ManagementAccountPage = lazy(() => import('./pages/parity/paritySectionPages').then((m) => ({ default: m.ManagementAccountPage })));
@@ -139,7 +139,7 @@ function AppRoutes() {
             {/* Dashboard & Stats: all authenticated users */}
             <Route path="/" element={
               <ProtectedRoute>
-                <SecurityPosture />
+                <Navigate to="/dashboards/service" replace />
               </ProtectedRoute>
             } />
             <Route path="/platform" element={
@@ -204,26 +204,20 @@ function AppRoutes() {
 
             {/* Audit Logs: audit:read → admin, security */}
             <Route path="/audit" element={
-              <ProtectedRoute roles={['admin', 'security']}>
-                <AuditLogs />
-              </ProtectedRoute>
+              <Navigate to="/system/audit-logs" replace />
             } />
 
             {/* Enrollment Tokens: tokens:read → all roles */}
             <Route path="/tokens" element={
-              <ProtectedRoute roles={['admin', 'security', 'analyst', 'operations', 'viewer']}>
-                <EnrollmentTokens />
-              </ProtectedRoute>
+              <Navigate to="/security/tokens" replace />
             } />
 
             {/* Agent Deployment: agents:read → admin, security, operations */}
             <Route path="/deploy" element={
-              <ProtectedRoute roles={['admin', 'security', 'operations']}>
-                <AgentDeployment />
-              </ProtectedRoute>
+              <Navigate to="/management/agent-deploy" replace />
             } />
 
-            {/* Settings: sub-routes /settings/:tab */}
+            {/* Settings: keep only platform settings (dashboard/admin settings live here) */}
             <Route
                 path="/settings"
                 element={
@@ -232,14 +226,10 @@ function AppRoutes() {
                     </ProtectedRoute>
                 }
             >
-                <Route index element={<Navigate to="profile" replace />} />
+                <Route index element={<Navigate to="system" replace />} />
                 <Route
                     path="profile"
-                    element={
-                        <Suspense fallback={<SettingsTabFallback />}>
-                            <SettingsUserProfile />
-                        </Suspense>
-                    }
+                    element={<Navigate to="/system/profile" replace />}
                 />
                 <Route
                     path="system"
@@ -251,36 +241,44 @@ function AppRoutes() {
                 />
                 <Route
                     path="context"
-                    element={
-                        <Suspense fallback={<SettingsTabFallback />}>
-                            <SettingsContextPolicies />
-                        </Suspense>
-                    }
+                    element={<Navigate to="/management/context-policies" replace />}
                 />
                 <Route
                     path="reliability"
-                    element={
-                        <Suspense fallback={<SettingsTabFallback />}>
-                            <SettingsReliabilityHealth />
-                        </Suspense>
-                    }
+                    element={<Navigate to="/system/reliability-health" replace />}
                 />
                 <Route
                     path="users"
-                    element={
-                        <Suspense fallback={<SettingsTabFallback />}>
-                            <SettingsAccessManagement />
-                        </Suspense>
-                    }
+                    element={<Navigate to="/system/access/users" replace />}
                 />
                 <Route
                     path="roles"
-                    element={
-                        <Suspense fallback={<SettingsTabFallback />}>
-                            <SettingsRBACMatrix />
-                        </Suspense>
-                    }
+                    element={<Navigate to="/system/access/roles" replace />}
                 />
+            </Route>
+
+            {/* System hub */}
+            <Route path="/system" element={<ProtectedRoute><SystemLayout /></ProtectedRoute>}>
+              <Route index element={<Navigate to="profile" replace />} />
+              <Route path="platform-settings" element={<Navigate to="/settings/system" replace />} />
+              <Route path="profile" element={<ProtectedRoute><SettingsUserProfile /></ProtectedRoute>} />
+              <Route path="access/users" element={<ProtectedRoute><SettingsAccessManagement /></ProtectedRoute>} />
+              <Route path="access/roles" element={<ProtectedRoute><SettingsRBACMatrix /></ProtectedRoute>} />
+              <Route path="security/tokens" element={
+                <Navigate to="/security/tokens" replace />
+              } />
+              <Route path="audit-logs" element={
+                <ProtectedRoute roles={['admin', 'security']}>
+                  <AuditLogs />
+                </ProtectedRoute>
+              } />
+              <Route path="reliability-health" element={
+                <ProtectedRoute>
+                  <Suspense fallback={<SettingsTabFallback />}>
+                    <SettingsReliabilityHealth />
+                  </Suspense>
+                </ProtectedRoute>
+              } />
             </Route>
 
             {/* Platform hub (APIs on Sigma `/api/v1/...`; 404 → silent mock in UI) */}
@@ -289,7 +287,7 @@ function AppRoutes() {
                 <DashboardsLayout />
               </ProtectedRoute>
             }>
-              <Route index element={<Navigate to="endpoint" replace />} />
+              <Route index element={<Navigate to="service" replace />} />
               <Route path="service" element={<SecurityPosture />} />
               <Route path="endpoint" element={<DashboardEndpointPage />} />
               <Route path="cloud" element={<DashboardCloudPage />} />
@@ -299,12 +297,6 @@ function AppRoutes() {
               <Route path="ctem" element={<Navigate to="endpoint" replace />} />
               <Route path="verdict-cloud" element={<DashboardVerdictCloudPage />} />
               <Route path="reports" element={<DashboardReportsPage />} />
-              <Route path="notifications" element={<DashboardNotificationsPage />} />
-              <Route path="audit-logs" element={
-                <ProtectedRoute roles={['admin', 'security']}>
-                  <AuditLogs />
-                </ProtectedRoute>
-              } />
               <Route path="roi" element={<Navigate to="endpoint" replace />} />
             </Route>
 
@@ -312,16 +304,29 @@ function AppRoutes() {
             <Route path="/security/siem-x" element={<ProtectedRoute><SecuritySiemPage /></ProtectedRoute>} />
             <Route path="/security/cloud-zero-trust" element={<Navigate to="/security/endpoint-zero-trust" replace />} />
             <Route path="/security/threat-labs" element={<Navigate to="/security/siem-x" replace />} />
+            <Route path="/security/tokens" element={
+              <ProtectedRoute roles={['admin', 'security', 'analyst', 'operations', 'viewer']}>
+                <EnrollmentTokens />
+              </ProtectedRoute>
+            } />
 
             <Route path="/managed-security" element={<Navigate to="/managed-security/overview" replace />} />
             <Route path="/managed-security/overview" element={<ProtectedRoute><ManagedSecurityOverviewPage /></ProtectedRoute>} />
             <Route path="/managed-security/incidents" element={<ProtectedRoute><ManagedSecurityIncidentsPage /></ProtectedRoute>} />
             <Route path="/managed-security/sla" element={<Navigate to="/managed-security/overview" replace />} />
 
-            <Route path="/itsm/tickets" element={<ProtectedRoute><ItsmTicketsPage /></ProtectedRoute>} />
+            <Route path="/itsm/tickets" element={<Navigate to="/itsm/playbooks" replace />} />
             <Route path="/itsm/playbooks" element={<ProtectedRoute><ItsmPlaybooksPage /></ProtectedRoute>} />
             <Route path="/itsm/automations" element={<ProtectedRoute><ItsmAutomationsPage /></ProtectedRoute>} />
-            <Route path="/itsm/integrations" element={<ProtectedRoute><ItsmIntegrationsPage /></ProtectedRoute>} />
+            <Route path="/itsm/integrations" element={<Navigate to="/itsm/playbooks" replace />} />
+
+            {/* SOC extensions */}
+            <Route path="/soc/correlation" element={
+              <ProtectedRoute roles={['admin', 'security', 'analyst', 'operations', 'viewer']}>
+                <SocCorrelationPage />
+              </ProtectedRoute>
+            } />
+            <Route path="/soc/vulnerability" element={<ProtectedRoute><ManagementVulnPage /></ProtectedRoute>} />
 
             <Route path="/management/devices/:agentId" element={
               <ProtectedRoute roles={['admin', 'security', 'analyst', 'operations', 'viewer']}>
@@ -333,18 +338,38 @@ function AppRoutes() {
                 <Endpoints />
               </ProtectedRoute>
             } />
+            <Route path="/endpoints" element={<Navigate to="/management/devices" replace />} />
             <Route path="/management/profiles" element={<Navigate to="/management/devices" replace />} />
             <Route path="/management/rmm" element={<ProtectedRoute><ManagementRmmPage /></ProtectedRoute>} />
             <Route path="/management/patch" element={<Navigate to="/management/devices" replace />} />
-            <Route path="/management/vulnerability" element={<ProtectedRoute><ManagementVulnPage /></ProtectedRoute>} />
+            <Route path="/management/vulnerability" element={<Navigate to="/soc/vulnerability" replace />} />
             <Route path="/management/network" element={<ProtectedRoute><ManagementNetworkPage /></ProtectedRoute>} />
             <Route path="/management/app-control" element={<ProtectedRoute><ManagementAppControlPage /></ProtectedRoute>} />
             <Route path="/management/application-control" element={<ProtectedRoute><ManagementAppControlPage /></ProtectedRoute>} />
             <Route path="/management/staff" element={<ProtectedRoute><ManagementStaffPage /></ProtectedRoute>} />
             <Route path="/management/account" element={<ProtectedRoute><ManagementAccountPage /></ProtectedRoute>} />
-            <Route path="/management/users" element={<Navigate to="/settings/users" replace />} />
+            <Route path="/management/users" element={<Navigate to="/management/agent-profiles" replace />} />
             <Route path="/management/licenses" element={<ProtectedRoute><ManagementLicensesPage /></ProtectedRoute>} />
             <Route path="/management/billing" element={<ProtectedRoute><ManagementBillingPage /></ProtectedRoute>} />
+
+            <Route path="/management/agent-deploy" element={
+              <ProtectedRoute roles={['admin', 'security', 'operations']}>
+                <AgentDeployment />
+              </ProtectedRoute>
+            } />
+            <Route path="/management/agent-profiles" element={
+              <ProtectedRoute roles={['admin', 'security', 'analyst', 'operations', 'viewer']}>
+                <AgentProfiles />
+              </ProtectedRoute>
+            } />
+            <Route path="/management/context-policies" element={
+              <ProtectedRoute>
+                {/* This is an admin-ish control surface; kept under Management per requirements. */}
+                <Suspense fallback={<SettingsTabFallback />}>
+                  <SettingsContextPolicies />
+                </Suspense>
+              </ProtectedRoute>
+            } />
           </Routes>
         </Layout>
       } />

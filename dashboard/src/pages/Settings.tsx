@@ -4,7 +4,7 @@ import SettingsLayout from '../components/settings/SettingsLayout';
 import { type SettingsTab } from '../components/settings/types';
 import { authApi } from '../api/client';
 
-const VALID_TABS = new Set<SettingsTab>(['profile', 'system', 'context', 'reliability', 'users', 'roles']);
+const VALID_TABS = new Set<SettingsTab>(['system']);
 
 export default function Settings() {
     const match = useMatch('/settings/:tab');
@@ -15,7 +15,7 @@ export default function Settings() {
     const userRole = currentUser?.role;
 
     const activeTab: SettingsTab =
-        tab && VALID_TABS.has(tab as SettingsTab) ? (tab as SettingsTab) : 'profile';
+        tab && VALID_TABS.has(tab as SettingsTab) ? (tab as SettingsTab) : 'system';
 
     useEffect(() => {
         const sp = new URLSearchParams(location.search);
@@ -27,7 +27,7 @@ export default function Settings() {
 
     useEffect(() => {
         if (tab && !VALID_TABS.has(tab as SettingsTab)) {
-            navigate('/settings/profile', { replace: true });
+            navigate('/settings/system', { replace: true });
         }
     }, [tab, navigate]);
 

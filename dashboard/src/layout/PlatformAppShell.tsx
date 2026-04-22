@@ -380,7 +380,7 @@ export const PlatformAppShell = memo(function PlatformAppShell({ children }: { c
                     </Link>
 
                     <Link
-                        to="/"
+                        to="/platform"
                         className="hidden md:inline text-[12px] px-2 py-1 rounded text-[var(--xc-nav-text)] hover:bg-[var(--xc-nav-hover)]"
                     >
                         Essential Platform

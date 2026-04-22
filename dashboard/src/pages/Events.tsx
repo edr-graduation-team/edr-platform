@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { useEffect, useMemo, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { Activity, AlertTriangle, ChevronLeft, ChevronRight, Loader2, Search } from 'lucide-react';
 import { authApi, eventsApi, type CmEventSummary } from '../api/client';
@@ -7,6 +7,43 @@ import { EventDetailModal } from '../components/EventDetailModal';
 import { useDebounce } from '../hooks/useDebounce';
 
 const DEFAULT_LIMIT = 50;
+
+const EventRow = memo(function EventRow({
+    e,
+    onOpen,
+}: {
+    e: CmEventSummary;
+    onOpen: (id: string) => void;
+}) {
+    return (
+        <tr
+            key={e.id}
+            role="button"
+            tabIndex={0}
+            className="border-t border-slate-100 dark:border-slate-800 cursor-pointer hover:bg-slate-50/80 dark:hover:bg-slate-800/40"
+            onClick={() => onOpen(e.id)}
+            onKeyDown={(ev) => {
+                if (ev.key === 'Enter' || ev.key === ' ') {
+                    ev.preventDefault();
+                    onOpen(e.id);
+                }
+            }}
+        >
+            <td className="p-3 whitespace-nowrap text-xs font-mono text-slate-500">{new Date(e.timestamp).toLocaleString()}</td>
+            <td className="p-3">
+                <Link
+                    className="text-cyan-700 dark:text-cyan-300 hover:underline font-mono text-xs"
+                    to={`/management/devices/${encodeURIComponent(e.agent_id)}?tab=activity`}
+                    onClick={(ev) => ev.stopPropagation()}
+                >
+                    {e.agent_id.slice(0, 8)}…
+                </Link>
+            </td>
+            <td className="p-3 font-mono text-xs">{e.event_type}</td>
+            <td className="p-3">{e.summary}</td>
+        </tr>
+    );
+});
 
 function isoDaysAgo(days: number) {
     return new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
@@ -61,6 +98,7 @@ export default function Events() {
     const [to, setTo] = useState(() => sp.get('to') || new Date().toISOString());
     const [page, setPage] = useState(() => Math.max(1, parseInt(sp.get('page') || '1', 10) || 1));
     const [detailId, setDetailId] = useState<string | null>(null);
+    const openDetail = useCallback((id: string) => setDetailId(id), []);
 
     useEffect(() => {
         // keep URL in sync (bookmarkable)
@@ -238,36 +276,9 @@ export default function Events() {
                                     <th className="p-3">Summary</th>
                                 </tr>
                             </thead>
-                            <tbody>
+                            <tbody style={{ contentVisibility: 'auto', containIntrinsicSize: '600px' } as any}>
                                 {rows.map((e) => (
-                                    <tr
-                                        key={e.id}
-                                        role="button"
-                                        tabIndex={0}
-                                        className="border-t border-slate-100 dark:border-slate-800 cursor-pointer hover:bg-slate-50/80 dark:hover:bg-slate-800/40"
-                                        onClick={() => setDetailId(e.id)}
-                                        onKeyDown={(ev) => {
-                                            if (ev.key === 'Enter' || ev.key === ' ') {
-                                                ev.preventDefault();
-                                                setDetailId(e.id);
-                                            }
-                                        }}
-                                    >
-                                        <td className="p-3 whitespace-nowrap text-xs font-mono text-slate-500">
-                                            {new Date(e.timestamp).toLocaleString()}
-                                        </td>
-                                        <td className="p-3">
-                                            <Link
-                                                className="text-cyan-700 dark:text-cyan-300 hover:underline font-mono text-xs"
-                                                to={`/management/devices/${encodeURIComponent(e.agent_id)}?tab=activity`}
-                                                onClick={(ev) => ev.stopPropagation()}
-                                            >
-                                                {e.agent_id.slice(0, 8)}…
-                                            </Link>
-                                        </td>
-                                        <td className="p-3 font-mono text-xs">{e.event_type}</td>
-                                        <td className="p-3">{e.summary}</td>
-                                    </tr>
+                                    <EventRow key={e.id} e={e} onOpen={openDetail} />
                                 ))}
                             </tbody>
                         </table>

@@ -139,6 +139,11 @@ function AppRoutes() {
             {/* Dashboard & Stats: all authenticated users */}
             <Route path="/" element={
               <ProtectedRoute>
+                <SecurityPosture />
+              </ProtectedRoute>
+            } />
+            <Route path="/platform" element={
+              <ProtectedRoute>
                 <EssentialPlatform />
               </ProtectedRoute>
             } />

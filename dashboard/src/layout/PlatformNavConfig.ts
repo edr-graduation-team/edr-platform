@@ -35,7 +35,8 @@ export const SECURITY_MODULE_TABS: ContextTab[] = [
 ];
 
 export const SOC_CONTEXT_TABS: ContextTab[] = [
-    { to: '/', label: 'Essential Platform' },
+    { to: '/', label: 'Dashboard' },
+    { to: '/platform', label: 'Essential Platform' },
     { to: '/stats', label: 'Reports & Statistics' },
     { to: '/alerts', label: 'Alerts (Triage)' },
     { to: '/events', label: 'Telemetry Search' },

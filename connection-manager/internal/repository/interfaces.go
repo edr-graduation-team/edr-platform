@@ -270,6 +270,26 @@ type ForensicRepository interface {
 	ReplaceEvents(ctx context.Context, agentID, commandID uuid.UUID, logType string, events []ForensicEventRow) error
 }
 
+type AgentPackageRow struct {
+	ID          uuid.UUID
+	SHA256      string
+	Filename    string
+	StoragePath string
+	BuildParams map[string]any
+	CreatedAt   time.Time
+	ExpiresAt   time.Time
+}
+
+type AgentPackageRepository interface {
+	Create(ctx context.Context, row AgentPackageRow) error
+	Get(ctx context.Context, id uuid.UUID) (*AgentPackageRow, error)
+}
+
+type AgentPatchProfileRepository interface {
+	Get(ctx context.Context, agentID uuid.UUID) (map[string]any, error)
+	Upsert(ctx context.Context, agentID uuid.UUID, profile map[string]any) error
+}
+
 // AuditLogFilter defines filters for listing audit logs.
 type AuditLogFilter struct {
 	UserID       *uuid.UUID

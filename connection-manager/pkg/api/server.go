@@ -207,6 +207,11 @@ func (s *Server) RegisterRoutes(handlers *Handlers) {
 
 	// ── Agent build (deployment) ─────────────────────────────────────────
 	protected.POST("/agent/build", handlers.BuildAgent, handlers.RequirePermission("agents", "write"))
+
+	// ── Agent packages (patch/upgrade) ───────────────────────────────────
+	// Create package requires auth; download is tokenized + short-lived and is public.
+	protected.POST("/agent/packages", handlers.CreateAgentPackage, handlers.RequirePermission("agents", "write"))
+	v1.GET("/agent/packages/:id/download", handlers.DownloadAgentPackage)
 }
 
 // healthCheck returns server health status.

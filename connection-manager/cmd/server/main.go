@@ -415,6 +415,8 @@ func main() {
 		apiHandlers.SetUserRepo(repository.NewPostgresUserRepository(pool))
 		apiHandlers.SetRoleRepo(repository.NewPostgresRoleRepository(pool))
 		apiHandlers.SetContextPolicyRepo(repository.NewPostgresContextPolicyRepository(pool))
+		apiHandlers.SetAgentPackageRepo(repository.NewPostgresAgentPackageRepository(pool))
+		apiHandlers.SetAgentPatchProfileRepo(repository.NewPostgresAgentPatchProfileRepository(pool))
 		// Event storage/search for dashboard investigations
 		eventRepo := repository.NewPostgresEventRepository(pool)
 		apiHandlers.SetEventRepo(eventRepo)

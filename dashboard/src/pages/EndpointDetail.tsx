@@ -7,6 +7,8 @@ import {
     RefreshCw, ChevronLeft, ChevronRight,
 } from 'lucide-react';
 import {
+    agentBuildApi,
+    agentPackagesApi,
     agentsApi,
     alertsApi,
     authApi,
@@ -17,6 +19,7 @@ import {
     type CommandListItem,
     type CommandRequest,
     type CommandType,
+    type EnrollmentToken,
     type EndpointRiskSummary,
     type QuarantineItem,
     type ForensicCollection,
@@ -81,6 +84,7 @@ const RESPONSE_OPTIONS: { value: CommandType; label: string; destructive?: boole
     { value: 'shutdown_machine', label: 'Shutdown machine', destructive: true },
     { value: 'enable_sysmon', label: 'Enable Sysmon (install + channel)' },
     { value: 'disable_sysmon', label: 'Disable Sysmon (uninstall)' },
+    { value: 'update_agent', label: 'Upgrade agent (in-place)' },
 ];
 
 function buildCommandParameters(cmd: CommandType, f: Record<string, string>): Record<string, string> {
@@ -432,6 +436,7 @@ export default function EndpointDetail() {
                     {tab === 'response' && canViewResp && (
                         <ResponseTab
                             agent={agent}
+                            agentId={agentId}
                             cmds={cmdPage?.data || []}
                             cmdsLoading={cmdsLoading}
                             cmdType={cmdType}
@@ -1416,6 +1421,7 @@ function NetworkTab({ agentId, canViewAlerts }: { agentId: string; canViewAlerts
 
 function ResponseTab({
     agent: _agent,
+    agentId,
     cmds,
     cmdsLoading,
     cmdType,
@@ -1427,6 +1433,7 @@ function ResponseTab({
     onSubmit,
 }: {
     agent: Agent;
+    agentId: string;
     cmds: CommandListItem[];
     cmdsLoading: boolean;
     cmdType: CommandType;
@@ -1447,12 +1454,74 @@ function ResponseTab({
         });
     }, []);
 
+    const { showToast } = useToast();
+    const queryClient = useQueryClient();
+    const [upgradeOpen, setUpgradeOpen] = useState(false);
+    const [upgradeForm, setUpgradeForm] = useState<{
+        serverIP: string;
+        serverDomain: string;
+        serverPort: string;
+        tokenId: string;
+        installSysmon: boolean;
+    }>({ serverIP: '', serverDomain: '', serverPort: '47051', tokenId: '', installSysmon: false });
+
+    const { data: upgradeTokens = [], isLoading: upgradeTokensLoading } = useQuery<EnrollmentToken[]>({
+        queryKey: ['enrollment-tokens-valid', 'upgrade'],
+        queryFn: () => agentBuildApi.listValidTokens(),
+        enabled: upgradeOpen,
+    });
+
+    const upgradeMutation = useMutation({
+        mutationFn: async () => {
+            const pkg = await agentPackagesApi.create({
+                server_ip: upgradeForm.serverIP || undefined,
+                server_domain: upgradeForm.serverDomain || undefined,
+                server_port: upgradeForm.serverPort || undefined,
+                token_id: upgradeForm.tokenId,
+                skip_config: false,
+                install_sysmon: upgradeForm.installSysmon,
+                expires_in_seconds: 900,
+            });
+            await agentsApi.executeCommand(agentId, {
+                command_type: 'update_agent',
+                parameters: {
+                    url: pkg.url,
+                    checksum: pkg.sha256,
+                    version: pkg.package_id,
+                    server_domain: upgradeForm.serverDomain,
+                    server_port: upgradeForm.serverPort,
+                    server_ip: upgradeForm.serverIP,
+                },
+                timeout: 3600,
+            });
+            return pkg;
+        },
+        onSuccess: (pkg) => {
+            showToast(`Upgrade queued (package ${pkg.package_id.slice(0, 8)})`, 'success');
+            queryClient.invalidateQueries({ queryKey: ['agent-commands', agentId] });
+            queryClient.invalidateQueries({ queryKey: ['commands'] });
+            setUpgradeOpen(false);
+        },
+        onError: (e: Error) => showToast(e.message || 'Upgrade failed', 'error'),
+    });
+
     return (
         <div className="space-y-8">
             <div>
-                <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100 mb-4 flex items-center gap-2">
-                    <Terminal className="w-4 h-4" /> Execute command
-                </h3>
+                <div className="flex items-center justify-between gap-3 mb-4">
+                    <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2">
+                        <Terminal className="w-4 h-4" /> Execute command
+                    </h3>
+                    {canExec && (
+                        <button
+                            type="button"
+                            onClick={() => setUpgradeOpen(true)}
+                            className="px-3 py-2 rounded-lg text-xs font-semibold border border-cyan-500/40 bg-cyan-500/10 text-cyan-800 dark:text-cyan-300 hover:bg-cyan-500/20 transition-colors"
+                        >
+                            Upgrade agent
+                        </button>
+                    )}
+                </div>
                 <div className="grid grid-cols-1 xl:grid-cols-12 gap-6">
                     <div className="xl:col-span-7 space-y-3">
                         <label className="block text-xs font-bold tracking-wider text-slate-500 uppercase mb-2">Select Action</label>
@@ -1685,6 +1754,64 @@ function ResponseTab({
                     </div>
                 </div>
             </div>
+
+            <Modal isOpen={upgradeOpen} onClose={() => setUpgradeOpen(false)} title="Upgrade agent (in-place)">
+                <div className="space-y-4">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <div>
+                            <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Server IP</label>
+                            <input className="input w-full" value={upgradeForm.serverIP} onChange={(e) => setUpgradeForm((p) => ({ ...p, serverIP: e.target.value }))} />
+                        </div>
+                        <div>
+                            <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Server domain</label>
+                            <input className="input w-full" value={upgradeForm.serverDomain} onChange={(e) => setUpgradeForm((p) => ({ ...p, serverDomain: e.target.value }))} />
+                        </div>
+                        <div>
+                            <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">gRPC port</label>
+                            <input className="input w-full" value={upgradeForm.serverPort} onChange={(e) => setUpgradeForm((p) => ({ ...p, serverPort: e.target.value }))} />
+                        </div>
+                        <div>
+                            <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Enrollment token</label>
+                            <select
+                                className="input w-full"
+                                value={upgradeForm.tokenId}
+                                onChange={(e) => setUpgradeForm((p) => ({ ...p, tokenId: e.target.value }))}
+                                disabled={upgradeTokensLoading}
+                            >
+                                <option value="">{upgradeTokensLoading ? 'Loading…' : 'Select token'}</option>
+                                {upgradeTokens.map((t) => (
+                                    <option key={t.id} value={t.id}>
+                                        {t.description || t.id.slice(0, 8)}
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
+                    </div>
+
+                    <label className="flex items-center gap-2 text-sm">
+                        <input
+                            type="checkbox"
+                            checked={upgradeForm.installSysmon}
+                            onChange={(e) => setUpgradeForm((p) => ({ ...p, installSysmon: e.target.checked }))}
+                        />
+                        Install and enable Sysmon on first run
+                    </label>
+
+                    <div className="flex justify-end gap-2 pt-2">
+                        <button type="button" className="btn" onClick={() => setUpgradeOpen(false)}>
+                            Cancel
+                        </button>
+                        <button
+                            type="button"
+                            className="btn btn-primary"
+                            disabled={!upgradeForm.tokenId || upgradeMutation.isPending}
+                            onClick={() => upgradeMutation.mutate()}
+                        >
+                            {upgradeMutation.isPending ? 'Queuing…' : 'Queue upgrade'}
+                        </button>
+                    </div>
+                </div>
+            </Modal>
 
             <div>
                 <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100 mb-2">Command history</h3>

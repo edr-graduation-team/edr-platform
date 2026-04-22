@@ -72,7 +72,7 @@ export type CommandType = 'kill_process' | 'terminate_process' | 'quarantine_fil
     'restart_machine' | 'shutdown_machine' | 'update_filter_policy' |
     'run_cmd' | 'block_ip' | 'unblock_ip' | 'block_domain' | 'unblock_domain' | 'update_signatures' | 'update_config' |
     'unisolate_network' | 'restore_quarantine_file' | 'delete_quarantine_file' |
-    'enable_sysmon' | 'disable_sysmon';
+    'enable_sysmon' | 'disable_sysmon' | 'update_agent';
 export type CommandStatus = 'pending' | 'sent' | 'acknowledged' | 'executing' | 'completed' | 'failed' | 'timeout' | 'cancelled';
 
 // Sprint 4 context-aware scoring types
@@ -866,6 +866,37 @@ export const agentBuildApi = {
             if (t.max_uses !== null && t.use_count >= t.max_uses) return false;
             return true;
         });
+    },
+};
+
+// ============================================================================
+// Agent Packages API (Patch / Upgrade)
+// ============================================================================
+
+export interface CreateAgentPackageRequest {
+    server_ip?: string;
+    server_domain?: string;
+    server_port?: string;
+    token_id: string;
+    skip_config: boolean;
+    install_sysmon?: boolean;
+    expires_in_seconds?: number;
+}
+
+export interface CreateAgentPackageResponse {
+    package_id: string;
+    sha256: string;
+    filename: string;
+    expires_at: string;
+    url: string;
+}
+
+export const agentPackagesApi = {
+    create: async (data: CreateAgentPackageRequest) => {
+        const response = await connectionApi.post<CreateAgentPackageResponse>('/api/v1/agent/packages', data, {
+            timeout: 600_000,
+        });
+        return response.data;
     },
 };
 

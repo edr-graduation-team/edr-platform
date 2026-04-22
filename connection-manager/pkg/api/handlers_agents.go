@@ -430,6 +430,17 @@ func (h *Handlers) ExecuteAgentCommand(c echo.Context) error {
 		return errorResponse(c, http.StatusNotFound, "AGENT_OFFLINE", "Agent is not online — command cannot be delivered")
 	}
 
+	// Block any new commands when the agent has already confirmed uninstall.
+	// `uninstall_agent` itself is allowed so operators can retry a stuck uninstall.
+	if h.agentSvc != nil && req.CommandType != "uninstall_agent" {
+		if current, err := h.agentSvc.GetByID(c.Request().Context(), agentID); err == nil && current != nil {
+			if current.Status == models.AgentStatusUninstalled {
+				h.logger.Warnf("[C2] Agent %s is uninstalled — refusing new command %s", agentID, req.CommandType)
+				return errorResponse(c, http.StatusGone, "AGENT_UNINSTALLED", "Agent has been uninstalled; no further commands will be dispatched")
+			}
+		}
+	}
+
 	execTimeoutSec := req.Timeout
 	if req.TimeoutSeconds > 0 {
 		execTimeoutSec = req.TimeoutSeconds
@@ -556,6 +567,15 @@ func (h *Handlers) ExecuteAgentCommand(c echo.Context) error {
 				h.logger.WithError(err).Warn("[Isolation] Failed to proactively set is_isolated=false")
 			} else {
 				h.logger.Infof("[Isolation] Agent %s proactively marked UN-ISOLATED at dispatch", agentID)
+			}
+		case "uninstall_agent":
+			// Mark pending_uninstall right when the uninstall order is dispatched.
+			// A successful SendCommandResult from the agent promotes this to 'uninstalled';
+			// otherwise the UI can surface the pending state plus missed-heartbeat signal.
+			if err := h.agentSvc.UpdateStatus(c.Request().Context(), agentID, models.AgentStatusPendingUninstall, nil); err != nil {
+				h.logger.WithError(err).Warn("[Uninstall] Failed to set agent status=pending_uninstall")
+			} else {
+				h.logger.Infof("[Uninstall] Agent %s marked PENDING_UNINSTALL at dispatch", agentID)
 			}
 		}
 	}
@@ -756,6 +776,11 @@ func mapCommandType(cmdType string) edrv1.CommandType {
 		return edrv1.CommandType(11)
 	case "update_agent":
 		return edrv1.CommandType_COMMAND_TYPE_UPDATE_AGENT
+	case "uninstall_agent":
+		// Proto enum value 21 — server is the sole authority for agent uninstall.
+		// Using a numeric literal avoids forcing a pb.go regeneration pass; the agent
+		// decodes the same integer and routes it through the uninstall command path.
+		return edrv1.CommandType(21)
 	case "update_config", "update_policy":
 		return edrv1.CommandType_COMMAND_TYPE_UPDATE_CONFIG
 	case "update_filter_policy":

@@ -238,19 +238,14 @@ func main() {
 		}
 
 		if req.Token != "" {
-			// SECURITY: Two embedded values, neither is plaintext:
-			//
-			// 1. EmbeddedTokenHash (SHA-256) — for uninstall verification.
-			//    Irreversible; useless to an attacker even if extracted.
-			//
-			// 2. EmbeddedTokenObf (XOR-obfuscated hex) — for zero-touch enrollment.
-			//    The token is XOR'd with a compile-time key so `strings binary`
-			//    cannot reveal it. Decoded at runtime ONLY for the single CSR call,
-			//    then zeroed from memory. This raises the bar significantly above
-			//    plaintext embedding (the standard for commercial EDR agents).
-			tokenHash := sha256Hex(req.Token)
+			// SECURITY: The enrollment token is embedded ONLY as an
+			// XOR-obfuscated blob for zero-touch registration. No uninstall
+			// secret is embedded: removal is a server-authorised C2 action
+			// (UNINSTALL_AGENT), so there is nothing in the binary that an
+			// attacker with filesystem access could extract and replay to
+			// tear down the agent. The token is decoded at runtime for the
+			// single CSR call, then zeroed from memory.
 			tokenObf := xorObfuscate(req.Token)
-			ldflags = append(ldflags, fmt.Sprintf("-X main.EmbeddedTokenHash=%s", tokenHash))
 			ldflags = append(ldflags, fmt.Sprintf("-X main.EmbeddedTokenObf=%s", tokenObf))
 		}
 

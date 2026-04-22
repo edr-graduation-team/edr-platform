@@ -4,7 +4,8 @@
 //
 //	-install  Zero-touch setup: patch hosts file, write config.yaml, register SCM service,
 //	           start the service. Requires -server-ip, -server-domain, and -token.
-//	-uninstall  Remove the Windows Service registration.
+//	(uninstall)  Local uninstall is NOT supported. An agent is removed only via the
+//	             server-issued UNINSTALL_AGENT C2 command (authorised via mTLS + RBAC).
 //	CLI / standalone  Run interactively (development / testing).
 //	SCM-managed  Detected automatically via svc.IsWindowsService(); no flag required.
 package main
@@ -50,8 +51,10 @@ var (
 	EmbeddedServerIP     = "" // e.g. "192.168.1.10"
 	EmbeddedServerDomain = "" // e.g. "edr.local"
 	EmbeddedServerPort   = "" // e.g. "47051"
-	EmbeddedTokenHash    = "" // SHA-256 hash of enrollment token (for uninstall verification)
-	EmbeddedTokenObf     = "" // XOR-obfuscated enrollment token (for zero-touch install)
+	// NOTE: the agent no longer carries any uninstall secret. Uninstall is a
+	// server-authorised C2 action (UNINSTALL_AGENT), so there is nothing to
+	// embed in the binary that could be extracted and replayed by an attacker.
+	EmbeddedTokenObf     = "" // XOR-obfuscated enrollment token (for zero-touch install ONLY)
 	EmbeddedInstallSysmon = "" // "true" when dashboard build enabled Sysmon bootstrap
 )
 
@@ -69,11 +72,10 @@ func main() {
 		doInstall    = flag.Bool("install", false, "Zero-touch install: patch hosts, write config, register and start Windows Service")
 		doUpdate     = flag.Bool("update", false, "In-place upgrade: replace agent binary, optionally update config, and restart Windows Service")
 		doUpdateStage2 = flag.Bool("update-stage2", false, "[INTERNAL] Stage2 for -update, executed as SYSTEM")
-		doUninstall  = flag.Bool("uninstall", false, "Remove the EDRAgent Windows Service")
 		serverIP     = flag.String("server-ip", "", "C2 server IP address (used with -install for hosts file injection)")
 		serverDomain = flag.String("server-domain", "", "C2 server FQDN/hostname (used with -install)")
 		serverPort   = flag.String("server-port", "50051", "C2 gRPC port (used with -install, default 50051)")
-		token        = flag.String("token", "", "Bootstrap enrollment token (install) or uninstall authorization token")
+		token        = flag.String("token", "", "Enrollment token (install only — never used for uninstall)")
 
 		// ── Runtime flags ──────────────────────────────────────────────────────
 		debugMode = flag.Bool("debug", false, "Enable DEBUG-level logging")
@@ -126,17 +128,13 @@ func main() {
 	}
 
 	// ══════════════════════════════════════════════════════════════════════════
-	// UNINSTALL PATH
+	// UNINSTALL PATH — intentionally not implemented as a local CLI action.
 	// ══════════════════════════════════════════════════════════════════════════
-	if *doUninstall {
-		if err := service.Uninstall(*token, EmbeddedTokenHash); err != nil {
-			logger.Errorf("Failed to uninstall service: %v", err)
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			os.Exit(1)
-		}
-		fmt.Println("EDR Agent service removed successfully.")
-		os.Exit(0)
-	}
+	// Uninstall is a privileged server-side operation. It is issued as a C2
+	// command (UNINSTALL_AGENT) over the agent's mTLS stream and authorised by
+	// the dashboard's RBAC + audit pipeline. Keeping a local "-uninstall -token"
+	// path would mean every deployed binary carries a removal secret that an
+	// attacker with filesystem access could eventually extract.
 
 	// ══════════════════════════════════════════════════════════════════════════
 	// RUNTIME PATH — detect execution mode FIRST, then load config
@@ -162,7 +160,7 @@ func main() {
 		// load config, perform CA fetch → enrollment → agent.Start()
 		// asynchronously, reporting proper SCM status at each stage.
 		logger.Info("Execution context: Windows Service Control Manager")
-		if err := service.Run(*configPath, logger, EmbeddedTokenHash); err != nil {
+		if err := service.Run(*configPath, logger); err != nil {
 			logger.Errorf("Service execution error: %v", err)
 			os.Exit(1)
 		}
@@ -283,9 +281,9 @@ func runInstall(
 	//   2. XOR-obfuscated token in binary (decoded at runtime, then zeroed)
 	//   3. Empty → installation fails (token is REQUIRED)
 	//
-	// The binary NEVER contains the plaintext token. Only:
-	//   - EmbeddedTokenHash (SHA-256, irreversible) for uninstall verification
-	//   - EmbeddedTokenObf  (XOR-obfuscated hex) for zero-touch enrollment
+	// The binary NEVER contains any uninstall secret. Uninstall is a server-
+	// authorised C2 action, so the only embedded value is:
+	//   - EmbeddedTokenObf  (XOR-obfuscated enrollment token for zero-touch install)
 	if token == "" && EmbeddedTokenObf != "" {
 		// Decode the obfuscated token for enrollment
 		token = xorDeobfuscate(EmbeddedTokenObf)
@@ -418,11 +416,11 @@ func runInstall(
 
 	// ── Step 6: Register service ─────────────────────────────────────────────
 	fmt.Println("[6/7] Registering Windows Service (EDRAgent)...")
-	if err := service.Install(EmbeddedTokenHash); err != nil {
+	if err := service.Install(); err != nil {
 		if isAlreadyExistsErr(err) {
 			fmt.Fprintf(os.Stderr, "\n[X] Error: EDR Agent is already installed on this system.\n")
-			fmt.Fprintf(os.Stderr, "    To protect existing configurations and ensure security, automatic re-installation is blocked.\n")
-			fmt.Fprintf(os.Stderr, "    Please remove the agent first using: edr-agent.exe -uninstall -token <secret>\n")
+			fmt.Fprintf(os.Stderr, "    Re-installation is blocked. Issue an UNINSTALL_AGENT command\n")
+			fmt.Fprintf(os.Stderr, "    from the EDR dashboard to remove this agent first.\n")
 			logger.Errorf("Install aborted: service already exists")
 			os.Exit(1)
 		} else {
@@ -457,7 +455,7 @@ func runInstall(
 	}
 	fmt.Println("\n  To check status:   sc query EDRAgent")
 	fmt.Println("  To view logs:      Get-Content C:\\ProgramData\\EDR\\logs\\agent.log -Tail 50")
-	fmt.Println("  To uninstall:      edr-agent.exe -uninstall -token <secret>")
+	fmt.Println("  To uninstall:      issue UNINSTALL_AGENT from the EDR dashboard (RBAC + audit enforced)")
 	fmt.Println("\n  You can safely delete this installer file — the agent binary")
 	fmt.Println("  has been copied to the secure path above.")
 	logger.Infof("Zero-touch installation complete: server=%s:%s", serverDomain, serverPort)

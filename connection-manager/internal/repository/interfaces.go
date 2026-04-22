@@ -272,17 +272,25 @@ type ForensicRepository interface {
 
 type AgentPackageRow struct {
 	ID          uuid.UUID
+	AgentID     uuid.UUID // Package is bound to exactly one agent (download link is personal)
 	SHA256      string
 	Filename    string
 	StoragePath string
 	BuildParams map[string]any
 	CreatedAt   time.Time
 	ExpiresAt   time.Time
+	ConsumedAt  *time.Time // Set on first successful download — link becomes single-use
 }
 
 type AgentPackageRepository interface {
 	Create(ctx context.Context, row AgentPackageRow) error
 	Get(ctx context.Context, id uuid.UUID) (*AgentPackageRow, error)
+	// MarkConsumed flags a package as used so subsequent downloads are refused.
+	MarkConsumed(ctx context.Context, id uuid.UUID) error
+	// Delete removes a package row (used after expiry cleanup or successful consumption).
+	Delete(ctx context.Context, id uuid.UUID) error
+	// ListExpired returns rows with expires_at < now that still have a storage_path to clean up.
+	ListExpired(ctx context.Context, before time.Time) ([]*AgentPackageRow, error)
 }
 
 type AgentPatchProfileRepository interface {

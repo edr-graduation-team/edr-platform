@@ -35,6 +35,7 @@ service EventIngestionService {
   rpc RegisterAgent(AgentRegistrationRequest) returns (AgentRegistrationResponse) {}
 
   // SendCommandResult - Agent sends command execution result back to server (C2 feedback)
+  // Also used to confirm completion of UNINSTALL_AGENT right before the agent exits.
   rpc SendCommandResult(CommandResult) returns (google.protobuf.Empty) {}
 }
 
@@ -394,6 +395,7 @@ enum CommandType {
   COMMAND_TYPE_UPDATE_SIGNATURES = 18;
   COMMAND_TYPE_RESTORE_QUARANTINE_FILE = 19;
   COMMAND_TYPE_DELETE_QUARANTINE_FILE = 20;
+  COMMAND_TYPE_UNINSTALL_AGENT = 21; // Server-initiated uninstall: sole allowed uninstall path
 }
 
 // CommandResult - Agent-to-server feedback for a completed command (C2 loop closure)

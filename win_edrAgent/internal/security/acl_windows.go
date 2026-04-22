@@ -242,9 +242,9 @@ func setSystemOwnedExclusiveFile(path string) error {
 
 // HardenAgentDirectoriesExclusive sets OWNER=SYSTEM and a DACL that grants only
 // SYSTEM full control (inheriting to subfolders). Administrators cannot change
-// ACLs or modify contents until RestoreAgentDirectoriesACL during authorized
-// uninstall. C:\ProgramData\EDR itself is not in the list so uninstall.dat
-// can still be created by an elevated admin.
+// ACLs or modify contents until RestoreAgentDirectoriesACL runs during the
+// server-authorised UNINSTALL_AGENT flow. C:\ProgramData\EDR itself is left
+// out of the hardened set so the SYSTEM cleanup scheduled task can remove it.
 func HardenAgentDirectoriesExclusive(dirs []string, logger *logging.Logger) error {
 	var first error
 	for _, dir := range dirs {

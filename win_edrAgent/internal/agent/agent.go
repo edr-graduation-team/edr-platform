@@ -362,6 +362,14 @@ func (a *Agent) SetRestartInfo(configPath string) {
 	a.commandHandler.SetRestartInfo(configPath)
 }
 
+// SetUninstallHook wires the server-authorised uninstall callback into the
+// command handler. The hook is invoked by COMMAND_TYPE_UNINSTALL_AGENT only.
+// Typical implementation (service.go) releases self-protections and schedules
+// a SYSTEM cleanup task.
+func (a *Agent) SetUninstallHook(fn func(reason string) error) {
+	a.commandHandler.SetUninstallHook(fn)
+}
+
 // SetConfigUpdateHandler registers a callback function that the command handler
 // will invoke when a C2 "UPDATE_CONFIG" or "PUSH_POLICY" command arrives.
 // This decouples the command package from the agent package to avoid import cycles.
@@ -847,6 +855,8 @@ func mapProtoCommandType(protoType string) command.CommandType {
 		return command.CmdRestoreQuarantineFile
 	case "COMMAND_TYPE_DELETE_QUARANTINE_FILE", "20":
 		return command.CmdDeleteQuarantineFile
+	case "COMMAND_TYPE_UNINSTALL_AGENT", "21":
+		return command.CmdUninstallAgent
 	case "COMMAND_TYPE_RESTART", "10": // Machine reboot (enum value 10)
 		return command.CmdRestart
 	case "COMMAND_TYPE_SHUTDOWN", "11": // Machine shutdown (enum value 11)

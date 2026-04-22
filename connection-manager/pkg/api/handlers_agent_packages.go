@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
@@ -21,10 +22,18 @@ import (
 )
 
 type CreateAgentPackageRequest struct {
+	// AgentID binds this package to a single already-enrolled agent. The download link
+	// is rejected for any other identity, revoked after the first successful download,
+	// and cleaned up on expiry — so no stale URL can be replayed by an attacker.
+	AgentID string `json:"agent_id" validate:"required"`
+
 	ServerIP      string `json:"server_ip"`
 	ServerDomain  string `json:"server_domain"`
 	ServerPort    string `json:"server_port"`
-	TokenID       string `json:"token_id" validate:"required"`
+	// TokenID is ONLY used to locate a legitimate CA-trust anchor during build;
+	// it is NOT injected into the produced binary for an upgrade. An already-enrolled
+	// agent has its own mTLS identity and does not need a new enrollment token.
+	TokenID       string `json:"token_id"`
 	SkipConfig    bool   `json:"skip_config"`
 	InstallSysmon bool   `json:"install_sysmon"`
 
@@ -40,16 +49,28 @@ type CreateAgentPackageResponse struct {
 }
 
 func (h *Handlers) CreateAgentPackage(c echo.Context) error {
-	if h.agentPackageRepo == nil || h.enrollmentTokenRepo == nil {
+	if h.agentPackageRepo == nil {
 		return errorResponse(c, http.StatusServiceUnavailable, "DB_UNAVAILABLE", "Database unavailable")
 	}
 	var req CreateAgentPackageRequest
 	if err := c.Bind(&req); err != nil {
 		return errorResponse(c, http.StatusBadRequest, "INVALID_REQUEST", "Invalid request body")
 	}
-	if req.TokenID == "" {
-		return errorResponse(c, http.StatusBadRequest, "TOKEN_REQUIRED", "token_id is required")
+	agentID, err := uuid.Parse(strings.TrimSpace(req.AgentID))
+	if err != nil || agentID == uuid.Nil {
+		return errorResponse(c, http.StatusBadRequest, "AGENT_REQUIRED", "agent_id is required — upgrade packages are per-agent")
 	}
+	// Confirm the target agent exists and is not already uninstalled.
+	if h.agentSvc != nil {
+		agent, aerr := h.agentSvc.GetByID(c.Request().Context(), agentID)
+		if aerr != nil || agent == nil {
+			return errorResponse(c, http.StatusNotFound, "AGENT_NOT_FOUND", "Target agent does not exist")
+		}
+		if agent.Status == "uninstalled" {
+			return errorResponse(c, http.StatusGone, "AGENT_UNINSTALLED", "Target agent has been uninstalled")
+		}
+	}
+
 	if !req.SkipConfig && (req.ServerIP == "" || req.ServerDomain == "") {
 		return errorResponse(c, http.StatusBadRequest, "MISSING_CONFIG", "server_ip and server_domain are required when not skipping config")
 	}
@@ -65,21 +86,11 @@ func (h *Handlers) CreateAgentPackage(c echo.Context) error {
 	}
 	expiresAt := time.Now().Add(time.Duration(exp) * time.Second)
 
-	// Resolve token value
-	tokens, err := h.enrollmentTokenRepo.List(c.Request().Context())
-	if err != nil {
-		return errorResponse(c, http.StatusInternalServerError, "TOKEN_FETCH_ERROR", "Failed to fetch enrollment tokens")
-	}
-	var tokenValue string
-	for _, t := range tokens {
-		if t.ID.String() == req.TokenID {
-			tokenValue = t.Token
-			break
-		}
-	}
-	if tokenValue == "" {
-		return errorResponse(c, http.StatusNotFound, "TOKEN_NOT_FOUND", "Token not found")
-	}
+	// Upgrade binaries are NOT injected with any enrollment/uninstall token —
+	// a registered agent already has its mTLS identity. The builder call below
+	// deliberately passes an empty token so the produced EXE has no secret inside.
+	tokenValue := "" //nolint:staticcheck // intentional: no-token upgrade build
+	_ = req.TokenID
 
 	// Read CA PEM
 	var caCertPEM string
@@ -139,18 +150,18 @@ func (h *Handlers) CreateAgentPackage(c echo.Context) error {
 	downloadToken, _ := newRandomToken(32)
 	downloadTokenHash := sha256Hex(downloadToken)
 
-	// Save package row (store token hash in build_params for MVP)
+	// Save package row bound to the agent (download is revoked after first use / on expiry).
 	params := map[string]any{
-		"server_ip":      req.ServerIP,
-		"server_domain":  req.ServerDomain,
-		"server_port":    req.ServerPort,
-		"token_id":       req.TokenID,
-		"skip_config":    req.SkipConfig,
-		"install_sysmon": req.InstallSysmon,
+		"server_ip":           req.ServerIP,
+		"server_domain":       req.ServerDomain,
+		"server_port":         req.ServerPort,
+		"skip_config":         req.SkipConfig,
+		"install_sysmon":      req.InstallSysmon,
 		"download_token_hash": downloadTokenHash,
 	}
 	if err := h.agentPackageRepo.Create(c.Request().Context(), repository.AgentPackageRow{
 		ID:          packageID,
+		AgentID:     agentID,
 		SHA256:      shaStr,
 		Filename:    "edr-agent.exe",
 		StoragePath: storagePath,
@@ -190,7 +201,14 @@ func (h *Handlers) DownloadAgentPackage(c echo.Context) error {
 	if err != nil {
 		return errorResponse(c, http.StatusNotFound, "NOT_FOUND", "Package not found")
 	}
+	// Single-use semantics: once downloaded, the link is dead. This also prevents
+	// any replay even if the URL leaks after the first fetch.
+	if row.ConsumedAt != nil {
+		return errorResponse(c, http.StatusGone, "ALREADY_CONSUMED", "Package link has already been used")
+	}
 	if time.Now().After(row.ExpiresAt) {
+		// Lazy cleanup: expired links are deleted right here so nothing usable persists.
+		h.cleanupPackage(c.Request().Context(), row)
 		return errorResponse(c, http.StatusGone, "EXPIRED", "Package link expired")
 	}
 	wantHash := ""
@@ -203,13 +221,57 @@ func (h *Handlers) DownloadAgentPackage(c echo.Context) error {
 		return errorResponse(c, http.StatusUnauthorized, "INVALID_TOKEN", "Invalid download token")
 	}
 
+	// If the agent already registered a client certificate, require it to match the bound
+	// agent_id. This enforces that only the exact endpoint the link was minted for can
+	// download the binary — closing the "any attacker with the URL" escape hatch.
+	if row.AgentID != uuid.Nil {
+		if tls := c.Request().TLS; tls != nil && len(tls.PeerCertificates) > 0 {
+			if peerAgentID := extractAgentIDFromPeerCert(tls.PeerCertificates[0].Subject.CommonName); peerAgentID != "" && peerAgentID != row.AgentID.String() {
+				return errorResponse(c, http.StatusForbidden, "AGENT_MISMATCH", "This download link is bound to a different agent")
+			}
+		}
+	}
+
 	data, err := os.ReadFile(row.StoragePath)
 	if err != nil {
 		return errorResponse(c, http.StatusInternalServerError, "READ_ERROR", "Failed to read package")
 	}
 	c.Response().Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", row.Filename))
 	c.Response().Header().Set("X-Agent-SHA256", row.SHA256)
-	return c.Blob(http.StatusOK, "application/octet-stream", data)
+
+	// Stream first, then revoke — otherwise a broken client would lose access on retry
+	// without having actually obtained the binary.
+	if err := c.Blob(http.StatusOK, "application/octet-stream", data); err != nil {
+		return err
+	}
+
+	// Mark consumed + delete the file from disk + remove the DB row so no usable link remains.
+	h.cleanupPackage(c.Request().Context(), row)
+	return nil
+}
+
+// cleanupPackage revokes a package link: removes the on-disk binary and the DB row.
+// Called after a successful download and on expiry — so nothing redeemable outlives the event.
+func (h *Handlers) cleanupPackage(ctx context.Context, row *repository.AgentPackageRow) {
+	if row == nil || h.agentPackageRepo == nil {
+		return
+	}
+	if row.StoragePath != "" {
+		_ = os.Remove(row.StoragePath)
+	}
+	_ = h.agentPackageRepo.MarkConsumed(ctx, row.ID)
+	_ = h.agentPackageRepo.Delete(ctx, row.ID)
+}
+
+// extractAgentIDFromPeerCert pulls the agent UUID from the client certificate's CN.
+// Agent certs are issued with CN=<agent-uuid> during enrollment; any other format
+// falls back to an empty string (permissive for non-mTLS deployments).
+func extractAgentIDFromPeerCert(commonName string) string {
+	cn := strings.TrimSpace(commonName)
+	if _, err := uuid.Parse(cn); err == nil {
+		return cn
+	}
+	return ""
 }
 
 func newRandomToken(n int) (string, error) {

@@ -183,14 +183,18 @@ func (h *EventHandler) StreamEvents(stream edrv1.EventIngestionService_StreamEve
 			}
 		}
 
-		// Persist to PostgreSQL — but only if agent is NOT already 'suspended'.
-		// stop_agent sets suspended in SendCommandResult BEFORE the stream closes;
-		// we must preserve that state so the dashboard knows it's intentional.
+		// Persist to PostgreSQL — but only if agent is NOT in a deliberate terminal
+		// or intentionally-stopped state. stop_agent sets `suspended` and the
+		// uninstall path sets `pending_uninstall`/`uninstalled` before the stream
+		// closes; overwriting any of these with `offline` would destroy meaningful
+		// UI signals.
 		currentStatus := h.fetchAgentStatus(agentID)
-		if currentStatus != "suspended" {
+		switch currentStatus {
+		case "suspended", "uninstalled", "pending_uninstall":
+			h.logger.WithFields(logrus.Fields{"agent_id": agentID, "status": currentStatus}).
+				Info("Stream closed — preserving explicit agent state (no offline overwrite)")
+		default:
 			h.updateAgentDBStatus(agentID, "offline")
-		} else {
-			h.logger.WithField("agent_id", agentID).Info("Stream closed but agent is SUSPENDED — skipping offline write")
 		}
 	}()
 
@@ -206,18 +210,20 @@ func (h *EventHandler) StreamEvents(stream edrv1.EventIngestionService_StreamEve
 				return
 			case <-keepAliveTicker.C:
 				// Read current DB status to avoid overwriting deliberate states
-				// (e.g. 'suspended' from stop_agent command).
+				// (e.g. 'suspended' from stop_agent; 'uninstalled'/'pending_uninstall'
+				// from the server-ordered uninstall flow).
 				currentStatus := h.fetchAgentStatus(agentID)
+				preserve := currentStatus == "suspended" || currentStatus == "uninstalled" || currentStatus == "pending_uninstall"
 				statusToWrite := "online"
-				if currentStatus == "suspended" {
-					statusToWrite = "suspended"
+				if preserve {
+					statusToWrite = currentStatus
 				}
 				if h.redis != nil {
 					if err := h.redis.SetAgentStatus(ctx, agentID, statusToWrite, 10*time.Minute); err != nil {
 						h.logger.WithError(err).WithField("agent_id", agentID).Debug("Keepalive: failed to refresh Redis TTL")
 					}
 				}
-				if currentStatus != "suspended" {
+				if !preserve {
 					h.updateAgentDBStatus(agentID, "online")
 				}
 				h.logger.WithField("agent_id", agentID).Debug("Keepalive: refreshed Redis TTL and DB last_seen")
@@ -549,6 +555,8 @@ func mapDBCommandTypeToProto(cmdType string) edrv1.CommandType {
 		return edrv1.CommandType_COMMAND_TYPE_RESTART_SERVICE
 	case "update_agent":
 		return edrv1.CommandType_COMMAND_TYPE_UPDATE_AGENT
+	case "uninstall_agent":
+		return edrv1.CommandType(21)
 	case "update_config", "update_policy":
 		return edrv1.CommandType_COMMAND_TYPE_UPDATE_CONFIG
 	case "update_filter_policy":

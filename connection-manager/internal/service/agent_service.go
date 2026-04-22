@@ -228,14 +228,46 @@ func (s *agentServiceImpl) Register(ctx context.Context, req *RegisterAgentReque
 			// be corrected on first heartbeat.
 		}
 
-		// Burn/increment token ONLY after successful cert issuance.
+		// Burn/retire token ONLY after successful cert issuance.
+		//
+		// Policy: an enrollment token is a one-time install secret. Once an agent has
+		// been accepted and received its mTLS identity, the token has served its entire
+		// purpose and is permanently destroyed — both from the dashboard listing and
+		// from the database — so it can never be replayed to impersonate another agent.
 		if enrollmentToken != nil {
-			if err := s.enrollmentTokenRepo.IncrementUsage(ctx, enrollmentToken.ID); err != nil {
-				s.logger.WithError(err).Error("Failed to increment enrollment token usage")
+			// Single-use (MaxUses nil or <=1): delete immediately so the token is gone forever.
+			// Multi-use: bump use_count first, then delete once the quota is exhausted.
+			isSingleUse := enrollmentToken.MaxUses == nil || *enrollmentToken.MaxUses <= 1
+			if isSingleUse {
+				if err := s.enrollmentTokenRepo.Delete(ctx, enrollmentToken.ID); err != nil {
+					s.logger.WithError(err).Error("Failed to delete single-use enrollment token")
+				} else {
+					s.logger.Infof("Single-use enrollment token %s deleted after successful registration", enrollmentToken.ID)
+				}
+			} else {
+				if err := s.enrollmentTokenRepo.IncrementUsage(ctx, enrollmentToken.ID); err != nil {
+					s.logger.WithError(err).Error("Failed to increment enrollment token usage")
+				}
+				if fresh, err := s.enrollmentTokenRepo.GetByID(ctx, enrollmentToken.ID); err == nil && fresh != nil {
+					if fresh.MaxUses != nil && fresh.UseCount >= *fresh.MaxUses {
+						if err := s.enrollmentTokenRepo.Delete(ctx, fresh.ID); err != nil {
+							s.logger.WithError(err).Error("Failed to delete exhausted enrollment token")
+						} else {
+							s.logger.Infof("Exhausted enrollment token %s deleted after final registration", fresh.ID)
+						}
+					}
+				}
 			}
 		} else if legacyToken != nil {
+			// Legacy one-shot installation token: also deleted for the same reason —
+			// a consumed token should not linger in the DB where it can be harvested.
 			if err := s.tokenRepo.MarkUsed(ctx, legacyToken.ID, agentID); err != nil {
-				s.logger.WithError(err).Error("Failed to mark token as used")
+				s.logger.WithError(err).Error("Failed to mark legacy installation token as used")
+			}
+			if err := s.tokenRepo.Delete(ctx, legacyToken.ID); err != nil {
+				s.logger.WithError(err).Error("Failed to delete legacy installation token after use")
+			} else {
+				s.logger.Infof("Legacy installation token %s deleted after successful registration", legacyToken.ID)
 			}
 		}
 	}

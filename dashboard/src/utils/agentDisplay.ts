@@ -37,3 +37,12 @@ export function getEffectiveStatus(agent: Agent): Agent['status'] {
     }
     return agent.status;
 }
+
+/**
+ * Whether this agent has been decommissioned (server-confirmed uninstall or
+ * still waiting for the agent's final UNINSTALL_CONFIRM). The Endpoints UI
+ * hides action buttons and most command affordances for these rows.
+ */
+export function isDecommissioned(agent: Agent): boolean {
+    return agent.status === 'uninstalled' || agent.status === 'pending_uninstall';
+}

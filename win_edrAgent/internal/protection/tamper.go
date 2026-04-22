@@ -1,6 +1,9 @@
 // Package protection implements tamper-resistance mechanisms for the EDR Agent.
 //
-// Three layers of defense are provided:
+// Two layers of defense are provided. Local uninstall is intentionally NOT one
+// of them — removal is a privileged server-side C2 action (UNINSTALL_AGENT)
+// authorised by the dashboard's RBAC + audit pipeline, so the binary itself
+// never carries an uninstall secret.
 //
 //  1. Process Self-Protection (ProtectProcess):
 //     Sets a restrictive DACL on the agent's own process handle so that only
@@ -17,20 +20,12 @@
 //       - Stop-Service EDRAgent
 //     from an elevated command prompt.
 //
-//  3. Uninstall Token Verification (VerifyUninstallToken):
-//     The --uninstall flag requires a matching --token argument.  The token is
-//     verified against a SHA-256 hash stored in the agent's config file.
-//     Without the correct token, the binary refuses to uninstall.
-//
 //go:build windows
 // +build windows
 
 package protection
 
 import (
-	"crypto/sha256"
-	"crypto/subtle"
-	"encoding/hex"
 	"fmt"
 	"unsafe"
 
@@ -520,41 +515,6 @@ func RestoreAgentRegistryKey() error {
 	return lastErr
 }
 
-// SaveTokenHashToRegistry stores the uninstall token hash in a protected
-// registry key. This provides a backup source for uninstall verification
-// even if the EXE file is deleted or replaced.
-func SaveTokenHashToRegistry(tokenHash string) error {
-	if tokenHash == "" {
-		return nil
-	}
-	k, _, err := registry.CreateKey(registry.LOCAL_MACHINE, agentRegistryPath, registry.ALL_ACCESS)
-	if err != nil {
-		return fmt.Errorf("tamper: create agent registry key: %w", err)
-	}
-	defer k.Close()
-
-	if err := k.SetStringValue("UninstallTokenHash", tokenHash); err != nil {
-		return fmt.Errorf("tamper: write token hash: %w", err)
-	}
-	return nil
-}
-
-// ReadTokenHashFromRegistry reads the stored uninstall token hash.
-// Returns empty string if not found (not an error — fallback to embedded).
-func ReadTokenHashFromRegistry() string {
-	k, err := registry.OpenKey(registry.LOCAL_MACHINE, agentRegistryPath, registry.QUERY_VALUE)
-	if err != nil {
-		return ""
-	}
-	defer k.Close()
-
-	val, _, err := k.GetStringValue("UninstallTokenHash")
-	if err != nil {
-		return ""
-	}
-	return val
-}
-
 // SaveCriticalConfig stores critical agent configuration values in the
 // protected registry key. These serve as a tamper-proof backup that the
 // agent can fall back to if config.yaml is deleted or corrupted.
@@ -632,73 +592,3 @@ func convertSDDLToSD(sddl string) (sd unsafe.Pointer, sdSize uint32, err error) 
 	return unsafe.Pointer(sdPtr), size, nil
 }
 
-// =========================================================================
-// Layer 3: Uninstall Token Verification
-// =========================================================================
-
-// VerifyUninstallToken validates the provided plaintext token against the
-// SHA-256 hash embedded in the binary at build time.
-//
-// Security design:
-//   - The binary contains ONLY the SHA-256 hash of the enrollment token,
-//     injected via -ldflags by the dashboard build system.
-//   - The plaintext secret is NEVER stored in the binary, config files,
-//     registry, or disk — it exists only as a CLI argument during install.
-//   - Even if the .exe is captured and reverse-engineered (strings, IDA Pro),
-//     the attacker gets an irreversible hash, not the secret.
-//   - Comparison uses crypto/subtle.ConstantTimeCompare to prevent timing
-//     side-channel attacks.
-//   - If no embedded hash exists (development builds), falls back to the
-//     legacy default token for backward compatibility.
-func VerifyUninstallToken(providedToken, embeddedHash string) error {
-	if providedToken == "" {
-		return fmt.Errorf("uninstall token required: use --token <secret>")
-	}
-
-	// Compute the SHA-256 hash of the provided token.
-	providedHash := sha256HexString(providedToken)
-
-	// If no embedded hash (dev build without dashboard), use legacy default.
-	// if embeddedHash == "" {
-	// 	embeddedHash = sha256HexString("EDR-Uninstall-2026!")
-	// }
-
-	// Constant-time comparison prevents timing side-channel attacks.
-	if subtle.ConstantTimeCompare([]byte(providedHash), []byte(embeddedHash)) != 1 {
-		return fmt.Errorf("invalid uninstall token")
-	}
-
-	return nil
-}
-
-// VerifyUninstallHash validates a pre-computed hash against the
-// SHA-256 hash embedded in the binary. This is used by the background
-// service when verifying uninstall requests via IPC/Registry.
-func VerifyUninstallHash(providedHash, embeddedHash string) error {
-	if providedHash == "" {
-		return fmt.Errorf("uninstall hash required")
-	}
-
-	// If no embedded hash (dev build without dashboard), use legacy default.
-	if embeddedHash == "" {
-		embeddedHash = sha256HexString("EDR-Uninstall-2026!")
-	}
-
-	// Constant-time comparison prevents timing side-channel attacks.
-	if subtle.ConstantTimeCompare([]byte(providedHash), []byte(embeddedHash)) != 1 {
-		return fmt.Errorf("invalid uninstall hash")
-	}
-
-	return nil
-}
-
-// HashUninstallToken computes the SHA-256 hash of a plaintext token.
-func HashUninstallToken(token string) string {
-	return sha256HexString(token)
-}
-
-// sha256HexString returns the lowercase hex-encoded SHA-256 hash of s.
-func sha256HexString(s string) string {
-	h := sha256.Sum256([]byte(s))
-	return hex.EncodeToString(h[:])
-}

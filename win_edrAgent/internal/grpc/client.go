@@ -76,6 +76,8 @@ func stringifyCommandType(t pb.CommandType) string {
 		return "COMMAND_TYPE_RESTORE_QUARANTINE_FILE"
 	case 20:
 		return "COMMAND_TYPE_DELETE_QUARANTINE_FILE"
+	case 21:
+		return "COMMAND_TYPE_UNINSTALL_AGENT"
 	default:
 		return fmt.Sprintf("COMMAND_UNKNOWN_%d", int32(t))
 	}

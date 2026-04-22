@@ -52,11 +52,13 @@ type Agent struct {
 
 // AgentStatus constants
 const (
-	AgentStatusPending   = "pending"
-	AgentStatusOnline    = "online"
-	AgentStatusOffline   = "offline"
-	AgentStatusDegraded  = "degraded"
-	AgentStatusSuspended = "suspended"
+	AgentStatusPending          = "pending"
+	AgentStatusOnline           = "online"
+	AgentStatusOffline          = "offline"
+	AgentStatusDegraded         = "degraded"
+	AgentStatusSuspended        = "suspended"
+	AgentStatusPendingUninstall = "pending_uninstall" // Server sent UNINSTALL_AGENT; awaiting agent confirmation
+	AgentStatusUninstalled      = "uninstalled"       // Agent confirmed local cleanup — no new commands will be dispatched
 )
 
 // IsOnline returns true if the agent is currently online.

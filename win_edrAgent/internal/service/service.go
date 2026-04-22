@@ -6,7 +6,6 @@ package service
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -38,11 +37,29 @@ const (
 
 // edrService implements the Windows service interface.
 type edrService struct {
-	configPath        string         // path to config.yaml — loaded inside Execute()
-	cfg               *config.Config // populated during Execute() after StartPending
-	logger            *logging.Logger
-	agent             *agent.Agent
-	embeddedTokenHash string         // passed down from main() for runtime uninstall verification
+	configPath string         // path to config.yaml — loaded inside Execute()
+	cfg        *config.Config // populated during Execute() after StartPending
+	logger     *logging.Logger
+	agent      *agent.Agent
+}
+
+// serverUninstallCh is the package-level signal used by the in-process C2
+// command handler (command.UNINSTALL_AGENT) to tell the running SCM loop to
+// tear protections down, schedule the SYSTEM cleanup task, and exit cleanly.
+// A capacity of 1 makes the signal idempotent: repeated triggers collapse.
+var serverUninstallCh = make(chan string, 1)
+
+// TriggerServerUninstall is called from the command handler after it has
+// received a server-authorised UNINSTALL_AGENT instruction. The service
+// (running as SYSTEM) will perform the actual removal. The caller returns
+// control to its command loop so SendCommandResult can ACK the server before
+// the cleanup task fires.
+func TriggerServerUninstall(reason string) {
+	select {
+	case serverUninstallCh <- reason:
+	default:
+		// A previous uninstall is already in flight — coalesce.
+	}
 }
 
 // Execute is the Windows Service control handler.
@@ -148,6 +165,16 @@ func (s *edrService) Execute(args []string, r <-chan svc.ChangeRequest, changes 
 	s.agent.SetConfigFilePath(s.configPath)
 	s.agent.SetRestartInfo(s.configPath)
 	s.agent.SetConfigUpdateHandler(s.agent.UpdateConfig)
+
+	// Wire the server-authorised uninstall hook. When an UNINSTALL_AGENT
+	// command arrives, the command handler calls this function, which signals
+	// the SCM control loop (below) via serverUninstallCh. The command handler
+	// returns SUCCESS so SendCommandResult can ACK the server BEFORE the
+	// SYSTEM cleanup task stops the service.
+	s.agent.SetUninstallHook(func(reason string) error {
+		TriggerServerUninstall(reason)
+		return nil
+	})
 
 	// ── 3. Running — must be sent BEFORE any network / TLS / enrollment work ──
 	// This satisfies the SCM contract. All subsequent work is async.
@@ -270,13 +297,6 @@ func (s *edrService) Execute(args []string, r <-chan svc.ChangeRequest, changes 
 		}
 	}()
 
-	// ── Uninstall File Watcher ─────────────────────────────────────────
-	// Polls for C:\ProgramData\EDR\uninstall.dat every second.
-	// When a valid token hash is found, the service (SYSTEM) restores DACL
-	// and registry permissions, then signals the control loop to stop.
-	uninstallCh := make(chan struct{}, 1)
-	go s.watchUninstallFile(ctx, uninstallCh)
-
 	// agentErrCh carries the outcome of the async startup sequence.
 	// A nil value means the agent is running; a non-nil value means it failed.
 	agentErrCh := make(chan error, 1)
@@ -351,9 +371,25 @@ func (s *edrService) Execute(args []string, r <-chan svc.ChangeRequest, changes 
 			}
 			s.logger.Info("[SCM] Agent startup complete — fully operational")
 
-		case <-uninstallCh:
-			s.logger.Info("[SCM] Uninstall confirmed — stopping service")
+		case reason := <-serverUninstallCh:
+			s.logger.Infof("[SCM] Server-issued uninstall received (reason=%q) — tearing down protections", reason)
 			changes <- svc.Status{State: svc.StopPending}
+
+			// Release self-protections so the SYSTEM cleanup task can stop the
+			// service and delete files. This is the same sequence that the
+			// legacy uninstall-file watcher performed, minus the token dance.
+			s.disableServiceRecovery()
+			s.releaseSelfProtections()
+
+			// Hand off the final "stop service + delete binary + remove
+			// ProgramData\EDR" to a SYSTEM scheduled task so that the cleanup
+			// outlives this process after Execute() returns.
+			if err := scheduleSystemCleanupTask(reason); err != nil {
+				s.logger.Errorf("[SCM] Failed to schedule SYSTEM cleanup task: %v", err)
+			} else {
+				s.logger.Info("[SCM] SYSTEM cleanup task scheduled — service will exit shortly")
+			}
+
 			cancel()
 			if startupDone && s.agent != nil {
 				done := make(chan struct{})
@@ -423,7 +459,7 @@ func (s *edrService) Execute(args []string, r <-chan svc.ChangeRequest, changes 
 // configPath is loaded inside Execute() (not here) so that svc.Run()
 // registers the service handler with the SCM before any config I/O.
 // This prevents "Error 1: Incorrect function" if config loading fails.
-func Run(configPath string, logger *logging.Logger, embeddedTokenHash string) error {
+func Run(configPath string, logger *logging.Logger) error {
 	logger.Infof("Initializing Windows Service (config=%s)...", configPath)
 
 	// Check if running as a service
@@ -438,9 +474,8 @@ func Run(configPath string, logger *logging.Logger, embeddedTokenHash string) er
 
 	// Run the service — config loading is deferred to Execute().
 	err = svc.Run(ServiceName, &edrService{
-		configPath:        configPath,
-		logger:            logger,
-		embeddedTokenHash: embeddedTokenHash,
+		configPath: configPath,
+		logger:     logger,
 	})
 	if err != nil {
 		return fmt.Errorf("service run failed: %w", err)
@@ -456,95 +491,89 @@ func ensureEnrolled(cfg *config.Config, logger *logging.Logger, configPath strin
 	return enrollment.EnsureEnrolled(cfg, logger, configPath)
 }
 
-// watchUninstallFile polls for C:\ProgramData\EDR\uninstall.dat every 2 seconds.
-// When a file is found containing a valid SHA-256 token hash, the service
-// (running as SYSTEM) restores the service DACL and registry key permissions,
-// then signals the main control loop to initiate a clean shutdown.
-//
-// This file-based IPC approach is used instead of Custom Control Codes because
-// Go's svc package does not reliably forward user-defined control codes (128+)
-// to the Execute handler.
-func (s *edrService) watchUninstallFile(ctx context.Context, uninstallCh chan<- struct{}) {
-	const uninstallFile = `C:\ProgramData\EDR\uninstall.dat`
-	ticker := time.NewTicker(1 * time.Second)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			data, err := os.ReadFile(uninstallFile)
-			if err != nil {
-				continue // file doesn't exist — normal operation
-			}
-			hash := strings.TrimSpace(string(data))
-			if err := protection.VerifyUninstallHash(hash, s.embeddedTokenHash); err != nil {
-				s.logger.Warnf("[UNINSTALL] Invalid hash in uninstall.dat: %v", err)
-				_ = os.Remove(uninstallFile)
-				continue
-			}
+// disableServiceRecovery clears the service's recovery actions so the SCM
+// does not auto-restart it after we exit Execute(). Must run before the
+// service stops, otherwise a hardened new instance will immediately replace
+// the one being removed.
+func (s *edrService) disableServiceRecovery() {
+	scm, err := mgr.Connect()
+	if err != nil {
+		s.logger.Warnf("[UNINSTALL] SCM connect for recovery disable failed: %v", err)
+		return
+	}
+	defer scm.Disconnect()
 
-			// ── Valid hash — authorize uninstall ──────────────────────────
-			s.logger.Info("[UNINSTALL] Valid uninstall token hash detected")
+	svcHandle, err := scm.OpenService(ServiceName)
+	if err != nil {
+		s.logger.Warnf("[UNINSTALL] Open service for recovery disable failed: %v", err)
+		return
+	}
+	defer svcHandle.Close()
 
-			// CRITICAL: Disable recovery actions FIRST so the SCM does not
-			// automatically restart the service after we exit Execute().
-			// Without this, the service stops → SCM restarts it immediately
-			// (Delay: 0) → new instance re-hardens DACL → appears as if
-			// the service never stopped.
-			if scm, mgrErr := mgr.Connect(); mgrErr == nil {
-				if svcHandle, svcErr := scm.OpenService(ServiceName); svcErr == nil {
-					noRestart := []mgr.RecoveryAction{
-						{Type: mgr.NoAction, Delay: 0},
-						{Type: mgr.NoAction, Delay: 0},
-						{Type: mgr.NoAction, Delay: 0},
-					}
-					_ = svcHandle.SetRecoveryActions(noRestart, 0)
-					svcHandle.Close()
-					s.logger.Info("[UNINSTALL] Recovery actions disabled — no auto-restart")
-				}
-				scm.Disconnect()
-			}
+	noRestart := []mgr.RecoveryAction{
+		{Type: mgr.NoAction, Delay: 0},
+		{Type: mgr.NoAction, Delay: 0},
+		{Type: mgr.NoAction, Delay: 0},
+	}
+	if err := svcHandle.SetRecoveryActions(noRestart, 0); err != nil {
+		s.logger.Warnf("[UNINSTALL] SetRecoveryActions failed: %v", err)
+		return
+	}
+	s.logger.Info("[UNINSTALL] Recovery actions disabled — no auto-restart")
+}
 
-			// Restore service DACL (allow Administrators to stop/delete)
-			if err := protection.RestoreServiceDACL(ServiceName); err != nil {
-				s.logger.Errorf("[UNINSTALL] RestoreServiceDACL failed: %v", err)
-			} else {
-				s.logger.Info("[UNINSTALL] Service DACL restored — Admin access re-enabled")
-			}
+// releaseSelfProtections reverts every tamper-hardening layer applied in
+// Execute() so a SYSTEM cleanup task can stop the service, delete files, and
+// remove registry keys without running into ACCESS_DENIED.
+func (s *edrService) releaseSelfProtections() {
+	if err := protection.RestoreServiceDACL(ServiceName); err != nil {
+		s.logger.Errorf("[UNINSTALL] RestoreServiceDACL failed: %v", err)
+	} else {
+		s.logger.Info("[UNINSTALL] Service DACL restored — Admin access re-enabled")
+	}
 
-			// Restore registry key permissions
-			if err := protection.RestoreServiceRegistryKey(ServiceName); err != nil {
-				s.logger.Errorf("[UNINSTALL] RestoreServiceRegistryKey failed: %v", err)
-			} else {
-				s.logger.Info("[UNINSTALL] Service registry key DACL restored")
-			}
+	if err := protection.RestoreServiceRegistryKey(ServiceName); err != nil {
+		s.logger.Errorf("[UNINSTALL] RestoreServiceRegistryKey failed: %v", err)
+	} else {
+		s.logger.Info("[UNINSTALL] Service registry key DACL restored")
+	}
 
-			// Restore agent config registry key (allow Admin to delete during cleanup)
-			if err := protection.RestoreAgentRegistryKey(); err != nil {
-				s.logger.Errorf("[UNINSTALL] RestoreAgentRegistryKey failed: %v", err)
-			} else {
-				s.logger.Info("[UNINSTALL] Agent config registry key DACL restored")
-			}
+	if err := protection.RestoreAgentRegistryKey(); err != nil {
+		s.logger.Errorf("[UNINSTALL] RestoreAgentRegistryKey failed: %v", err)
+	} else {
+		s.logger.Info("[UNINSTALL] Agent config registry key DACL restored")
+	}
 
-			if s.cfg != nil {
-				if err := security.RestoreAgentDirectoriesACL(s.cfg.DataDirectoriesToHarden()); err != nil {
-					s.logger.Warnf("[UNINSTALL] RestoreAgentDirectoriesACL: %v", err)
-				} else {
-					s.logger.Info("[UNINSTALL] Agent data directory ACLs restored for cleanup")
-				}
-			}
-
-			_ = os.Remove(uninstallFile)
-			// Clean up any leftover debug/temp files
-			_ = os.Remove(`C:\ProgramData\EDR\uninstall_debug.txt`)
-			select {
-			case uninstallCh <- struct{}{}:
-			default:
-			}
-			return
+	if s.cfg != nil {
+		if err := security.RestoreAgentDirectoriesACL(s.cfg.DataDirectoriesToHarden()); err != nil {
+			s.logger.Warnf("[UNINSTALL] RestoreAgentDirectoriesACL: %v", err)
+		} else {
+			s.logger.Info("[UNINSTALL] Agent data directory ACLs restored for cleanup")
 		}
 	}
+}
+
+// scheduleSystemCleanupTask registers a one-shot SYSTEM scheduled task that
+// stops the service, deletes its SCM registration, kills any stragglers, and
+// removes C:\ProgramData\EDR. It is scheduled to fire after a short delay so
+// the in-flight SendCommandResult ACK can reach the server before the gRPC
+// stream dies with the service.
+func scheduleSystemCleanupTask(reason string) error {
+	taskName := fmt.Sprintf("EDR_ServerUninstall_%d", time.Now().UnixNano())
+	runAt := time.Now().Add(90 * time.Second).Format("15:04")
+	// Keep the command string simple: schtasks accepts a cmd /c line.
+	tr := `cmd /c sc stop EDRAgent & timeout /t 3 /nobreak & sc delete EDRAgent & taskkill /F /IM edr-agent.exe & rmdir /s /q C:\ProgramData\EDR`
+	create := exec.Command("schtasks", "/Create", "/TN", taskName, "/RU", "SYSTEM", "/SC", "ONCE", "/ST", runAt, "/F", "/TR", tr)
+	out, err := create.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("schtasks create: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+	run := exec.Command("schtasks", "/Run", "/TN", taskName)
+	if out, err := run.CombinedOutput(); err != nil {
+		return fmt.Errorf("schtasks run: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+	_ = reason // currently only logged by the caller; reserved for audit trail
+	return nil
 }
 
 // ServiceExists checks if EDRAgent is registered in the SCM using minimal
@@ -565,9 +594,10 @@ func ServiceExists() bool {
 	return true
 }
 
-// Install installs the Windows service.
-// embeddedTokenHash is saved to a protected registry key for uninstall verification.
-func Install(embeddedTokenHash string) error {
+// Install installs the Windows service. The agent no longer carries an
+// uninstall secret — removal is a server-authorised C2 action — so no token
+// state is persisted here.
+func Install() error {
 	// ── Pre-flight Check ────────────────────────────────────────────────
 	// Check if service already exists BEFORE attempting any file operations.
 	// If it does, we return an 'already exists' error immediately so the caller
@@ -647,13 +677,6 @@ func Install(embeddedTokenHash string) error {
 		fmt.Printf("Warning: failed to create event log source: %v\n", err)
 	}
 
-	// ── Save token hash to protected Registry ────────────────────────────
-	// This ensures uninstall verification works even if the EXE is replaced
-	// or the embedded hash is somehow lost.
-	if err := protection.SaveTokenHashToRegistry(embeddedTokenHash); err != nil {
-		fmt.Printf("Warning: failed to save token hash to registry: %v\n", err)
-	}
-
 	// NOTE: HardenAgentRegistryKey is NOT called here because Install()
 	// runs as Administrator, which cannot set OWNER=SYSTEM. The hardening
 	// is applied in Execute() which runs as SYSTEM.
@@ -679,300 +702,11 @@ func copyFile(src, dst string) error {
 	return err
 }
 
-// Uninstall removes the Windows service. Requires a valid anti-tamper token.
-// embeddedTokenHash is the SHA-256 hash of the enrollment token, compiled into
-// the binary. If the registry also contains a stored hash, it is used as the
-// primary source (more tamper-resistant than the embedded value).
-//
-// Flow:
-//  1. Determine the authoritative token hash (registry > embedded).
-//  2. Verify the plaintext token against the authoritative hash.
-//  3. Check if the service is running:
-//     a. Running  → write uninstall.dat, wait for the SYSTEM watcher to restore DACL.
-//     b. Stopped  → restore DACL directly from Administrator context (no watcher available).
-//  4. Delete the service from the SCM.
-func Uninstall(token, embeddedTokenHash string) error {
-	// ── Resolve authoritative token hash ────────────────────────────────────
-	// Priority: Registry (tamper-proof) > Embedded in EXE > legacy default
-	authoritativeHash := protection.ReadTokenHashFromRegistry()
-	if authoritativeHash == "" {
-		authoritativeHash = embeddedTokenHash
-	}
-
-	// ── Anti-Tamper: Verify uninstall token ──────────────────────────────────
-	if err := protection.VerifyUninstallToken(token, authoritativeHash); err != nil {
-		return fmt.Errorf("uninstall blocked: %w", err)
-	}
-
-	fmt.Println("  Token verified. Checking service state...")
-
-	// ── Check if the service is actually running ─────────────────────────────
-	// If the service is stopped (e.g., enrollment failed on first boot), there
-	// is no watcher goroutine to detect uninstall.dat. In that case, we must
-	// restore DACL/registry permissions DIRECTLY from Administrator context.
-	state, stateErr := Status()
-	serviceIsStopped := stateErr != nil || state == svc.Stopped
-
-	if serviceIsStopped {
-		// ── Stopped-service path: restore protections directly ──────────
-		fmt.Println("  Service is stopped — restoring protections directly...")
-		if err := protection.RestoreServiceDACL(ServiceName); err != nil {
-			fmt.Printf("  Warning: DACL restore: %v\n", err)
-		} else {
-			fmt.Println("  Service DACL restored.")
-		}
-		if err := protection.RestoreServiceRegistryKey(ServiceName); err != nil {
-			fmt.Printf("  Warning: Registry restore: %v\n", err)
-		} else {
-			fmt.Println("  Service registry keys restored.")
-		}
-		_ = protection.RestoreAgentRegistryKey()
-		if err := security.RestoreAgentDirectoriesACL(config.DefaultConfig().DataDirectoriesToHarden()); err != nil {
-			fmt.Printf("  Warning: directory ACL restore: %v\n", err)
-		}
-	} else {
-		// ── Running-service path: signal via uninstall.dat ───────────────
-		providedHash := protection.HashUninstallToken(token)
-		hashFilePath := filepath.Join("C:\\ProgramData\\EDR", "uninstall.dat")
-		if err := os.WriteFile(hashFilePath, []byte(providedHash), 0600); err != nil {
-			// In some environments the agent hardening may unexpectedly prevent
-			// Administrators from writing into C:\ProgramData\EDR. If so, fall back
-			// to a SYSTEM scheduled task that can stop/delete the service and remove
-			// the agent directory.
-			if isAccessDenied(err) {
-				fmt.Println("  Access denied writing uninstall signal — falling back to SYSTEM uninstall task...")
-				return uninstallViaSystemTask()
-			}
-			return fmt.Errorf("failed to write uninstall signal: %w", err)
-		}
-
-		fmt.Println("  Signaling running service to release protections...")
-
-		// Poll until the service stops
-		for i := 0; i < 30; i++ {
-			time.Sleep(1 * time.Second)
-			st, err := Status()
-			if err != nil || st == svc.Stopped {
-				break
-			}
-			if i%5 == 4 {
-				_ = os.WriteFile(hashFilePath, []byte(providedHash), 0600)
-				fmt.Printf("  Waiting for service to stop... (%d/30s)\n", i+1)
-			}
-		}
-		_ = os.Remove(hashFilePath)
-
-		// After signaling, also attempt direct DACL restore in case the
-		// watcher didn't fully complete before the service stopped.
-		_ = protection.RestoreServiceDACL(ServiceName)
-		_ = protection.RestoreServiceRegistryKey(ServiceName)
-		_ = protection.RestoreAgentRegistryKey()
-		_ = security.RestoreAgentDirectoriesACL(config.DefaultConfig().DataDirectoriesToHarden())
-	}
-
-	fmt.Println("  Removing service registration...")
-
-	// Clean up residual files and agent registry key
-	cleanupResidualFiles()
-	protection.CleanAgentRegistryKey()
-
-	return forceRemoveService()
-}
-
-// ForceUninstall removes the service WITHOUT token verification.
-// This is ONLY called from runInstall() during a re-install, which is already
-// a privileged operation (requires admin + enrollment token).
-// It is NOT exposed via any CLI flag.
-//
-// Handles both service states:
-//   - Running: signals via uninstall.dat, waits for watcher to restore DACL.
-//   - Stopped: restores DACL directly from Administrator context.
-func ForceUninstall(embeddedTokenHash string) error {
-	// ── Check if the service is actually running ─────────────────────────────
-	state, stateErr := Status()
-	serviceIsStopped := stateErr != nil || state == svc.Stopped
-
-	if serviceIsStopped {
-		// ── Stopped-service path: restore protections directly ──────────
-		fmt.Println("      Service is stopped — restoring protections directly...")
-		_ = protection.RestoreServiceDACL(ServiceName)
-		_ = protection.RestoreServiceRegistryKey(ServiceName)
-		_ = protection.RestoreAgentRegistryKey()
-		_ = security.RestoreAgentDirectoriesACL(config.DefaultConfig().DataDirectoriesToHarden())
-	} else {
-		// ── Running-service path: signal via uninstall.dat ───────────────
-		hashFilePath := filepath.Join("C:\\ProgramData\\EDR", "uninstall.dat")
-		hash := embeddedTokenHash
-		if hash == "" {
-			hash = protection.HashUninstallToken("EDR-Uninstall-2026!")
-		}
-		if err := os.WriteFile(hashFilePath, []byte(hash), 0600); err != nil && isAccessDenied(err) {
-			fmt.Println("      Access denied writing uninstall signal — falling back to SYSTEM uninstall task...")
-			return uninstallViaSystemTask()
-		}
-
-		fmt.Println("      Signaling running service to release protections...")
-		for i := 0; i < 15; i++ {
-			time.Sleep(1 * time.Second)
-			st, err := Status()
-			if err != nil || st == svc.Stopped {
-				break
-			}
-			if i%5 == 4 {
-				_ = os.WriteFile(hashFilePath, []byte(hash), 0600)
-			}
-		}
-		_ = os.Remove(hashFilePath)
-
-		// Belt-and-suspenders: also restore DACL in case the watcher did
-		// not fully complete.
-		_ = protection.RestoreServiceDACL(ServiceName)
-		_ = protection.RestoreServiceRegistryKey(ServiceName)
-		_ = protection.RestoreAgentRegistryKey()
-		_ = security.RestoreAgentDirectoriesACL(config.DefaultConfig().DataDirectoriesToHarden())
-	}
-
-	// Clean up residual files
-	cleanupResidualFiles()
-
-	return forceRemoveService()
-}
-
-func isAccessDenied(err error) bool {
-	if err == nil {
-		return false
-	}
-	// Keep it simple: these errors frequently surface as strings.
-	s := strings.ToLower(err.Error())
-	if strings.Contains(s, "access is denied") || strings.Contains(s, "permission denied") {
-		return true
-	}
-	// Also match the canonical Windows error.
-	return errors.Is(err, windows.ERROR_ACCESS_DENIED)
-}
-
-// uninstallViaSystemTask creates a one-shot Scheduled Task that runs as SYSTEM to:
-// - stop/delete EDRAgent service
-// - kill remaining processes
-// - remove C:\ProgramData\EDR
-//
-// This is a pragmatic fallback for environments where service ACL hardening
-// blocks Administrators from stopping/deleting the service.
-func uninstallViaSystemTask() error {
-	taskName := fmt.Sprintf("EDR_Remove_%d", os.Getpid())
-	st := time.Now().Add(1 * time.Minute).Format("15:04")
-	tr := `cmd /c sc stop EDRAgent & sc delete EDRAgent & timeout /t 2 /nobreak & taskkill /F /IM edr-agent.exe & taskkill /F /IM edr-agent-service.exe & rmdir /s /q C:\ProgramData\EDR`
-
-	create := exec.Command("schtasks", "/Create", "/TN", taskName, "/RU", "SYSTEM", "/SC", "ONCE", "/ST", st, "/F", "/TR", tr)
-	createOut, createErr := create.CombinedOutput()
-	if createErr != nil {
-		return fmt.Errorf("system uninstall task create failed: %w: %s", createErr, strings.TrimSpace(string(createOut)))
-	}
-
-	run := exec.Command("schtasks", "/Run", "/TN", taskName)
-	runOut, runErr := run.CombinedOutput()
-	if runErr != nil {
-		return fmt.Errorf("system uninstall task run failed: %w: %s", runErr, strings.TrimSpace(string(runOut)))
-	}
-
-	time.Sleep(3 * time.Second)
-	_ = exec.Command("schtasks", "/Delete", "/TN", taskName, "/F").Run()
-	return nil
-}
-
-// cleanupResidualFiles removes temporary files that may be left behind
-// by the uninstall process or by user errors (e.g., PowerShell's sc alias
-// creates files named 'stop' and 'delete' instead of calling sc.exe).
-func cleanupResidualFiles() {
-	residual := []string{
-		`C:\ProgramData\EDR\uninstall.dat`,
-		`C:\ProgramData\EDR\uninstall_debug.txt`,
-		`C:\ProgramData\EDR\stop`,
-		`C:\ProgramData\EDR\delete`,
-	}
-	for _, f := range residual {
-		_ = os.Remove(f)
-	}
-}
-
-// forceRemoveService stops and deletes the service.
-// Called after DACL restoration has been attempted by the caller.
-//
-// This function includes multiple retry strategies:
-//  1. Retry opening the service with full permissions (DACL restore may be async)
-//  2. If Access Denied persists, attempt DACL restore between retries
-//  3. If the service was already deleted (e.g., marked-for-delete), return success
-func forceRemoveService() error {
-	// Best-effort DACL restore from Admin context (belt-and-suspenders)
-	_ = protection.RestoreServiceDACL(ServiceName)
-	_ = protection.RestoreServiceRegistryKey(ServiceName)
-
-	m, err := mgr.Connect()
-	if err != nil {
-		return fmt.Errorf("failed to connect to service manager: %w", err)
-	}
-	defer m.Disconnect()
-
-	// Retry opening the service with escalating recovery attempts.
-	var s *mgr.Service
-	for attempt := 0; attempt < 10; attempt++ {
-		s, err = m.OpenService(ServiceName)
-		if err == nil {
-			break
-		}
-
-		// If service no longer exists, consider it success.
-		if strings.Contains(err.Error(), "not exist") || strings.Contains(err.Error(), "1060") {
-			return nil
-		}
-
-		// If Access Denied, re-attempt DACL restore before retrying.
-		// This handles the race condition where DACL restore is still propagating.
-		if attempt%3 == 2 {
-			_ = protection.RestoreServiceDACL(ServiceName)
-			_ = protection.RestoreServiceRegistryKey(ServiceName)
-		}
-
-		time.Sleep(1 * time.Second)
-	}
-	if err != nil {
-		// Final check: service may have been deleted between retries.
-		if strings.Contains(err.Error(), "not exist") || strings.Contains(err.Error(), "1060") {
-			return nil
-		}
-		return fmt.Errorf("service %s: %w", ServiceName, err)
-	}
-	defer s.Close()
-
-	// Disable recovery actions so the service doesn't auto-restart after stop.
-	noRestart := []mgr.RecoveryAction{
-		{Type: mgr.NoAction, Delay: 0},
-		{Type: mgr.NoAction, Delay: 0},
-		{Type: mgr.NoAction, Delay: 0},
-	}
-	_ = s.SetRecoveryActions(noRestart, 0)
-
-	// Stop the service if running.
-	status, err := s.Query()
-	if err == nil && status.State != svc.Stopped {
-		_, _ = s.Control(svc.Stop)
-		for i := 0; i < 30; i++ {
-			time.Sleep(500 * time.Millisecond)
-			status, err = s.Query()
-			if err != nil || status.State == svc.Stopped {
-				break
-			}
-		}
-	}
-
-	// Delete the service.
-	if err := s.Delete(); err != nil {
-		return fmt.Errorf("failed to delete service: %w", err)
-	}
-
-	eventlog.Remove(ServiceName)
-	return nil
-}
+// Note: local, token-based Uninstall / ForceUninstall helpers were removed.
+// The only supported removal path is an authenticated server-issued
+// UNINSTALL_AGENT command processed by the command handler, which calls
+// TriggerServerUninstall() above. The service itself then releases its
+// protections and schedules a SYSTEM cleanup task to finish the removal.
 
 // StartService opens a handle to the named service and issues a Start call.
 // Blocks up to 10 s polling until the service reaches the Running state.

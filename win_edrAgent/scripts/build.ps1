@@ -99,6 +99,6 @@ Write-Host ""
 # Usage instructions
 Write-Host "Usage:" -ForegroundColor Cyan
 Write-Host "  Install:   .\$Output -install"
-Write-Host "  Uninstall: .\$Output -uninstall"
+Write-Host "  Uninstall: issue UNINSTALL_AGENT from the EDR dashboard (RBAC + audit)"
 Write-Host "  Run:       .\$Output -debug"
 Write-Host "  Version:   .\$Output -version"

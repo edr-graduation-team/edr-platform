@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"runtime"
 	"runtime/debug"
 	"strings"
@@ -127,6 +128,15 @@ func (a *Agent) Start(ctx context.Context) error {
 
 	// ── Security hardening (ACLs, encryption, self-protection, retention) ──
 	a.initSecurity()
+
+	// Optional: bootstrap Sysmon on first run (best-effort; never blocks startup).
+	if a.cfg.Sysmon.InstallOnFirstRun {
+		a.wg.Add(1)
+		go func() {
+			defer a.wg.Done()
+			a.bootstrapSysmonOnce()
+		}()
+	}
 
 	// Start event batcher
 	a.wg.Add(1)
@@ -257,6 +267,37 @@ func (a *Agent) Start(ctx context.Context) error {
 
 	a.logger.Info("Agent started successfully")
 	return nil
+}
+
+func (a *Agent) bootstrapSysmonOnce() {
+	// Marker file to avoid repeating on every service restart.
+	const marker = `C:\ProgramData\EDR\sysmon_bootstrap.done`
+	if _, err := os.Stat(marker); err == nil {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(a.ctx, 3*time.Minute)
+	defer cancel()
+
+	a.logger.Info("[SYS] Sysmon bootstrap requested (sysmon.install_on_first_run=true)")
+	res := a.commandHandler.Execute(ctx, &command.Command{
+		ID:   "sysmon-bootstrap",
+		Type: command.CmdRestartService,
+		Parameters: map[string]string{
+			"mode":       "enable_sysmon",
+			"config_url": strings.TrimSpace(a.cfg.Sysmon.ConfigURL),
+		},
+	})
+	if res == nil || strings.EqualFold(res.Status, "FAILED") {
+		if res != nil && res.Error != "" {
+			a.logger.Warnf("[SYS] Sysmon bootstrap failed: %s", res.Error)
+		}
+		return
+	}
+
+	_ = os.MkdirAll(filepath.Dir(marker), 0755)
+	_ = os.WriteFile(marker, []byte(time.Now().UTC().Format(time.RFC3339)), 0644)
+	a.logger.Info("[SYS] Sysmon bootstrap completed")
 }
 
 // Stop gracefully stops all agent components.

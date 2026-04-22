@@ -59,6 +59,9 @@ type Options struct {
 	// ConfigPath is the absolute path where config.yaml will be written.
 	// Defaults to DefaultConfigPath.
 	ConfigPath string
+
+	// InstallSysmon is "true" to enable sysmon.install_on_first_run in generated config.
+	InstallSysmon string
 }
 
 // effectiveConfigPath returns opts.ConfigPath if set, otherwise DefaultConfigPath.
@@ -188,6 +191,12 @@ func GenerateConfig(opts Options) error {
 	cfg.Server.Address = opts.ServerDomain + ":" + opts.ServerPort
 	cfg.Certs.BootstrapToken = opts.Token
 	cfg.Agent.ID = uuid.New().String()
+
+	// Optional: Sysmon bootstrap (dashboard build flag).
+	// This is safe even when Sysmon is not present; the agent will no-op unless enabled.
+	if strings.EqualFold(opts.InstallSysmon, "true") {
+		cfg.Sysmon.InstallOnFirstRun = true
+	}
 
 	// ── Create the target directory ────────────────────────────────────────────
 	cfgPath := opts.effectiveConfigPath()

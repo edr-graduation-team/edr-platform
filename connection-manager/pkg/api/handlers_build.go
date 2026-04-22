@@ -21,6 +21,7 @@ type BuildAgentRequest struct {
 	ServerPort   string `json:"server_port"`
 	TokenID      string `json:"token_id" validate:"required"`
 	SkipConfig   bool   `json:"skip_config"` // if true, only token + CA are embedded
+	InstallSysmon bool  `json:"install_sysmon"` // if true, agent will install + enable Sysmon on first run
 }
 
 // builderRequest is the JSON body sent to the agent-builder service.
@@ -31,6 +32,7 @@ type builderRequest struct {
 	Token        string `json:"token"`
 	SkipConfig   bool   `json:"skip_config"`
 	CACertPEM    string `json:"ca_cert_pem"`
+	InstallSysmon bool  `json:"install_sysmon"`
 }
 
 // BuildAgent handles POST /api/v1/agent/build
@@ -132,6 +134,7 @@ func (h *Handlers) BuildAgent(c echo.Context) error {
 		Token:        tokenValue,
 		SkipConfig:   req.SkipConfig,
 		CACertPEM:    caCertPEM,
+		InstallSysmon: req.InstallSysmon,
 	}
 
 	body, err := json.Marshal(buildReq)

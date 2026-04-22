@@ -71,7 +71,8 @@ export type CommandType = 'kill_process' | 'terminate_process' | 'quarantine_fil
     'isolate_network' | 'restore_network' | 'scan_file' | 'scan_memory' | 'custom' |
     'restart_machine' | 'shutdown_machine' | 'update_filter_policy' |
     'run_cmd' | 'block_ip' | 'unblock_ip' | 'block_domain' | 'unblock_domain' | 'update_signatures' | 'update_config' |
-    'unisolate_network' | 'restore_quarantine_file' | 'delete_quarantine_file';
+    'unisolate_network' | 'restore_quarantine_file' | 'delete_quarantine_file' |
+    'enable_sysmon' | 'disable_sysmon';
 export type CommandStatus = 'pending' | 'sent' | 'acknowledged' | 'executing' | 'completed' | 'failed' | 'timeout' | 'cancelled';
 
 // Sprint 4 context-aware scoring types
@@ -790,6 +791,7 @@ export interface AgentBuildRequest {
     server_port?: string;
     token_id: string;
     skip_config: boolean;
+    install_sysmon?: boolean;
 }
 
 export const agentBuildApi = {

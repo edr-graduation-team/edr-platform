@@ -62,15 +62,21 @@ const RESPONSE_OPTIONS: { value: CommandType; label: string; destructive?: boole
     { value: 'block_domain', label: 'Block domain' },
     { value: 'unblock_domain', label: 'Unblock domain' },
     { value: 'run_cmd', label: 'Run CMD (whitelisted)' },
+    { value: 'custom', label: 'Custom command (whitelisted)' },
+    { value: 'collect_logs', label: 'Collect logs' },
     { value: 'collect_forensics', label: 'Collect forensics' },
+    { value: 'scan_memory', label: 'Scan memory (file hash)' },
     { value: 'update_signatures', label: 'Update signatures' },
     { value: 'update_config', label: 'Update config (hot reload)' },
     { value: 'update_filter_policy', label: 'Update filter policy (JSON)' },
+    { value: 'restart_agent', label: 'Restart agent' },
     { value: 'restart_service', label: 'Restart agent service' },
     { value: 'stop_agent', label: 'Stop agent service' },
     { value: 'start_agent', label: 'Start agent service' },
     { value: 'restart_machine', label: 'Restart machine', destructive: true },
     { value: 'shutdown_machine', label: 'Shutdown machine', destructive: true },
+    { value: 'enable_sysmon', label: 'Enable Sysmon (install + channel)' },
+    { value: 'disable_sysmon', label: 'Disable Sysmon (uninstall)' },
 ];
 
 function buildCommandParameters(cmd: CommandType, f: Record<string, string>): Record<string, string> {
@@ -96,17 +102,35 @@ function buildCommandParameters(cmd: CommandType, f: Record<string, string>): Re
             return { domain: (f.domain || '').trim() };
         case 'run_cmd':
             return { cmd: (f.cmd || '').trim() };
+        case 'custom':
+            return { cmd: (f.cmd || '').trim() };
+        case 'collect_logs':
         case 'collect_forensics': {
             const o: Record<string, string> = {};
-            const et = f.event_types?.trim() || f.log_types?.trim();
-            if (et) {
-                o.event_types = et;
-                o.log_types = et;
-            }
+            const types = f.types?.trim() || f.log_types?.trim();
+            if (types) o.log_types = types;
+            const tr = f.time_range?.trim();
+            if (tr) o.time_range = tr;
             if (f.max_events?.trim()) o.max_events = f.max_events.trim();
             if (f.file_path?.trim()) o.file_path = f.file_path.trim();
             return o;
         }
+        case 'scan_memory':
+        case 'scan_file':
+            return { file_path: (f.file_path || f.path || '').trim() };
+        case 'restart_agent':
+            return { mode: 'restart' };
+        case 'stop_agent':
+            return { mode: 'stop' };
+        case 'start_agent':
+            return { mode: 'start' };
+        case 'enable_sysmon': {
+            const o: Record<string, string> = { mode: 'enable_sysmon' };
+            if (f.sysmon_config_url?.trim()) o.config_url = f.sysmon_config_url.trim();
+            return o;
+        }
+        case 'disable_sysmon':
+            return { mode: 'disable_sysmon' };
         case 'update_signatures': {
             const o: Record<string, string> = { url: (f.sig_url || '').trim() };
             if (f.checksum_sha256?.trim()) o.checksum_sha256 = f.checksum_sha256.trim();
@@ -1172,22 +1196,80 @@ function ResponseTab({
                             </>
                         )}
 
-                        {cmdType === 'run_cmd' && (
+                        {(cmdType === 'run_cmd' || cmdType === 'custom') && (
                             <>
                                 <label className="text-xs text-slate-500">Command (whitelisted)</label>
                                 <input className="input w-full font-mono text-xs" placeholder="hostname" value={fields.cmd || ''} onChange={(e) => patch('cmd', e.target.value)} disabled={!canExec} />
                             </>
                         )}
 
-                        {cmdType === 'collect_forensics' && (
+                        {(cmdType === 'collect_logs' || cmdType === 'collect_forensics') && (
                             <>
-                                <label className="text-xs text-slate-500">Event types (comma-separated)</label>
-                                <input className="input w-full text-xs" placeholder="Security,System,Application" value={fields.event_types || ''} onChange={(e) => patch('event_types', e.target.value)} disabled={!canExec} />
-                                <label className="text-xs text-slate-500">Max events</label>
-                                <input className="input w-full" value={fields.max_events || '100'} onChange={(e) => patch('max_events', e.target.value)} disabled={!canExec} />
-                                <label className="text-xs text-slate-500">File path (optional)</label>
-                                <input className="input w-full font-mono text-xs" value={fields.file_path || ''} onChange={(e) => patch('file_path', e.target.value)} disabled={!canExec} />
+                                <label className="text-xs text-slate-500">Log types (comma-separated)</label>
+                                <input
+                                    className="input w-full text-xs"
+                                    placeholder="Security,System,Application,Sysmon,PowerShell"
+                                    value={fields.log_types || ''}
+                                    onChange={(e) => patch('log_types', e.target.value)}
+                                    disabled={!canExec}
+                                />
+                                <label className="text-xs text-slate-500">Time range</label>
+                                <input
+                                    className="input w-full text-xs"
+                                    placeholder="24h | 7d | Last 6 hours"
+                                    value={fields.time_range || '24h'}
+                                    onChange={(e) => patch('time_range', e.target.value)}
+                                    disabled={!canExec}
+                                />
+                                <label className="text-xs text-slate-500">Max events (per log)</label>
+                                <input className="input w-full" value={fields.max_events || '500'} onChange={(e) => patch('max_events', e.target.value)} disabled={!canExec} />
+                                <label className="text-xs text-slate-500">File path (optional, hash scan)</label>
+                                <input className="input w-full font-mono text-xs" placeholder="C:\\path\\to\\file.exe" value={fields.file_path || ''} onChange={(e) => patch('file_path', e.target.value)} disabled={!canExec} />
                             </>
+                        )}
+
+                        {(cmdType === 'scan_memory' || cmdType === 'scan_file') && (
+                            <>
+                                <label className="text-xs text-slate-500">File path</label>
+                                <input
+                                    className="input w-full font-mono text-xs"
+                                    placeholder="C:\\path\\to\\file.exe"
+                                    value={fields.file_path || ''}
+                                    onChange={(e) => patch('file_path', e.target.value)}
+                                    disabled={!canExec}
+                                />
+                                <p className="text-xs text-slate-500">
+                                    Note: in this build, <code>scan_memory</code> is implemented as a safe on-disk hash scan (same as <code>scan_file</code>).
+                                </p>
+                            </>
+                        )}
+
+                        {(cmdType === 'restart_agent' || cmdType === 'stop_agent' || cmdType === 'start_agent' || cmdType === 'restart_service') && (
+                            <p className="text-xs text-slate-500">
+                                No parameters required. The agent service is controlled via Windows SCM (mode: stop/start/restart).
+                            </p>
+                        )}
+
+                        {cmdType === 'enable_sysmon' && (
+                            <>
+                                <label className="text-xs text-slate-500">Sysmon config URL (optional)</label>
+                                <input
+                                    className="input w-full font-mono text-xs"
+                                    placeholder="https://example.com/sysmonconfig.xml"
+                                    value={fields.sysmon_config_url || ''}
+                                    onChange={(e) => patch('sysmon_config_url', e.target.value)}
+                                    disabled={!canExec}
+                                />
+                                <p className="text-xs text-slate-500">
+                                    Installs Sysmon if missing, enables <code>Microsoft-Windows-Sysmon/Operational</code>, and applies config if provided.
+                                </p>
+                            </>
+                        )}
+
+                        {cmdType === 'disable_sysmon' && (
+                            <p className="text-xs text-slate-500">
+                                Disables the Sysmon channel and uninstalls Sysmon if present.
+                            </p>
                         )}
 
                         {cmdType === 'update_signatures' && (

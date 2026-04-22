@@ -48,6 +48,8 @@ const COMMAND_DEFINITIONS: Record<CommandType, { label: string; icon: typeof Pla
     delete_quarantine_file: { label: 'Delete Quarantine File', icon: Trash2, description: 'Permanently delete quarantined file', color: 'text-red-600' },
     custom: { label: 'Custom Command', icon: Zap, description: 'Execute custom command', color: 'text-gray-500' },
     update_filter_policy: { label: 'Update Filter Policy', icon: Shield, description: 'Push new filtering rules to agent', color: 'text-teal-500' },
+    enable_sysmon: { label: 'Enable Sysmon', icon: Shield, description: 'Install Sysmon and enable Operational channel', color: 'text-cyan-600' },
+    disable_sysmon: { label: 'Disable Sysmon', icon: ShieldOff, description: 'Disable Sysmon channel and uninstall', color: 'text-slate-500' },
 };
 
 // Status badge component

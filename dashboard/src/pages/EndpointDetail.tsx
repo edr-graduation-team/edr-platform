@@ -19,6 +19,8 @@ import {
     type CommandType,
     type EndpointRiskSummary,
     type QuarantineItem,
+    type ForensicCollection,
+    type ForensicEvent,
 } from '../api/client';
 import { EventDetailModal, Modal, useToast } from '../components';
 import { formatRelativeTime, getEffectiveStatus } from '../utils/agentDisplay';
@@ -28,6 +30,7 @@ type DetailTab =
     | 'response'
     | 'quarantine'
     | 'activity'
+    | 'forensics'
     | 'network'
     | 'configuration'
     | 'software';
@@ -37,6 +40,7 @@ const TAB_LABELS: { id: DetailTab; label: string }[] = [
     { id: 'response', label: 'Response' },
     { id: 'quarantine', label: 'Quarantine' },
     { id: 'activity', label: 'Activity' },
+    { id: 'forensics', label: 'Forensic Logs' },
     { id: 'network', label: 'Network' },
     { id: 'configuration', label: 'Configuration' },
     { id: 'software', label: 'Software' },
@@ -113,6 +117,8 @@ function buildCommandParameters(cmd: CommandType, f: Record<string, string>): Re
             if (tr) o.time_range = tr;
             if (f.max_events?.trim()) o.max_events = f.max_events.trim();
             if (f.file_path?.trim()) o.file_path = f.file_path.trim();
+            // Return structured events so the backend can persist them for the Forensic Logs tab.
+            o.return_events = 'true';
             return o;
         }
         case 'scan_memory':
@@ -466,6 +472,14 @@ export default function EndpointDetail() {
                         />
                     )}
 
+                    {tab === 'forensics' && canViewResp && (
+                        <ForensicsTab agentId={agent.id} />
+                    )}
+
+                    {tab === 'forensics' && !canViewResp && (
+                        <p className="text-slate-500">You do not have permission to view forensic logs.</p>
+                    )}
+
                     {tab === 'network' &&
                         (canViewAlerts ? (
                             <NetworkTab agentId={agentId} canViewAlerts={canViewAlerts} />
@@ -722,6 +736,275 @@ function OverviewTab({
                     Use the <strong>Response</strong> tab to execute commands and view full command history.
                 </p>
             </div>
+        </div>
+    );
+}
+
+function ForensicsTab({ agentId }: { agentId: string }) {
+    const [searchParams, setSearchParams] = useSearchParams();
+    const { showToast } = useToast();
+
+    const preselectedCommandId = searchParams.get('command_id') || '';
+    const [selectedCommandId, setSelectedCommandId] = useState<string>(preselectedCommandId);
+    const [logType, setLogType] = useState<string>('security');
+    const [cursor, setCursor] = useState<number | undefined>(undefined);
+    const [rows, setRows] = useState<ForensicEvent[]>([]);
+    const [rawOpen, setRawOpen] = useState(false);
+    const [rawEvent, setRawEvent] = useState<ForensicEvent | null>(null);
+
+    const collectionsQ = useQuery({
+        queryKey: ['forensics', 'collections', agentId],
+        queryFn: () => agentsApi.getForensicCollections(agentId, { limit: 25 }),
+        refetchInterval: 30000,
+    });
+
+    const collections: ForensicCollection[] = (collectionsQ.data as any)?.data || [];
+
+    useEffect(() => {
+        if (!selectedCommandId) {
+            const first = collections[0]?.command_id;
+            if (first) setSelectedCommandId(first);
+        }
+    }, [collections, selectedCommandId]);
+
+    useEffect(() => {
+        // Keep URL in sync so Command Center can deep-link.
+        if (!selectedCommandId) return;
+        const next = new URLSearchParams(searchParams);
+        next.set('tab', 'forensics');
+        next.set('command_id', selectedCommandId);
+        setSearchParams(next, { replace: true });
+        // Reset paging on selection changes.
+        setCursor(undefined);
+        setRows([]);
+    }, [selectedCommandId, searchParams, setSearchParams]);
+
+    const eventsQ = useQuery({
+        queryKey: ['forensics', 'events', agentId, selectedCommandId, logType, cursor],
+        enabled: Boolean(selectedCommandId && logType),
+        queryFn: () =>
+            agentsApi.getForensicEvents(agentId, selectedCommandId, {
+                log_type: logType,
+                limit: 100,
+                cursor,
+            }),
+    });
+
+    useEffect(() => {
+        const payload: any = eventsQ.data;
+        const data: ForensicEvent[] = payload?.data || [];
+        if (!eventsQ.isSuccess) return;
+        if (!cursor) setRows(data);
+        else setRows((prev) => [...prev, ...data]);
+    }, [eventsQ.data, eventsQ.isSuccess]);
+
+    const nextCursor: number | undefined = (eventsQ.data as any)?.next_cursor;
+
+    const selected = collections.find((c) => c.command_id === selectedCommandId);
+    const summaryCounts = selected?.summary?.counts || selected?.summary?.output_text || '';
+    const warnings = selected?.summary?.warnings as any[] | undefined;
+
+    return (
+        <div className="space-y-4">
+            <div>
+                <h2 className="text-lg font-bold text-slate-900 dark:text-white">Forensic Logs</h2>
+                <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
+                    Browse events returned from <code className="text-xs">collect_logs</code> / <code className="text-xs">collect_forensics</code>.
+                </p>
+            </div>
+
+            <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white/60 dark:bg-slate-900/40 overflow-hidden">
+                <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between">
+                    <div className="text-sm font-semibold text-slate-700 dark:text-slate-200">Recent collections</div>
+                    {collectionsQ.isLoading && <span className="text-xs text-slate-500">Loading…</span>}
+                </div>
+                <div className="overflow-x-auto">
+                    <table className="min-w-full text-sm">
+                        <thead className="bg-slate-50 dark:bg-slate-800/60 text-slate-600 dark:text-slate-300">
+                            <tr>
+                                <th className="text-left px-4 py-2">Issued</th>
+                                <th className="text-left px-4 py-2">Time range</th>
+                                <th className="text-left px-4 py-2">Log types</th>
+                                <th className="text-left px-4 py-2">Summary</th>
+                                <th className="text-right px-4 py-2">View</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
+                            {collections.map((c) => (
+                                <tr key={c.command_id} className={c.command_id === selectedCommandId ? 'bg-cyan-50/60 dark:bg-cyan-500/10' : ''}>
+                                    <td className="px-4 py-2 text-slate-700 dark:text-slate-200 whitespace-nowrap">
+                                        {new Date(c.issued_at).toLocaleString()}
+                                    </td>
+                                    <td className="px-4 py-2 text-slate-600 dark:text-slate-300">{c.time_range || '—'}</td>
+                                    <td className="px-4 py-2 font-mono text-xs text-slate-600 dark:text-slate-300">{c.log_types || '—'}</td>
+                                    <td className="px-4 py-2 text-slate-600 dark:text-slate-300 truncate max-w-[28rem]" title={String(c.summary?.counts || '')}>
+                                        {String(c.summary?.counts || '').slice(0, 140) || '—'}
+                                    </td>
+                                    <td className="px-4 py-2 text-right">
+                                        <button
+                                            type="button"
+                                            className="px-2.5 py-1.5 text-xs font-semibold rounded-lg border border-cyan-500/30 bg-cyan-500/10 text-cyan-800 dark:text-cyan-300 hover:bg-cyan-500/20"
+                                            onClick={() => setSelectedCommandId(c.command_id)}
+                                        >
+                                            View
+                                        </button>
+                                    </td>
+                                </tr>
+                            ))}
+                            {!collectionsQ.isLoading && collections.length === 0 && (
+                                <tr>
+                                    <td className="px-4 py-3 text-slate-500" colSpan={5}>
+                                        No forensic collections yet. Run <strong>Collect logs</strong> from the Response tab.
+                                    </td>
+                                </tr>
+                            )}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div className="flex flex-col lg:flex-row gap-3 lg:items-end">
+                <div className="flex-1">
+                    <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">Collection</label>
+                    <select
+                        value={selectedCommandId}
+                        onChange={(e) => setSelectedCommandId(e.target.value)}
+                        className="w-full bg-white dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm"
+                    >
+                        {collections.map((c) => (
+                            <option key={c.command_id} value={c.command_id}>
+                                {c.command_id.slice(0, 8)} — {new Date(c.issued_at).toLocaleString()}
+                            </option>
+                        ))}
+                    </select>
+                </div>
+                <div className="w-full lg:w-64">
+                    <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">Log type</label>
+                    <select
+                        value={logType}
+                        onChange={(e) => {
+                            setLogType(e.target.value);
+                            setCursor(undefined);
+                            setRows([]);
+                        }}
+                        className="w-full bg-white dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm"
+                    >
+                        <option value="security">security</option>
+                        <option value="system">system</option>
+                        <option value="application">application</option>
+                        <option value="powershell">powershell</option>
+                        <option value="sysmon/operational">sysmon/operational</option>
+                    </select>
+                </div>
+            </div>
+
+            {summaryCounts && (
+                <div className="text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/40 px-3 py-2 text-slate-700 dark:text-slate-200">
+                    <div className="font-semibold">Summary</div>
+                    <div className="mt-1 font-mono whitespace-pre-wrap break-words">{String(summaryCounts)}</div>
+                    {warnings && warnings.length > 0 && (
+                        <div className="mt-2 text-amber-700 dark:text-amber-300">
+                            <div className="font-semibold">Warnings</div>
+                            <div className="mt-1 font-mono whitespace-pre-wrap break-words">{JSON.stringify(warnings, null, 2)}</div>
+                        </div>
+                    )}
+                </div>
+            )}
+
+            <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white/60 dark:bg-slate-900/40 overflow-hidden">
+                <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between">
+                    <div className="text-sm font-semibold text-slate-700 dark:text-slate-200">
+                        Events ({rows.length})
+                    </div>
+                    {eventsQ.isFetching && <span className="text-xs text-slate-500">Loading…</span>}
+                </div>
+                <div className="overflow-x-auto">
+                    <table className="min-w-full text-sm">
+                        <thead className="bg-slate-50 dark:bg-slate-800/60 text-slate-600 dark:text-slate-300">
+                            <tr>
+                                <th className="text-left px-4 py-2">Time</th>
+                                <th className="text-left px-4 py-2">LogType</th>
+                                <th className="text-left px-4 py-2">EventID</th>
+                                <th className="text-left px-4 py-2">Level</th>
+                                <th className="text-left px-4 py-2">Provider</th>
+                                <th className="text-left px-4 py-2">Message</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
+                            {rows.map((e) => (
+                                <tr
+                                    key={e.id}
+                                    className="hover:bg-slate-50 dark:hover:bg-slate-800/40 cursor-pointer"
+                                    onClick={() => { setRawEvent(e); setRawOpen(true); }}
+                                >
+                                    <td className="px-4 py-2 whitespace-nowrap text-slate-700 dark:text-slate-200">
+                                        {e.timestamp ? new Date(e.timestamp).toLocaleString() : '—'}
+                                    </td>
+                                    <td className="px-4 py-2 font-mono text-xs text-slate-600 dark:text-slate-300">{e.log_type}</td>
+                                    <td className="px-4 py-2 font-mono text-xs text-slate-600 dark:text-slate-300">{e.event_id || '—'}</td>
+                                    <td className="px-4 py-2 text-slate-600 dark:text-slate-300">{e.level || '—'}</td>
+                                    <td className="px-4 py-2 text-slate-600 dark:text-slate-300">{e.provider || '—'}</td>
+                                    <td className="px-4 py-2 text-slate-600 dark:text-slate-300 truncate max-w-[36rem]" title={e.message || ''}>
+                                        {e.message || '—'}
+                                    </td>
+                                </tr>
+                            ))}
+                            {eventsQ.isSuccess && rows.length === 0 && (
+                                <tr>
+                                    <td className="px-4 py-3 text-slate-500" colSpan={6}>
+                                        No events stored for this log type.
+                                    </td>
+                                </tr>
+                            )}
+                        </tbody>
+                    </table>
+                </div>
+                <div className="px-4 py-3 border-t border-slate-200 dark:border-slate-700 flex justify-end">
+                    <button
+                        type="button"
+                        disabled={!nextCursor || eventsQ.isFetching}
+                        onClick={() => setCursor(nextCursor)}
+                        className="px-3 py-2 text-sm font-semibold rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/60 disabled:opacity-50"
+                    >
+                        Load more
+                    </button>
+                </div>
+            </div>
+
+            <Modal
+                isOpen={rawOpen}
+                onClose={() => { setRawOpen(false); setRawEvent(null); }}
+                title="Event raw payload"
+                footer={
+                    <div className="flex justify-end gap-2">
+                        <button
+                            type="button"
+                            className="btn btn-secondary"
+                            onClick={() => { setRawOpen(false); setRawEvent(null); }}
+                        >
+                            Close
+                        </button>
+                        <button
+                            type="button"
+                            className="btn bg-cyan-600 hover:bg-cyan-700 text-white"
+                            onClick={async () => {
+                                try {
+                                    await navigator.clipboard.writeText(JSON.stringify(rawEvent?.raw ?? {}, null, 2));
+                                    showToast('Copied raw JSON to clipboard', 'success');
+                                } catch {
+                                    showToast('Copy failed', 'error');
+                                }
+                            }}
+                        >
+                            Copy
+                        </button>
+                    </div>
+                }
+            >
+                <pre className="bg-slate-900 p-3 rounded-md text-slate-100 whitespace-pre-wrap break-words max-h-[30rem] overflow-y-auto text-xs">
+                    {JSON.stringify(rawEvent?.raw ?? {}, null, 2)}
+                </pre>
+            </Modal>
         </div>
     );
 }

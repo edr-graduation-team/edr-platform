@@ -187,6 +187,18 @@ const CommandRow = React.memo(function CommandRow({ command: item }: { command: 
                         </pre>
                     </div>
 
+                    {(item.command_type === 'collect_logs' || item.command_type === 'collect_forensics') && (
+                        <div className="mt-4 flex justify-end">
+                            <Link
+                                to={`/management/devices/${encodeURIComponent(item.agent_id)}?tab=forensics&command_id=${encodeURIComponent(item.id)}`}
+                                className="px-3 py-2 text-sm font-semibold rounded-lg border border-cyan-500/40 bg-cyan-500/10 text-cyan-800 dark:text-cyan-300 hover:bg-cyan-500/20 transition-colors"
+                                title="Open Forensic Logs tab for this collection"
+                            >
+                                Open Forensic Logs
+                            </Link>
+                        </div>
+                    )}
+
                     {item.result && (
                         <div className="mt-4">
                             <div className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider mb-1 flex items-center gap-1">

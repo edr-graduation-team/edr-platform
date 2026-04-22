@@ -187,6 +187,7 @@ func main() {
 	var enrollmentTokenRepo repository.EnrollmentTokenRepository
 	var agentRepo repository.AgentRepository     // hoisted for sweeper access
 	var commandRepo repository.CommandRepository // hoisted for C2 injection
+	var forensicRepo repository.ForensicRepository
 	var quarantineRepo repository.QuarantineRepository
 	var auditRepo repository.AuditLogRepository // hoisted for audit log API
 	var alertRepo repository.AlertRepository    // hoisted for alert stats API
@@ -230,6 +231,7 @@ func main() {
 		auditRepo = repository.NewPostgresAuditLogRepository(pool)
 		certRepo := repository.NewPostgresCertificateRepository(pool)
 		commandRepo = repository.NewPostgresCommandRepository(pool)
+		forensicRepo = repository.NewPostgresForensicRepository(pool)
 		alertRepo = repository.NewPostgresAlertRepository(pool)
 		quarantineRepo = repository.NewPostgresQuarantineRepository(pool)
 
@@ -350,6 +352,9 @@ func main() {
 	if err != nil {
 		logger.Fatalf("Failed to create gRPC server: %v", err)
 	}
+	if forensicRepo != nil {
+		grpcServer.SetForensicRepo(forensicRepo)
+	}
 
 	// Build REST API config (dashboard /api/v1): use API config with HTTP port so one server serves both.
 	apiCfg := cfg.API
@@ -414,6 +419,7 @@ func main() {
 		eventRepo := repository.NewPostgresEventRepository(pool)
 		apiHandlers.SetEventRepo(eventRepo)
 		evtHandler.SetEventRepo(eventRepo)
+		apiHandlers.SetForensicRepo(forensicRepo)
 		logger.Info("User management and RBAC enabled")
 	}
 

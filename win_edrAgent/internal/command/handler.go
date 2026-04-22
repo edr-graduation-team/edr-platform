@@ -894,6 +894,18 @@ func wevtUtilPath() string {
 	return "wevtutil.exe"
 }
 
+func powershellExePath() string {
+	root := os.Getenv("SystemRoot")
+	if root == "" {
+		root = `C:\Windows`
+	}
+	p := filepath.Join(root, "System32", "WindowsPowerShell", "v1.0", "powershell.exe")
+	if st, err := os.Stat(p); err == nil && !st.IsDir() {
+		return p
+	}
+	return "powershell.exe"
+}
+
 // forensicsLookbackMs returns the XPath timediff window in milliseconds from parameters.
 func forensicsLookbackMs(params map[string]string) int64 {
 	if v := strings.TrimSpace(params["time_range_ms"]); v != "" {
@@ -1053,6 +1065,17 @@ func (h *Handler) collectForensics(ctx context.Context, params map[string]string
 	if hasLogs {
 		types := strings.Split(logTypes, ",")
 		var results []string
+		var bundleEvents []map[string]any
+		returnEvents := true
+		if v := strings.TrimSpace(params["return_events"]); v != "" {
+			returnEvents = strings.EqualFold(v, "true") || v == "1" || strings.EqualFold(v, "yes")
+		}
+		eventsPerType := 75
+		if v := strings.TrimSpace(params["events_per_type"]); v != "" {
+			if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 500 {
+				eventsPerType = n
+			}
+		}
 		anyOK := false
 		for _, logName := range types {
 			logName = strings.TrimSpace(logName)
@@ -1122,6 +1145,16 @@ func (h *Handler) collectForensics(ctx context.Context, params map[string]string
 			results = append(results, fmt.Sprintf("%s: %d events (window_ms=%d cap=%d)", channel, eventCount, ms, maxEv))
 			anyOK = true
 			h.logger.Infof("[C2] Forensics log slice ok channel=%s events=%d", channel, eventCount)
+
+			if returnEvents {
+				// Best-effort structured event capture for UI browsing.
+				evs, err := h.collectEventLogAsJSON(ctx, channel, strings.ToLower(canonicalEventLogChannel(logName)), ms, eventsPerType)
+				if err != nil {
+					warnings = append(warnings, fmt.Sprintf("%s: structured parse failed (%v)", logName, err))
+				} else if len(evs) > 0 {
+					bundleEvents = append(bundleEvents, evs...)
+				}
+			}
 		}
 
 		if len(results) == 0 {
@@ -1130,6 +1163,27 @@ func (h *Handler) collectForensics(ctx context.Context, params map[string]string
 		if !anyOK {
 			return strings.Join(results, "; "), fmt.Errorf("all requested event logs failed: %s", strings.Join(results, "; "))
 		}
+
+		// If requested, return JSON bundle so the server can persist events.
+		if returnEvents {
+			payload := map[string]any{
+				"version":    1,
+				"command_id": strings.TrimSpace(params["command_id"]),
+				"agent_id":   strings.TrimSpace(params["agent_id"]),
+				"time_range": strings.TrimSpace(params["time_range"]),
+				"log_types":  logTypes,
+				"summary": map[string]any{
+					"counts":   strings.Join(results, "; "),
+					"warnings": warnings,
+				},
+				"events": bundleEvents,
+			}
+			b, _ := json.Marshal(payload)
+			if len(b) > 0 {
+				return string(b), nil
+			}
+		}
+
 		sections = append(sections, "event_logs: "+strings.Join(results, "; "))
 	}
 
@@ -1171,6 +1225,57 @@ func (h *Handler) collectFileHashForensics(ctx context.Context, filePath string)
 	}
 	return fmt.Sprintf("File scan: path=%s size=%d bytes sha256=%s (hashed_bytes=%d)",
 		filePath, info.Size(), hashHex, readN), nil
+}
+
+func (h *Handler) collectEventLogAsJSON(ctx context.Context, channel string, logType string, lookbackMs int64, maxEvents int) ([]map[string]any, error) {
+	ps := powershellExePath()
+
+	script := fmt.Sprintf(`$ErrorActionPreference='Stop';
+$ms=%d;
+$log=%q;
+$max=%d;
+$q = "*[System[TimeCreated[timediff(@SystemTime) <= $ms]]]";
+$events = Get-WinEvent -LogName $log -FilterXPath $q -MaxEvents $max -ErrorAction Stop;
+$out = @();
+foreach ($e in $events) {
+  $out += [pscustomobject]@{
+    timestamp = ($e.TimeCreated.ToUniversalTime().ToString("o"));
+    log_type = %q;
+    event_id = [string]$e.Id;
+    level = [string]$e.LevelDisplayName;
+    provider = [string]$e.ProviderName;
+    message = [string]$e.Message;
+    raw = [pscustomobject]@{ xml = [string]$e.ToXml() };
+  }
+}
+$out | ConvertTo-Json -Depth 6 -Compress;`, lookbackMs, channel, maxEvents, strings.ToLower(logType))
+
+	out, err := exec.CommandContext(ctx, ps, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script).CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("powershell get-winevent failed: %v: %s", err, string(out))
+	}
+	raw := strings.TrimSpace(string(out))
+	if raw == "" {
+		return nil, nil
+	}
+	var anyVal any
+	if err := json.Unmarshal([]byte(raw), &anyVal); err != nil {
+		return nil, fmt.Errorf("json parse failed: %v", err)
+	}
+	switch v := anyVal.(type) {
+	case []any:
+		res := make([]map[string]any, 0, len(v))
+		for _, it := range v {
+			if m, ok := it.(map[string]any); ok {
+				res = append(res, m)
+			}
+		}
+		return res, nil
+	case map[string]any:
+		return []map[string]any{v}, nil
+	default:
+		return nil, nil
+	}
 }
 
 // timeRangeToMs converts a time range string to milliseconds for wevtutil timediff().

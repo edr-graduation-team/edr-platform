@@ -34,6 +34,7 @@ type Handlers struct {
 	auditRepo           repository.AuditLogRepository        // audit log querying
 	alertRepo           repository.AlertRepository           // alert querying and stats
 	eventRepo           repository.EventRepository           // event search/list (durable store)
+	forensicRepo        repository.ForensicRepository        // forensic collections/events (collect_logs)
 	userRepo            repository.UserRepository            // user CRUD
 	roleRepo            repository.RoleRepository            // RBAC role/permission management
 	contextPolicyRepo   repository.ContextPolicyRepository   // context-aware policy controls
@@ -100,6 +101,11 @@ func (h *Handlers) SetCommandRepo(repo repository.CommandRepository) {
 // SetQuarantineRepo sets the quarantine inventory repository.
 func (h *Handlers) SetQuarantineRepo(repo repository.QuarantineRepository) {
 	h.quarantineRepo = repo
+}
+
+// SetForensicRepo sets the ForensicRepository for forensic log browsing.
+func (h *Handlers) SetForensicRepo(repo repository.ForensicRepository) {
+	h.forensicRepo = repo
 }
 
 // SetUserRepo sets the UserRepository for user CRUD operations.

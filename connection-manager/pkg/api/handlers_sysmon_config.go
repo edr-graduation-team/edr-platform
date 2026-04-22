@@ -7,7 +7,7 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
-//go:embed ../../assets/sysmonconfig.xml
+//go:embed assets/sysmonconfig.xml
 var embeddedSysmonConfigXML []byte
 
 // ServeSysmonConfig serves a default Sysmon config XML for agents.

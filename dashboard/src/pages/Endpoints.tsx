@@ -51,6 +51,7 @@ const COMMAND_DEFINITIONS: Record<CommandType, { label: string; icon: typeof Pla
     enable_sysmon: { label: 'Enable Sysmon', icon: Shield, description: 'Install Sysmon and enable Operational channel', color: 'text-cyan-600' },
     disable_sysmon: { label: 'Disable Sysmon', icon: ShieldOff, description: 'Disable Sysmon channel and uninstall', color: 'text-slate-500' },
     update_agent: { label: 'Upgrade Agent', icon: Download, description: 'In-place upgrade of the agent binary', color: 'text-cyan-600' },
+    uninstall_agent: { label: 'Uninstall Agent', icon: Trash2, description: 'Server-authorised permanent removal (RBAC + audit)', color: 'text-rose-600' },
 };
 
 // Status badge component

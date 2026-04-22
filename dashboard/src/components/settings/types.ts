@@ -1,4 +1,4 @@
-export type SettingsTab = 'profile' | 'system' | 'context' | 'reliability' | 'users' | 'roles';
+export type SettingsTab = 'system';
 
 export interface SettingsNavItem {
     id: SettingsTab;
@@ -9,12 +9,7 @@ export interface SettingsNavItem {
 }
 
 export const SETTINGS_NAV: SettingsNavItem[] = [
-    { id: 'profile', label: 'Profile', icon: 'User', description: 'Personal info & preferences' },
-    { id: 'system', label: 'System', icon: 'Settings', description: 'Platform configuration' },
-    { id: 'context', label: 'Context Policies', icon: 'SlidersHorizontal', description: 'Hybrid user/device/network weights' },
-    { id: 'reliability', label: 'Reliability Health', icon: 'Activity', description: 'Drops, backpressure & fallback usage' },
-    { id: 'users', label: 'Users', icon: 'Users', description: 'User management', requiredRole: ['admin', 'security'] },
-    { id: 'roles', label: 'Roles & Permissions', icon: 'Shield', description: 'Access control', requiredRole: ['admin', 'security'] },
+    { id: 'system', label: 'Platform Settings', icon: 'Settings', description: 'Platform configuration (dashboard-level settings)' },
 ];
 
 export function filterSettingsNavByRole(userRole?: string): SettingsNavItem[] {

@@ -31,7 +31,9 @@ import {
     MANAGEMENT_TABS,
     SECURITY_MODULE_TABS,
     SOC_CONTEXT_TABS,
+    SYSTEM_CONTEXT_TABS,
     isSocPath,
+    isSystemPath,
 } from './PlatformNavConfig';
 
 const navLinkBase =
@@ -250,9 +252,8 @@ function EngineHealthChip() {
 
 function filterSocTabs() {
     return SOC_CONTEXT_TABS.filter((t) => {
-        if (t.to === '/' || t.to === '/stats') return true;
+        if (t.to === '/stats') return true;
         if (t.to === '/alerts') return authApi.canViewAlerts();
-        if (t.to === '/endpoints') return authApi.canViewEndpoints();
         if (t.to === '/endpoint-risk' || t.to === '/threats') return authApi.canViewAlerts();
         if (t.to === '/rules') return authApi.canViewRules();
         if (t.to === '/responses') return authApi.canViewResponses();
@@ -298,8 +299,7 @@ export const PlatformAppShell = memo(function PlatformAppShell({ children }: { c
     const openAlertCount = (sidebarAlertStats?.by_status?.['open'] || 0) as number;
 
     const securityTopActive = useMemo(() => {
-        if (pathname.startsWith('/security')) return true;
-        return isSocPath(pathname);
+        return pathname.startsWith('/security');
     }, [pathname]);
 
     const managementTopActive = useMemo(() => pathname.startsWith('/management'), [pathname]);
@@ -310,9 +310,7 @@ export const PlatformAppShell = memo(function PlatformAppShell({ children }: { c
 
     const dashboardsTopActive = useMemo(() => pathname.startsWith('/dashboards'), [pathname]);
 
-    const systemTopActive = useMemo(() => {
-        return ['/audit', '/tokens', '/deploy'].some((p) => pathname === p || pathname.startsWith(`${p}/`));
-    }, [pathname]);
+    const systemTopActive = useMemo(() => isSystemPath(pathname), [pathname]);
 
     const settingsTopActive = useMemo(() => pathname.startsWith('/settings'), [pathname]);
 
@@ -330,10 +328,13 @@ export const PlatformAppShell = memo(function PlatformAppShell({ children }: { c
             return { title: 'Managed Security', variant: 'managed' as const };
         }
         if (pathname.startsWith('/itsm')) {
-            return { title: 'ITSM', variant: 'itsm' as const };
+            return { title: 'Orchestration', variant: 'itsm' as const };
         }
         if (pathname.startsWith('/management')) {
             return { title: 'Management', variant: 'management' as const };
+        }
+        if (pathname.startsWith('/system') || pathname === '/audit' || pathname === '/tokens') {
+            return { title: 'System', variant: 'system' as const };
         }
         if (pathname.startsWith('/settings')) {
             return { title: 'Settings', variant: 'settings' as const };
@@ -387,14 +388,18 @@ export const PlatformAppShell = memo(function PlatformAppShell({ children }: { c
                     </Link>
 
                     <nav className="hidden lg:flex items-center gap-0.5 flex-1 min-w-0 overflow-x-auto [&::-webkit-scrollbar]:hidden">
-                        <NavLink
-                            to="/dashboards"
-                            className={({ isActive }) => cx(navLinkBase, isActive || dashboardsTopActive ? navLinkActive : navLinkIdle)}
-                        >
-                            Dashboards
-                        </NavLink>
+                        <NavDropdown id="dashboards" label="Dashboards" active={dashboardsTopActive} openId={openId} setOpenId={setOpenId}>
+                            {[...DASHBOARD_MAIN_TABS, ...DASHBOARD_MORE_TABS].map((t) => (
+                                <DropdownLink key={t.to} to={t.to} onNavigate={() => setOpenId(null)}>
+                                    {t.label}
+                                </DropdownLink>
+                            ))}
+                        </NavDropdown>
 
                         <NavDropdown id="soc" label="SOC" active={isSocPath(pathname)} openId={openId} setOpenId={setOpenId}>
+                            <DropdownLink to="/stats" onNavigate={() => setOpenId(null)}>
+                                Statistics
+                            </DropdownLink>
                             {authApi.canViewAlerts() && (
                                 <DropdownLink to="/alerts" onNavigate={() => setOpenId(null)}>
                                     Alerts (Triage)
@@ -408,11 +413,6 @@ export const PlatformAppShell = memo(function PlatformAppShell({ children }: { c
                             <DropdownLink to="/events" onNavigate={() => setOpenId(null)}>
                                 Telemetry Search
                             </DropdownLink>
-                            {authApi.canViewEndpoints() && (
-                                <DropdownLink to="/endpoints" onNavigate={() => setOpenId(null)}>
-                                    Devices
-                                </DropdownLink>
-                            )}
                             {authApi.canViewAlerts() && (
                                 <DropdownLink to="/endpoint-risk" onNavigate={() => setOpenId(null)}>
                                     Endpoint Risk
@@ -433,8 +433,11 @@ export const PlatformAppShell = memo(function PlatformAppShell({ children }: { c
                                     Command Center
                                 </DropdownLink>
                             )}
-                            <DropdownLink to="/stats" onNavigate={() => setOpenId(null)}>
-                                Reports &amp; Statistics
+                            <DropdownLink to="/soc/vulnerability" onNavigate={() => setOpenId(null)}>
+                                Vulnerability
+                            </DropdownLink>
+                            <DropdownLink to="/soc/correlation" onNavigate={() => setOpenId(null)}>
+                                Correlation
                             </DropdownLink>
                         </NavDropdown>
 
@@ -445,6 +448,11 @@ export const PlatformAppShell = memo(function PlatformAppShell({ children }: { c
                             <DropdownLink to="/security/siem-x" onNavigate={() => setOpenId(null)}>
                                 SIEM Connectors
                             </DropdownLink>
+                            {authApi.canViewTokens() && (
+                                <DropdownLink to="/security/tokens" onNavigate={() => setOpenId(null)}>
+                                    Enrollment Tokens
+                                </DropdownLink>
+                            )}
                         </NavDropdown>
 
                         <NavLink
@@ -454,7 +462,7 @@ export const PlatformAppShell = memo(function PlatformAppShell({ children }: { c
                             Managed Detection &amp; Response
                         </NavLink>
 
-                        <NavDropdown id="workflows" label="Workflows" active={itsmTopActive} openId={openId} setOpenId={setOpenId}>
+                        <NavDropdown id="workflows" label="Orchestration" active={itsmTopActive} openId={openId} setOpenId={setOpenId}>
                             {ITSM_TABS.map((t) => (
                                 <DropdownLink key={t.to} to={t.to} onNavigate={() => setOpenId(null)}>
                                     {t.label}
@@ -479,20 +487,19 @@ export const PlatformAppShell = memo(function PlatformAppShell({ children }: { c
                         {(authApi.canViewAuditLogs() || authApi.canViewTokens() || authApi.canViewAgentDeploy()) && (
                             <NavDropdown id="system" label="System" active={systemTopActive} openId={openId} setOpenId={setOpenId}>
                                 {authApi.canViewAuditLogs() && (
-                                    <DropdownLink to="/audit" onNavigate={() => setOpenId(null)}>
+                                    <DropdownLink to="/system/audit-logs" onNavigate={() => setOpenId(null)}>
                                         Audit Logs
                                     </DropdownLink>
                                 )}
-                                {authApi.canViewTokens() && (
-                                    <DropdownLink to="/tokens" onNavigate={() => setOpenId(null)}>
-                                        Enrollment Tokens
-                                    </DropdownLink>
-                                )}
-                                {authApi.canViewAgentDeploy() && (
-                                    <DropdownLink to="/deploy" onNavigate={() => setOpenId(null)}>
-                                        Agent Deployment
-                                    </DropdownLink>
-                                )}
+                                <DropdownLink to="/system/reliability-health" onNavigate={() => setOpenId(null)}>
+                                    Reliability Health
+                                </DropdownLink>
+                                <DropdownLink to="/system/access/users" onNavigate={() => setOpenId(null)}>
+                                    Users
+                                </DropdownLink>
+                                <DropdownLink to="/system/access/roles" onNavigate={() => setOpenId(null)}>
+                                    Roles &amp; Permissions
+                                </DropdownLink>
                             </NavDropdown>
                         )}
 
@@ -611,6 +618,16 @@ export const PlatformAppShell = memo(function PlatformAppShell({ children }: { c
                                 ))}
                             {contextRow.variant === 'management' &&
                                 MANAGEMENT_TABS.map((t) => (
+                                    <NavLink
+                                        key={t.to}
+                                        to={t.to}
+                                        className={({ isActive }) => cx(ctxTabBase, isActive ? ctxTabActive : ctxTabIdle)}
+                                    >
+                                        {t.label}
+                                    </NavLink>
+                                ))}
+                            {contextRow.variant === 'system' &&
+                                SYSTEM_CONTEXT_TABS.map((t) => (
                                     <NavLink
                                         key={t.to}
                                         to={t.to}

@@ -19,6 +19,25 @@ export default function EssentialPlatform() {
                                 central storage, and analyst response workflows. It is designed to help you <strong>observe</strong>,
                                 <strong> investigate</strong>, and <strong>respond</strong> to endpoint activity using the APIs and UI in this dashboard.
                             </p>
+                            <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3 text-sm text-slate-600 dark:text-slate-300">
+                                <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white/60 dark:bg-slate-950/20 p-4">
+                                    <div className="font-semibold text-slate-900 dark:text-white">What problems it solves</div>
+                                    <ul className="mt-2 space-y-1">
+                                        <li>- Centralized visibility across endpoints (status, health, alerts).</li>
+                                        <li>- Faster investigations with searchable telemetry + raw payload access.</li>
+                                        <li>- Consistent response actions via an auditable command pipeline.</li>
+                                    </ul>
+                                </div>
+                                <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white/60 dark:bg-slate-950/20 p-4">
+                                    <div className="font-semibold text-slate-900 dark:text-white">Key capabilities</div>
+                                    <ul className="mt-2 space-y-1">
+                                        <li>- Detection & alerting (Sigma rules engine).</li>
+                                        <li>- Device management and endpoint profiles.</li>
+                                        <li>- Remote response (containment, forensics, blocking).</li>
+                                        <li>- Governance (audit logs, roles & permissions, tokens).</li>
+                                    </ul>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>

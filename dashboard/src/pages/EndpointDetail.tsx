@@ -768,6 +768,14 @@ function ForensicsTab({ agentId }: { agentId: string }) {
     }, [collections, selectedCommandId]);
 
     useEffect(() => {
+        // Best-effort: if the selected collection was "sysmon", default filter to sysmon.
+        const sel = collections.find((c) => c.command_id === selectedCommandId);
+        if (!sel) return;
+        const t = (sel.log_types || '').toLowerCase();
+        if (t.includes('sysmon')) setLogType('sysmon');
+    }, [collections, selectedCommandId]);
+
+    useEffect(() => {
         // Keep URL in sync so Command Center can deep-link.
         if (!selectedCommandId) return;
         const next = new URLSearchParams(searchParams);
@@ -893,7 +901,7 @@ function ForensicsTab({ agentId }: { agentId: string }) {
                         <option value="system">system</option>
                         <option value="application">application</option>
                         <option value="powershell">powershell</option>
-                        <option value="sysmon/operational">sysmon/operational</option>
+                        <option value="sysmon">sysmon</option>
                     </select>
                 </div>
             </div>

@@ -123,7 +123,26 @@ func (r *PostgresForensicRepository) ListEvents(ctx context.Context, agentID, co
 	if limit <= 0 || limit > 500 {
 		limit = 100
 	}
-	args := []any{agentID, commandID, logType}
+	// Backward/forward compat: normalize common aliases so UI can query "sysmon"
+	// while older bundles may have persisted "microsoft-windows-sysmon/operational".
+	candidates := []string{logType}
+	switch logType {
+	case "sysmon", "sysmon/operational":
+		candidates = []string{
+			"sysmon",
+			"sysmon/operational",
+			"microsoft-windows-sysmon/operational",
+		}
+	case "powershell":
+		// Some agents may send full channel names; keep a couple of common variants.
+		candidates = []string{
+			"powershell",
+			"microsoft-windows-powershell/operational",
+			"windows powershell",
+		}
+	}
+
+	args := []any{agentID, commandID, candidates}
 	whereCursor := ""
 	if cursorID != nil && *cursorID > 0 {
 		whereCursor = "AND id > $4"
@@ -134,7 +153,7 @@ func (r *PostgresForensicRepository) ListEvents(ctx context.Context, agentID, co
 	q := fmt.Sprintf(`
 		SELECT id, ts, log_type, event_id, level, provider, message, raw
 		FROM forensic_events
-		WHERE agent_id=$1 AND command_id=$2 AND log_type=$3
+		WHERE agent_id=$1 AND command_id=$2 AND log_type = ANY($3)
 		%s
 		ORDER BY id
 		LIMIT $%d`, whereCursor, len(args))

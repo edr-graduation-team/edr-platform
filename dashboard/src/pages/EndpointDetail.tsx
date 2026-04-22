@@ -559,8 +559,23 @@ function OverviewTab({
         return list.find((c) => c.command_type === 'enable_sysmon' || c.command_type === 'disable_sysmon');
     }, [cmds]);
 
+    const sysmonObserved = useMemo(() => {
+        const list = cmds || [];
+        // If we have a successful collection request that explicitly asked for sysmon logs,
+        // we can treat Sysmon as "observed" even if it was installed/enabled manually.
+        return list.find((c) => {
+            if (c.status !== 'completed') return false;
+            if (c.command_type !== 'collect_logs' && c.command_type !== 'collect_forensics') return false;
+            const lt = String((c.parameters as any)?.log_types || (c.parameters as any)?.types || '').toLowerCase();
+            return lt.includes('sysmon');
+        });
+    }, [cmds]);
+
     const sysmonStatus = (() => {
-        if (!sysmonCmd) return { label: 'Unknown', tone: 'muted' as const };
+        if (!sysmonCmd) {
+            if (sysmonObserved) return { label: 'Observed', tone: 'ok' as const };
+            return { label: 'Unknown', tone: 'muted' as const };
+        }
         const ok = sysmonCmd.status === 'completed';
         if (sysmonCmd.command_type === 'enable_sysmon') return { label: ok ? 'Enabled' : 'Enable failed', tone: ok ? ('ok' as const) : ('bad' as const) };
         return { label: ok ? 'Disabled' : 'Disable failed', tone: ok ? ('warn' as const) : ('bad' as const) };
@@ -637,6 +652,15 @@ function OverviewTab({
                                         {String((sysmonCmd.result as any).output)}
                                     </div>
                                 ) : null}
+                            </div>
+                        ) : sysmonObserved ? (
+                            <div className="text-xs text-slate-500 space-y-1">
+                                <div>
+                                    Observed via <code>{sysmonObserved.command_type}</code> · {new Date(sysmonObserved.issued_at).toLocaleString()}
+                                </div>
+                                <div className="text-[11px] text-slate-500">
+                                    Note: Sysmon was not enabled/disabled via C2, so status is inferred from log collection.
+                                </div>
                             </div>
                         ) : (
                             <p className="text-slate-500 text-sm">No Sysmon actions recorded yet.</p>
@@ -1414,6 +1438,14 @@ function ResponseTab({
     onSubmit: () => void;
 }) {
     const patch = (k: string, v: string) => setFields((f) => ({ ...f, [k]: v }));
+    const uniqueOptions = useMemo(() => {
+        const seen = new Set<string>();
+        return RESPONSE_OPTIONS.filter((o) => {
+            if (seen.has(o.value)) return false;
+            seen.add(o.value);
+            return true;
+        });
+    }, []);
 
     return (
         <div className="space-y-8">
@@ -1425,7 +1457,7 @@ function ResponseTab({
                     <div className="xl:col-span-7 space-y-3">
                         <label className="block text-xs font-bold tracking-wider text-slate-500 uppercase mb-2">Select Action</label>
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
-                            {RESPONSE_OPTIONS.map((o) => {
+                            {uniqueOptions.map((o) => {
                                 const isSelected = cmdType === o.value;
                                 return (
                                     <button

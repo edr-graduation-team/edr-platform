@@ -1,0 +1,29 @@
+<!--
+  Minimal Sysmon configuration for EDR Platform.
+  This is intentionally conservative (low noise) and safe as a default.
+  You can replace it with a stricter config later (e.g. SwiftOnSecurity).
+-->
+<Sysmon schemaversion="4.90">
+  <HashAlgorithms>sha256</HashAlgorithms>
+  <EventFiltering>
+    <!-- Process Create -->
+    <ProcessCreate onmatch="include" />
+    <!-- Network Connect -->
+    <NetworkConnect onmatch="include" />
+    <!-- File Create Time -->
+    <FileCreateTime onmatch="include" />
+    <!-- Image Loaded -->
+    <ImageLoad onmatch="include" />
+    <!-- Create Remote Thread -->
+    <CreateRemoteThread onmatch="include" />
+    <!-- Registry events -->
+    <RegistryEvent onmatch="include" />
+    <!-- DNS Query -->
+    <DnsQuery onmatch="include" />
+    <!-- File create -->
+    <FileCreate onmatch="include" />
+    <!-- Process Terminate -->
+    <ProcessTerminate onmatch="include" />
+  </EventFiltering>
+</Sysmon>
+

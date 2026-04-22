@@ -93,6 +93,8 @@ func (s *Server) RegisterRoutes(handlers *Handlers) {
 
 	// Zero-touch provisioning: public CA cert endpoint (no auth required)
 	v1.GET("/agent/ca", handlers.ServeCA)
+	// Optional public Sysmon config endpoint (no auth required)
+	v1.GET("/agent/sysmon/config", handlers.ServeSysmonConfig)
 
 	// Auth endpoints (no auth required for login)
 	auth := v1.Group("/auth")

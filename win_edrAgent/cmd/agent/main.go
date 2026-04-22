@@ -560,7 +560,10 @@ func runUpdateStage2(
 		cfg.Server.TLSServerName = strings.TrimSpace(serverDomain)
 	}
 	if strings.TrimSpace(token) != "" {
-		cfg.BootstrapToken = strings.TrimSpace(token)
+		// BootstrapToken lives on CertConfig; the root Config only aggregates
+		// sub-structs. Writing it at the root silently compiled on older builds
+		// but modern go vet + the agent-builder image catches the typo.
+		cfg.Certs.BootstrapToken = strings.TrimSpace(token)
 	}
 	if strings.EqualFold(strings.TrimSpace(EmbeddedInstallSysmon), "true") {
 		cfg.Sysmon.InstallOnFirstRun = true

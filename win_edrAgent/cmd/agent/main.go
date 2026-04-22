@@ -11,12 +11,18 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"encoding/hex"
 	"flag"
 	"fmt"
+	"io"
+	"os/exec"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"strings"
 	"syscall"
+	"time"
 
 	"golang.org/x/sys/windows/svc"
 
@@ -26,6 +32,7 @@ import (
 	"github.com/edr-platform/win-agent/internal/installer"
 	"github.com/edr-platform/win-agent/internal/logging"
 	"github.com/edr-platform/win-agent/internal/protection"
+	"github.com/edr-platform/win-agent/internal/security"
 	"github.com/edr-platform/win-agent/internal/service"
 )
 
@@ -60,6 +67,8 @@ func main() {
 
 		// ── Installation flags ─────────────────────────────────────────────────
 		doInstall    = flag.Bool("install", false, "Zero-touch install: patch hosts, write config, register and start Windows Service")
+		doUpdate     = flag.Bool("update", false, "In-place upgrade: replace agent binary, optionally update config, and restart Windows Service")
+		doUpdateStage2 = flag.Bool("update-stage2", false, "[INTERNAL] Stage2 for -update, executed as SYSTEM")
 		doUninstall  = flag.Bool("uninstall", false, "Remove the EDRAgent Windows Service")
 		serverIP     = flag.String("server-ip", "", "C2 server IP address (used with -install for hosts file injection)")
 		serverDomain = flag.String("server-domain", "", "C2 server FQDN/hostname (used with -install)")
@@ -102,6 +111,18 @@ func main() {
 	if *doInstall {
 		runInstall(logger, *serverIP, *serverDomain, *serverPort, *token, *configPath)
 		// runInstall calls os.Exit internally.
+	}
+
+	// ══════════════════════════════════════════════════════════════════════════
+	// UPDATE PATH (Stage2 runs as SYSTEM via scheduled task)
+	// ══════════════════════════════════════════════════════════════════════════
+	if *doUpdateStage2 {
+		runUpdateStage2(logger, *serverIP, *serverDomain, *serverPort, *token, *configPath)
+		// runUpdateStage2 calls os.Exit internally.
+	}
+	if *doUpdate {
+		runUpdate(logger, *serverIP, *serverDomain, *serverPort, *token, *configPath)
+		// runUpdate calls os.Exit internally.
 	}
 
 	// ══════════════════════════════════════════════════════════════════════════
@@ -252,11 +273,8 @@ func runInstall(
 
 	// ── Pre-flight Check: Ensure agent is not already installed ──────────────
 	if service.ServiceExists() {
-		fmt.Fprintf(os.Stderr, "\n[X] Error: EDR Agent is already installed on this system.\n")
-		fmt.Fprintf(os.Stderr, "    To protect existing configurations and ensure security, automatic re-installation is blocked.\n")
-		fmt.Fprintf(os.Stderr, "    Please remove the agent first using: edr-agent.exe -uninstall -token <secret>\n")
-		logger.Errorf("Install aborted: service already exists")
-		os.Exit(1)
+		fmt.Println("  Detected existing installation — switching to in-place upgrade (-update).")
+		runUpdate(logger, serverIP, serverDomain, serverPort, token, configPath)
 	}
 
 	// ── Resolve parameters: CLI > Embedded > empty ───────────────────────────
@@ -444,6 +462,187 @@ func runInstall(
 	fmt.Println("  has been copied to the secure path above.")
 	logger.Infof("Zero-touch installation complete: server=%s:%s", serverDomain, serverPort)
 	os.Exit(0)
+}
+
+type updateOverrides struct {
+	ServerIP     string `json:"server_ip,omitempty"`
+	ServerDomain string `json:"server_domain,omitempty"`
+	ServerPort   string `json:"server_port,omitempty"`
+	Token        string `json:"token,omitempty"`
+	InstallSysmon string `json:"install_sysmon,omitempty"`
+}
+
+func runUpdate(
+	logger *logging.Logger,
+	serverIP, serverDomain, serverPort, token, configPath string,
+) {
+	fmt.Println("════════════════════════════════════════")
+	fmt.Println(" EDR Agent — In-Place Upgrade (-update)")
+	fmt.Println("════════════════════════════════════════")
+
+	if !service.ServiceExists() {
+		fmt.Fprintf(os.Stderr, "\n[X] Error: EDR Agent is not installed on this system.\n")
+		fmt.Fprintf(os.Stderr, "    Please install first using: edr-agent.exe -install\n")
+		os.Exit(1)
+	}
+
+	// Resolve params (CLI overrides are optional; empty means keep current)
+	if token == "" && EmbeddedTokenObf != "" {
+		token = xorDeobfuscate(EmbeddedTokenObf)
+	}
+	serverIP = resolveInstallParam(serverIP, EmbeddedServerIP, "server-ip")
+	serverDomain = resolveInstallParam(serverDomain, EmbeddedServerDomain, "server-domain")
+	serverPort = resolveInstallParam(serverPort, EmbeddedServerPort, "server-port")
+
+	srcPath, err := os.Executable()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: failed to get executable path: %v\n", err)
+		os.Exit(1)
+	}
+	srcPath, _ = filepath.Abs(srcPath)
+
+	// Stage the new binary somewhere Admin can write (root is Admin+SYSTEM).
+	stagedExe := `C:\ProgramData\EDR\edr-agent.update.exe`
+	fmt.Printf("[1/3] Staging update binary to %s ...\n", stagedExe)
+	if err := copyFileLocal(srcPath, stagedExe); err != nil {
+		fmt.Fprintf(os.Stderr, "Error staging update binary: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Println("      → Done.")
+
+	// Write overrides for stage2 (SYSTEM).
+	ov := updateOverrides{
+		ServerIP:     strings.TrimSpace(serverIP),
+		ServerDomain: strings.TrimSpace(serverDomain),
+		ServerPort:   strings.TrimSpace(serverPort),
+		Token:        strings.TrimSpace(token),
+		InstallSysmon: strings.TrimSpace(EmbeddedInstallSysmon),
+	}
+	overridesPath := `C:\ProgramData\EDR\update_overrides.json`
+	if data, err := json.Marshal(ov); err == nil {
+		_ = os.WriteFile(overridesPath, data, 0600)
+	}
+
+	fmt.Println("[2/3] Scheduling SYSTEM upgrade task (stop → swap → start)...")
+	if err := scheduleUpdateStage2AsSystem(stagedExe, overridesPath, configPath); err != nil {
+		fmt.Fprintf(os.Stderr, "Error scheduling upgrade: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Println("      → Done.")
+
+	fmt.Println("[3/3] Upgrade initiated. Service will restart shortly.")
+	fmt.Println("      Check: sc query EDRAgent")
+	fmt.Println("      Logs:  Get-Content C:\\ProgramData\\EDR\\logs\\agent.log -Tail 80")
+	logger.Info("Update scheduled (SYSTEM stage2)")
+	os.Exit(0)
+}
+
+func runUpdateStage2(
+	logger *logging.Logger,
+	serverIP, serverDomain, serverPort, token, configPath string,
+) {
+	// Stage2 is executed as SYSTEM (via schtasks) to bypass hardened ACLs.
+	_ = protection.RestoreServiceDACL(service.ServiceName)
+	_ = protection.RestoreServiceRegistryKey(service.ServiceName)
+	_ = protection.RestoreAgentRegistryKey()
+	_ = security.RestoreAgentDirectoriesACL(config.DefaultConfig().DataDirectoriesToHarden())
+
+	// Apply config overrides (best-effort).
+	cfg, _ := config.LoadFromRegistry()
+	if cfg == nil {
+		// Fallback to YAML if present; else defaults.
+		if c2, err := config.Load(configPath); err == nil {
+			cfg = c2
+		} else {
+			cfg = config.DefaultConfig()
+		}
+	}
+	if strings.TrimSpace(serverDomain) != "" && strings.TrimSpace(serverPort) != "" {
+		cfg.Server.Address = fmt.Sprintf("%s:%s", strings.TrimSpace(serverDomain), strings.TrimSpace(serverPort))
+		cfg.Server.TLSServerName = strings.TrimSpace(serverDomain)
+	}
+	if strings.TrimSpace(token) != "" {
+		cfg.BootstrapToken = strings.TrimSpace(token)
+	}
+	if strings.EqualFold(strings.TrimSpace(EmbeddedInstallSysmon), "true") {
+		cfg.Sysmon.InstallOnFirstRun = true
+	}
+	_ = cfg.SaveToRegistry()
+
+	// Stop service, swap binary, start.
+	_ = exec.Command("sc", "stop", "EDRAgent").Run()
+	time.Sleep(2 * time.Second)
+
+	dst := `C:\ProgramData\EDR\bin\edr-agent.exe`
+	src := `C:\ProgramData\EDR\edr-agent.update.exe`
+	_ = os.MkdirAll(filepath.Dir(dst), 0700)
+
+	// Keep one backup.
+	_ = os.Remove(dst + ".old")
+	_ = os.Rename(dst, dst+".old")
+	if err := copyFileLocal(src, dst); err != nil {
+		logger.Errorf("Update stage2: swap failed: %v", err)
+		fmt.Fprintf(os.Stderr, "Error: swap failed: %v\n", err)
+		os.Exit(1)
+	}
+	_ = os.Remove(src)
+
+	_ = exec.Command("sc", "start", "EDRAgent").Run()
+	fmt.Println("✓ Upgrade applied (SYSTEM stage2).")
+	os.Exit(0)
+}
+
+func scheduleUpdateStage2AsSystem(stagedExe, overridesPath, configPath string) error {
+	taskName := fmt.Sprintf("EDR_Update_%d", os.Getpid())
+	st := time.Now().Add(1 * time.Minute).Format("15:04")
+
+	tr := fmt.Sprintf("\"%s\" -update-stage2 -config \"%s\"", stagedExe, configPath)
+	if data, err := os.ReadFile(overridesPath); err == nil && len(data) > 0 {
+		var ov updateOverrides
+		if json.Unmarshal(data, &ov) == nil {
+			if strings.TrimSpace(ov.ServerIP) != "" {
+				tr += fmt.Sprintf(" -server-ip \"%s\"", ov.ServerIP)
+			}
+			if strings.TrimSpace(ov.ServerDomain) != "" {
+				tr += fmt.Sprintf(" -server-domain \"%s\"", ov.ServerDomain)
+			}
+			if strings.TrimSpace(ov.ServerPort) != "" {
+				tr += fmt.Sprintf(" -server-port \"%s\"", ov.ServerPort)
+			}
+			if strings.TrimSpace(ov.Token) != "" {
+				tr += fmt.Sprintf(" -token \"%s\"", ov.Token)
+			}
+		}
+	}
+
+	create := exec.Command("schtasks", "/Create", "/TN", taskName, "/RU", "SYSTEM", "/SC", "ONCE", "/ST", st, "/F", "/TR", tr)
+	if out, err := create.CombinedOutput(); err != nil {
+		return fmt.Errorf("schtasks create failed: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+	run := exec.Command("schtasks", "/Run", "/TN", taskName)
+	if out, err := run.CombinedOutput(); err != nil {
+		return fmt.Errorf("schtasks run failed: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+	_ = exec.Command("schtasks", "/Delete", "/TN", taskName, "/F").Run()
+	return nil
+}
+
+func copyFileLocal(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	_ = os.MkdirAll(filepath.Dir(dst), 0755)
+	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0700)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+	if _, err := io.Copy(out, in); err != nil {
+		return err
+	}
+	return out.Close()
 }
 
 // isAlreadyExistsErr returns true when the error from service.Install() indicates

@@ -3,9 +3,13 @@ package command
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
+	"encoding/hex"
 	"fmt"
+	"io"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -1493,8 +1497,90 @@ func (h *Handler) updateAgent(ctx context.Context, params map[string]string) (st
 	if version == "" || url == "" {
 		return "", fmt.Errorf("version and url parameters are required")
 	}
+	if checksum == "" {
+		return "", fmt.Errorf("checksum parameter is required")
+	}
 
-	return fmt.Sprintf("Agent update initiated: version=%s checksum=%s", version, checksum), nil
+	h.logger.Infof("[C2] UPDATE_AGENT requested: version=%s url=%s", version, url)
+
+	// Optional: apply config overrides before swap (best-effort).
+	if sd := strings.TrimSpace(params["server_domain"]); sd != "" {
+		sp := strings.TrimSpace(params["server_port"])
+		if sp == "" {
+			sp = "47051"
+		}
+		if cfg, err := config.LoadFromRegistry(); err == nil && cfg != nil {
+			cfg.Server.Address = fmt.Sprintf("%s:%s", sd, sp)
+			cfg.Server.TLSServerName = sd
+			_ = cfg.SaveToRegistry()
+			h.logger.Infof("[C2] UPDATE_AGENT config override applied: server=%s:%s", sd, sp)
+		}
+	}
+	if strings.EqualFold(strings.TrimSpace(params["install_sysmon"]), "true") {
+		if cfg, err := config.LoadFromRegistry(); err == nil && cfg != nil {
+			cfg.Sysmon.InstallOnFirstRun = true
+			_ = cfg.SaveToRegistry()
+		}
+	}
+
+	// Download binary to a staging path (root dir is Admin+SYSTEM).
+	stagePath := `C:\ProgramData\EDR\edr-agent.patch.exe`
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return "", fmt.Errorf("build download request: %w", err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("download failed: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return "", fmt.Errorf("download failed: status=%d body=%s", resp.StatusCode, strings.TrimSpace(string(b)))
+	}
+
+	tmp := stagePath + ".tmp"
+	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0700)
+	if err != nil {
+		return "", fmt.Errorf("open stage file: %w", err)
+	}
+	hh := sha256.New()
+	if _, err := io.Copy(io.MultiWriter(f, hh), resp.Body); err != nil {
+		_ = f.Close()
+		_ = os.Remove(tmp)
+		return "", fmt.Errorf("write stage file: %w", err)
+	}
+	_ = f.Close()
+	got := hex.EncodeToString(hh.Sum(nil))
+	if !strings.EqualFold(got, strings.TrimSpace(checksum)) {
+		_ = os.Remove(tmp)
+		return "", fmt.Errorf("checksum mismatch: got=%s want=%s", got, checksum)
+	}
+	_ = os.Remove(stagePath)
+	if err := os.Rename(tmp, stagePath); err != nil {
+		return "", fmt.Errorf("finalize stage file: %w", err)
+	}
+	h.logger.Infof("[C2] UPDATE_AGENT download+verify OK: sha256=%s bytes staged=%s", got[:16]+"...", stagePath)
+
+	// Schedule a SYSTEM task to stop → swap → start.
+	taskName := fmt.Sprintf("EDR_Patch_%d", time.Now().UnixNano())
+	st := time.Now().Add(1 * time.Minute).Format("15:04")
+	dst := `C:\ProgramData\EDR\bin\edr-agent.exe`
+	// Keep a backup.
+	tr := fmt.Sprintf(`cmd /c sc stop EDRAgent ^& timeout /t 2 /nobreak ^& del /f /q "%s.old" ^& ren "%s" "edr-agent.exe.old" ^& copy /y "%s" "%s" ^& del /f /q "%s" ^& sc start EDRAgent`,
+		dst, dst, stagePath, dst, stagePath,
+	)
+	create := exec.Command("schtasks", "/Create", "/TN", taskName, "/RU", "SYSTEM", "/SC", "ONCE", "/ST", st, "/F", "/TR", tr)
+	if out, err := create.CombinedOutput(); err != nil {
+		return "", fmt.Errorf("schedule patch task create failed: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+	run := exec.Command("schtasks", "/Run", "/TN", taskName)
+	if out, err := run.CombinedOutput(); err != nil {
+		return "", fmt.Errorf("schedule patch task run failed: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+	_ = exec.Command("schtasks", "/Delete", "/TN", taskName, "/F").Run()
+
+	return fmt.Sprintf("Agent upgrade scheduled: version=%s sha256=%s (service will restart shortly)", version, got[:16]+"..."), nil
 }
 
 // restartService handles all agent service control commands.

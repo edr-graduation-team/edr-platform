@@ -35,6 +35,8 @@ type Handlers struct {
 	alertRepo           repository.AlertRepository           // alert querying and stats
 	eventRepo           repository.EventRepository           // event search/list (durable store)
 	forensicRepo        repository.ForensicRepository        // forensic collections/events (collect_logs)
+	agentPackageRepo    repository.AgentPackageRepository    // built agent packages for patch/upgrade
+	agentPatchRepo      repository.AgentPatchProfileRepository // per-agent patch profile (UI prefill)
 	userRepo            repository.UserRepository            // user CRUD
 	roleRepo            repository.RoleRepository            // RBAC role/permission management
 	contextPolicyRepo   repository.ContextPolicyRepository   // context-aware policy controls
@@ -106,6 +108,14 @@ func (h *Handlers) SetQuarantineRepo(repo repository.QuarantineRepository) {
 // SetForensicRepo sets the ForensicRepository for forensic log browsing.
 func (h *Handlers) SetForensicRepo(repo repository.ForensicRepository) {
 	h.forensicRepo = repo
+}
+
+func (h *Handlers) SetAgentPackageRepo(repo repository.AgentPackageRepository) {
+	h.agentPackageRepo = repo
+}
+
+func (h *Handlers) SetAgentPatchProfileRepo(repo repository.AgentPatchProfileRepository) {
+	h.agentPatchRepo = repo
 }
 
 // SetUserRepo sets the UserRepository for user CRUD operations.

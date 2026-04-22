@@ -6,9 +6,11 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -733,6 +735,14 @@ func Uninstall(token, embeddedTokenHash string) error {
 		providedHash := protection.HashUninstallToken(token)
 		hashFilePath := filepath.Join("C:\\ProgramData\\EDR", "uninstall.dat")
 		if err := os.WriteFile(hashFilePath, []byte(providedHash), 0600); err != nil {
+			// In some environments the agent hardening may unexpectedly prevent
+			// Administrators from writing into C:\ProgramData\EDR. If so, fall back
+			// to a SYSTEM scheduled task that can stop/delete the service and remove
+			// the agent directory.
+			if isAccessDenied(err) {
+				fmt.Println("  Access denied writing uninstall signal — falling back to SYSTEM uninstall task...")
+				return uninstallViaSystemTask()
+			}
 			return fmt.Errorf("failed to write uninstall signal: %w", err)
 		}
 
@@ -796,7 +806,10 @@ func ForceUninstall(embeddedTokenHash string) error {
 		if hash == "" {
 			hash = protection.HashUninstallToken("EDR-Uninstall-2026!")
 		}
-		_ = os.WriteFile(hashFilePath, []byte(hash), 0600)
+		if err := os.WriteFile(hashFilePath, []byte(hash), 0600); err != nil && isAccessDenied(err) {
+			fmt.Println("      Access denied writing uninstall signal — falling back to SYSTEM uninstall task...")
+			return uninstallViaSystemTask()
+		}
 
 		fmt.Println("      Signaling running service to release protections...")
 		for i := 0; i < 15; i++ {
@@ -823,6 +836,48 @@ func ForceUninstall(embeddedTokenHash string) error {
 	cleanupResidualFiles()
 
 	return forceRemoveService()
+}
+
+func isAccessDenied(err error) bool {
+	if err == nil {
+		return false
+	}
+	// Keep it simple: these errors frequently surface as strings.
+	s := strings.ToLower(err.Error())
+	if strings.Contains(s, "access is denied") || strings.Contains(s, "permission denied") {
+		return true
+	}
+	// Also match the canonical Windows error.
+	return errors.Is(err, windows.ERROR_ACCESS_DENIED)
+}
+
+// uninstallViaSystemTask creates a one-shot Scheduled Task that runs as SYSTEM to:
+// - stop/delete EDRAgent service
+// - kill remaining processes
+// - remove C:\ProgramData\EDR
+//
+// This is a pragmatic fallback for environments where service ACL hardening
+// blocks Administrators from stopping/deleting the service.
+func uninstallViaSystemTask() error {
+	taskName := fmt.Sprintf("EDR_Remove_%d", os.Getpid())
+	st := time.Now().Add(1 * time.Minute).Format("15:04")
+	tr := `cmd /c sc stop EDRAgent & sc delete EDRAgent & timeout /t 2 /nobreak & taskkill /F /IM edr-agent.exe & taskkill /F /IM edr-agent-service.exe & rmdir /s /q C:\ProgramData\EDR`
+
+	create := exec.Command("schtasks", "/Create", "/TN", taskName, "/RU", "SYSTEM", "/SC", "ONCE", "/ST", st, "/F", "/TR", tr)
+	createOut, createErr := create.CombinedOutput()
+	if createErr != nil {
+		return fmt.Errorf("system uninstall task create failed: %w: %s", createErr, strings.TrimSpace(string(createOut)))
+	}
+
+	run := exec.Command("schtasks", "/Run", "/TN", taskName)
+	runOut, runErr := run.CombinedOutput()
+	if runErr != nil {
+		return fmt.Errorf("system uninstall task run failed: %w: %s", runErr, strings.TrimSpace(string(runOut)))
+	}
+
+	time.Sleep(3 * time.Second)
+	_ = exec.Command("schtasks", "/Delete", "/TN", taskName, "/F").Run()
+	return nil
 }
 
 // cleanupResidualFiles removes temporary files that may be left behind

@@ -22,6 +22,7 @@ import (
 	"golang.org/x/sys/windows/svc/mgr"
 
 	"github.com/edr-platform/win-agent/internal/config"
+	"github.com/edr-platform/win-agent/internal/security"
 )
 
 const (
@@ -280,6 +281,10 @@ func EnsureDirectories() error {
 			return fmt.Errorf("failed to create directory %s: %w", dir, err)
 		}
 	}
+	// Ensure the root directory remains writable by elevated Administrators so
+	// they can signal an authorized uninstall (e.g., create uninstall.dat) and
+	// perform clean removal if needed.
+	_ = security.ApplyRestrictedDACL(`C:\ProgramData\EDR`)
 	return nil
 }
 

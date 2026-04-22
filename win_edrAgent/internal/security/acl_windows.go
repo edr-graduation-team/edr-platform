@@ -131,6 +131,14 @@ func setRestrictedDACL(path string) error {
 	return nil
 }
 
+// ApplyRestrictedDACL applies a protected DACL that grants Full Control to
+// SYSTEM and Administrators. This is used for directories that must remain
+// uninstallable by an elevated Administrator (e.g., C:\ProgramData\EDR root),
+// even while subdirectories may be hardened to SYSTEM-only.
+func ApplyRestrictedDACL(path string) error {
+	return setRestrictedDACL(path)
+}
+
 // setNamedSecurityInfoW is a thin wrapper calling advapi32!SetNamedSecurityInfoW
 // which is not yet exposed by golang.org/x/sys/windows.
 var (

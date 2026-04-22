@@ -32,13 +32,6 @@ type ForensicEventRow struct {
 	Raw      json.RawMessage `json:"raw,omitempty"`
 }
 
-type ForensicRepository interface {
-	ListCollectionsByAgent(ctx context.Context, agentID uuid.UUID, limit int) ([]ForensicCollectionSummary, error)
-	ListEvents(ctx context.Context, agentID, commandID uuid.UUID, logType string, limit int, cursorID *int64) (rows []ForensicEventRow, nextCursor *int64, err error)
-	UpsertCollection(ctx context.Context, c ForensicCollectionSummary) error
-	ReplaceEvents(ctx context.Context, agentID, commandID uuid.UUID, logType string, events []ForensicEventRow) error
-}
-
 type PostgresForensicRepository struct {
 	db *pgxpool.Pool
 }

@@ -143,6 +143,28 @@ export interface ContextSnapshot {
     warnings?: string[];
 }
 
+export type ForensicCollection = {
+    command_id: string;
+    agent_id: string;
+    command_type: string;
+    issued_at: string;
+    completed_at?: string | null;
+    time_range?: string;
+    log_types?: string;
+    summary: Record<string, any>;
+};
+
+export type ForensicEvent = {
+    id: number;
+    timestamp?: string | null;
+    log_type: string;
+    event_id?: string;
+    level?: string;
+    provider?: string;
+    message?: string;
+    raw?: any;
+};
+
 export interface Alert {
     id: string;
     timestamp: string;
@@ -553,6 +575,24 @@ export const agentsApi = {
             pagination: { total: number; limit: number; offset: number; has_more: boolean };
         }>(
             `/api/v1/agents/${agentId}/commands`,
+            { params }
+        );
+        return response.data;
+    },
+    getForensicCollections: async (agentId: string, params?: { limit?: number }) => {
+        const response = await connectionApi.get<{ data: ForensicCollection[] }>(
+            `/api/v1/agents/${encodeURIComponent(agentId)}/forensic-collections`,
+            { params }
+        );
+        return response.data;
+    },
+    getForensicEvents: async (
+        agentId: string,
+        commandId: string,
+        params: { log_type: string; limit?: number; cursor?: number }
+    ) => {
+        const response = await connectionApi.get<{ data: ForensicEvent[]; next_cursor?: number }>(
+            `/api/v1/agents/${encodeURIComponent(agentId)}/forensic-collections/${encodeURIComponent(commandId)}/events`,
             { params }
         );
         return response.data;

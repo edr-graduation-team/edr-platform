@@ -4,6 +4,7 @@ package server
 import (
 	"context"
 	"crypto/tls"
+	"encoding/json"
 	"fmt"
 	"net"
 	"strings"
@@ -28,6 +29,26 @@ import (
 	edrv1 "github.com/edr-platform/connection-manager/proto/v1"
 )
 
+type forensicBundle struct {
+	Version   int `json:"version"`
+	CommandID string `json:"command_id"`
+	AgentID   string `json:"agent_id"`
+	TimeRange string `json:"time_range,omitempty"`
+	LogTypes  string `json:"log_types,omitempty"`
+	Summary   map[string]any `json:"summary,omitempty"`
+	Events    []forensicBundleEvent `json:"events,omitempty"`
+}
+
+type forensicBundleEvent struct {
+	Timestamp string          `json:"timestamp,omitempty"`
+	LogType   string          `json:"log_type"`
+	EventID   string          `json:"event_id,omitempty"`
+	Level     string          `json:"level,omitempty"`
+	Provider  string          `json:"provider,omitempty"`
+	Message   string          `json:"message,omitempty"`
+	Raw       json.RawMessage `json:"raw,omitempty"`
+}
+
 // Server represents the gRPC server.
 // It explicitly implements all RPCs from EventIngestionServiceServer.
 // Handlers are injected via NewServer — nil handlers degrade gracefully
@@ -45,6 +66,7 @@ type Server struct {
 	registry         *handlers.AgentRegistry
 	commandRepo      repository.CommandRepository
 	quarantineRepo   repository.QuarantineRepository
+	forensicRepo     repository.ForensicRepository
 }
 
 // SetCommandRepo injects the command repository for C2 result persistence.
@@ -55,6 +77,10 @@ func (s *Server) SetCommandRepo(repo repository.CommandRepository) {
 // SetQuarantineRepo injects quarantine inventory persistence (optional).
 func (s *Server) SetQuarantineRepo(repo repository.QuarantineRepository) {
 	s.quarantineRepo = repo
+}
+
+func (s *Server) SetForensicRepo(repo repository.ForensicRepository) {
+	s.forensicRepo = repo
 }
 
 // NewServer creates a new gRPC server with all handler dependencies injected.
@@ -324,6 +350,11 @@ func (s *Server) SendCommandResult(ctx context.Context, res *edrv1.CommandResult
 		}
 	}
 
+	// Persist forensic bundles (collect_logs / collect_forensics) if present in output JSON.
+	if s.forensicRepo != nil && s.commandRepo != nil {
+		s.persistForensicBundleBestEffort(ctx, res)
+	}
+
 	// ── Status side-effects for successful commands ────────────────────────────
 	// Look up the command from DB (to get command_type) and apply side-effects:
 	//   - isolate_network   → set is_isolated=true
@@ -355,6 +386,83 @@ func (s *Server) SendCommandResult(ctx context.Context, res *edrv1.CommandResult
 	}
 
 	return &emptypb.Empty{}, nil
+}
+
+func (s *Server) persistForensicBundleBestEffort(ctx context.Context, res *edrv1.CommandResult) {
+	cmdID, err := uuid.Parse(res.CommandId)
+	if err != nil {
+		return
+	}
+	cmd, err := s.commandRepo.GetByID(ctx, cmdID)
+	if err != nil {
+		return
+	}
+	cmdType := strings.ToLower(string(cmd.CommandType))
+	if cmdType != "collect_logs" && cmdType != "collect_forensics" {
+		return
+	}
+
+	// Output may either be raw string or JSON; only parse when it looks like JSON.
+	out := strings.TrimSpace(res.Output)
+	if out == "" || !(strings.HasPrefix(out, "{") && strings.HasSuffix(out, "}")) {
+		return
+	}
+
+	var bundle forensicBundle
+	if err := json.Unmarshal([]byte(out), &bundle); err != nil || bundle.Version != 1 {
+		return
+	}
+
+	agentID, err := uuid.Parse(res.AgentId)
+	if err != nil {
+		return
+	}
+
+	issuedAt := cmd.IssuedAt
+	completedAt := cmd.CompletedAt
+
+	sum := bundle.Summary
+	if sum == nil {
+		sum = map[string]any{}
+	}
+
+	_ = s.forensicRepo.UpsertCollection(ctx, repository.ForensicCollectionSummary{
+		CommandID:   cmdID,
+		AgentID:     agentID,
+		CommandType: cmdType,
+		IssuedAt:    issuedAt,
+		CompletedAt: completedAt,
+		TimeRange:   bundle.TimeRange,
+		LogTypes:    bundle.LogTypes,
+		Summary:     sum,
+	})
+
+	// Replace events per log_type (simple MVP).
+	byType := map[string][]repository.ForensicEventRow{}
+	for _, e := range bundle.Events {
+		r := repository.ForensicEventRow{
+			LogType:  strings.ToLower(strings.TrimSpace(e.LogType)),
+			EventID:  e.EventID,
+			Level:    e.Level,
+			Provider: e.Provider,
+			Message:  e.Message,
+			Raw:      e.Raw,
+		}
+		if r.LogType == "" {
+			continue
+		}
+		if e.Timestamp != "" {
+			if ts, err := time.Parse(time.RFC3339Nano, e.Timestamp); err == nil {
+				r.Timestamp = &ts
+			} else if ts, err := time.Parse(time.RFC3339, e.Timestamp); err == nil {
+				r.Timestamp = &ts
+			}
+		}
+		byType[r.LogType] = append(byType[r.LogType], r)
+	}
+	for logType, events := range byType {
+		_ = s.forensicRepo.ReplaceEvents(ctx, agentID, cmdID, logType, events)
+	}
 }
 
 // updateAgentIsolation updates the agents.is_isolated column in PostgreSQL.

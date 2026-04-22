@@ -121,6 +121,8 @@ func (s *Server) RegisterRoutes(handlers *Handlers) {
 	agents.POST("/:id/process-exceptions", handlers.AddProcessException, handlers.RequirePermission("responses", "execute"))
 	// Backward-compat alias: some clients may omit the trailing 's'
 	agents.POST("/:id/command", handlers.ExecuteAgentCommand, handlers.RequirePermission("responses", "execute"))
+	agents.GET("/:id/forensic-collections", handlers.ListForensicCollections, handlers.RequirePermission("responses", "read"))
+	agents.GET("/:id/forensic-collections/:commandId/events", handlers.ListForensicEvents, handlers.RequirePermission("responses", "read"))
 
 	// ── Command history endpoints (Action Center) ────────────────────────
 	commands := protected.Group("/commands")

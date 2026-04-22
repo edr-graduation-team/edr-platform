@@ -262,6 +262,14 @@ type QuarantineRepository interface {
 	SetState(ctx context.Context, id uuid.UUID, state models.QuarantineItemState) error
 }
 
+// ForensicRepository stores forensic log collections and events (collect_logs/collect_forensics).
+type ForensicRepository interface {
+	ListCollectionsByAgent(ctx context.Context, agentID uuid.UUID, limit int) ([]ForensicCollectionSummary, error)
+	ListEvents(ctx context.Context, agentID, commandID uuid.UUID, logType string, limit int, cursorID *int64) (rows []ForensicEventRow, nextCursor *int64, err error)
+	UpsertCollection(ctx context.Context, c ForensicCollectionSummary) error
+	ReplaceEvents(ctx context.Context, agentID, commandID uuid.UUID, logType string, events []ForensicEventRow) error
+}
+
 // AuditLogFilter defines filters for listing audit logs.
 type AuditLogFilter struct {
 	UserID       *uuid.UUID

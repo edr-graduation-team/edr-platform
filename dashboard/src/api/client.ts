@@ -65,14 +65,14 @@ export const api = sigmaApi;
 
 export type AlertSeverity = 'critical' | 'high' | 'medium' | 'low' | 'informational';
 export type AlertStatus = 'open' | 'in_progress' | 'acknowledged' | 'resolved' | 'closed' | 'false_positive';
-export type AgentStatus = 'online' | 'offline' | 'degraded' | 'pending' | 'suspended';
+export type AgentStatus = 'online' | 'offline' | 'degraded' | 'pending' | 'suspended' | 'pending_uninstall' | 'uninstalled';
 export type CommandType = 'kill_process' | 'terminate_process' | 'quarantine_file' | 'collect_logs' | 'collect_forensics' | 'update_policy' |
     'restart_agent' | 'restart_service' | 'stop_agent' | 'start_agent' |
     'isolate_network' | 'restore_network' | 'scan_file' | 'scan_memory' | 'custom' |
     'restart_machine' | 'shutdown_machine' | 'update_filter_policy' |
     'run_cmd' | 'block_ip' | 'unblock_ip' | 'block_domain' | 'unblock_domain' | 'update_signatures' | 'update_config' |
     'unisolate_network' | 'restore_quarantine_file' | 'delete_quarantine_file' |
-    'enable_sysmon' | 'disable_sysmon' | 'update_agent';
+    'enable_sysmon' | 'disable_sysmon' | 'update_agent' | 'uninstall_agent';
 export type CommandStatus = 'pending' | 'sent' | 'acknowledged' | 'executing' | 'completed' | 'failed' | 'timeout' | 'cancelled';
 
 // Sprint 4 context-aware scoring types
@@ -881,6 +881,13 @@ export interface CreateAgentPackageRequest {
     skip_config: boolean;
     install_sysmon?: boolean;
     expires_in_seconds?: number;
+    /**
+     * Bind the download link (and mTLS verification) to a specific agent.
+     * Required for in-place upgrades; download will be rejected for any
+     * other agent identity and the package is automatically revoked after
+     * the first successful download or upon expiry.
+     */
+    agent_id?: string;
 }
 
 export interface CreateAgentPackageResponse {

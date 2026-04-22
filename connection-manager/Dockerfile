@@ -46,9 +46,13 @@ RUN mkdir -p /app/certs
 # Copy binary from builder
 COPY --from=builder /app/bin/connection-manager /app/connection-manager
 
-# Copy entrypoint script
+# Copy entrypoint script.
+# Strip any CRLF introduced by a Windows checkout (git core.autocrlf=true) before
+# chmod — a stray \r on the shebang line causes the kernel to try exec'ing
+# "/bin/sh\r", which fails with ENOENT and looks like a missing file.
 COPY docker-entrypoint.sh /app/docker-entrypoint.sh
-RUN chmod +x /app/docker-entrypoint.sh
+RUN sed -i 's/\r$//' /app/docker-entrypoint.sh \
+    && chmod +x /app/docker-entrypoint.sh
 
 # Copy config template
 COPY --from=builder /app/config/config.example.yaml /app/config/config.yaml

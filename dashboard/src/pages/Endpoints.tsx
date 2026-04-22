@@ -61,9 +61,11 @@ const StatusBadge = React.memo(function StatusBadge({ status }: { status: Agent[
         degraded: { label: 'Degraded', color: 'badge-degraded', icon: AlertTriangle },
         pending: { label: 'Pending', color: 'badge-warning', icon: Clock },
         suspended: { label: 'Suspended', color: 'badge-danger', icon: X },
-    };
+        pending_uninstall: { label: 'Uninstalling…', color: 'badge-warning', icon: Trash2 },
+        uninstalled: { label: 'Uninstalled', color: 'badge-offline', icon: Trash2 },
+    } as const;
 
-    const { label, color, icon: Icon } = config[status] || config.offline;
+    const { label, color, icon: Icon } = config[status as keyof typeof config] || config.offline;
 
     return (
         <span className={`badge ${color} flex items-center gap-1`}>
@@ -560,6 +562,9 @@ function buildAvailableCommands(agent: Agent): CommandType[] {
 
 function isCommandDisabledForAgent(agent: Agent, cmd: CommandType): boolean {
     const effectiveStatus = getEffectiveStatus(agent);
+    // A confirmed uninstall is terminal: no command (not even a repeat
+    // UNINSTALL_AGENT) is meaningful, and the server will reject it anyway.
+    if (effectiveStatus === 'uninstalled') return true;
     const agentRunning = effectiveStatus === 'online' || effectiveStatus === 'degraded';
     const agentSuspended = effectiveStatus === 'suspended';
     const machineOnline = effectiveStatus !== 'offline' && effectiveStatus !== 'pending';

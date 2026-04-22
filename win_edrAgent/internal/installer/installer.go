@@ -281,9 +281,9 @@ func EnsureDirectories() error {
 			return fmt.Errorf("failed to create directory %s: %w", dir, err)
 		}
 	}
-	// Ensure the root directory remains writable by elevated Administrators so
-	// they can signal an authorized uninstall (e.g., create uninstall.dat) and
-	// perform clean removal if needed.
+	// Root directory stays writable by elevated Administrators so the SYSTEM
+	// scheduled task spawned by an authorised UNINSTALL_AGENT command can
+	// finish removing logs/queue/quarantine after the service exits.
 	_ = security.ApplyRestrictedDACL(`C:\ProgramData\EDR`)
 	return nil
 }

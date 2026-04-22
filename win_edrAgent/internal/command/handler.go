@@ -4,6 +4,8 @@ package command
 import (
 	"context"
 	"crypto/sha256"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"encoding/hex"
 	"fmt"
@@ -51,6 +53,7 @@ const (
 	CmdUpdateSignatures CommandType = "UPDATE_SIGNATURES"
 	CmdRestoreQuarantineFile CommandType = "RESTORE_QUARANTINE_FILE"
 	CmdDeleteQuarantineFile  CommandType = "DELETE_QUARANTINE_FILE"
+	CmdUninstallAgent        CommandType = "UNINSTALL_AGENT"
 )
 
 // =============================================================================
@@ -160,6 +163,13 @@ type Handler struct {
 
 	// sigStore is the local malware hash database (optional).
 	sigStore *signatures.Store
+
+	// uninstallHook is the agent-level callback that performs the server-
+	// authorised uninstall (release protections, schedule SYSTEM cleanup,
+	// stop the service). It is injected by the service layer so the
+	// command package does not need to import service (which would create
+	// a cycle: service → agent → command → service).
+	uninstallHook func(reason string) error
 }
 
 // NewHandler creates a new command handler.
@@ -218,6 +228,17 @@ func (h *Handler) SetSignatureStore(s *signatures.Store) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.sigStore = s
+}
+
+// SetUninstallHook registers the agent-level callback that performs the
+// server-authorised uninstall. When a COMMAND_TYPE_UNINSTALL_AGENT arrives,
+// the handler invokes this hook, returns SUCCESS so SendCommandResult can
+// deliver the "uninstall confirm" over the still-open stream, then the hook
+// is responsible for stopping the service and cleaning up on disk.
+func (h *Handler) SetUninstallHook(fn func(reason string) error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.uninstallHook = fn
 }
 
 // Execute processes a command and returns the result.
@@ -279,6 +300,8 @@ func (h *Handler) Execute(ctx context.Context, cmd *Command) *Result {
 		output, err = h.restoreQuarantineFile(ctx, cmd.Parameters)
 	case CmdDeleteQuarantineFile:
 		output, err = h.deleteQuarantineFile(ctx, cmd.Parameters)
+	case CmdUninstallAgent:
+		output, err = h.uninstallAgent(ctx, cmd.Parameters)
 	default:
 		err = fmt.Errorf("unknown command type: %s", cmd.Type)
 	}
@@ -1488,6 +1511,89 @@ func (h *Handler) updateConfig(ctx context.Context, params map[string]string) (s
 	return fmt.Sprintf("Sparse config hot-reload applied (%d changes): %v", updated, overrides), nil
 }
 
+// uninstallAgent is the server-driven removal path. The server has already
+// enforced mTLS + RBAC + audit before the UNINSTALL_AGENT command was
+// dispatched, so no local token is required. We simply delegate to the
+// service-layer hook (which releases protections and schedules SYSTEM
+// cleanup) and return success. SendCommandResult(status=SUCCESS) carries the
+// "uninstall confirm" back to the server before the stream dies with the
+// service.
+func (h *Handler) uninstallAgent(_ context.Context, params map[string]string) (string, error) {
+	reason := strings.TrimSpace(params["reason"])
+	if reason == "" {
+		reason = "server-issued UNINSTALL_AGENT"
+	}
+
+	h.mu.Lock()
+	hook := h.uninstallHook
+	h.mu.Unlock()
+
+	if hook == nil {
+		return "", fmt.Errorf("uninstall hook not registered — agent cannot honour UNINSTALL_AGENT")
+	}
+
+	h.logger.Warnf("[C2] UNINSTALL_AGENT received (reason=%q) — releasing protections and scheduling removal", reason)
+	if err := hook(reason); err != nil {
+		return "", fmt.Errorf("uninstall hook failed: %w", err)
+	}
+
+	return fmt.Sprintf("Uninstall scheduled (reason=%s). Service will stop and agent files will be removed.", reason), nil
+}
+
+// mtlsHTTPClient builds an HTTP client that presents the agent's enrolled
+// client certificate and validates the server against the trusted CA. This is
+// the only transport allowed to download personalised agent packages — the
+// server rejects requests without a valid peer certificate whose CN matches
+// the package's bound agent_id.
+func (h *Handler) mtlsHTTPClient() (*http.Client, error) {
+	h.mu.Lock()
+	cfg := h.currentCfg
+	h.mu.Unlock()
+	if cfg == nil {
+		return nil, fmt.Errorf("agent config not wired into command handler")
+	}
+
+	// Prefer inline PEM blobs (stored in the protected Registry) over files.
+	var clientCert tls.Certificate
+	var err error
+	if len(cfg.Certs.CertPEM) > 0 && len(cfg.Certs.KeyPEM) > 0 {
+		clientCert, err = tls.X509KeyPair(cfg.Certs.CertPEM, cfg.Certs.KeyPEM)
+	} else if cfg.Certs.CertPath != "" && cfg.Certs.KeyPath != "" {
+		clientCert, err = tls.LoadX509KeyPair(cfg.Certs.CertPath, cfg.Certs.KeyPath)
+	} else {
+		return nil, fmt.Errorf("no client certificate material available for mTLS download")
+	}
+	if err != nil {
+		return nil, fmt.Errorf("load client certificate: %w", err)
+	}
+
+	caPool := x509.NewCertPool()
+	var caPEM []byte
+	if len(cfg.Certs.CACertPEM) > 0 {
+		caPEM = cfg.Certs.CACertPEM
+	} else if cfg.Certs.CAPath != "" {
+		caPEM, err = os.ReadFile(cfg.Certs.CAPath)
+		if err != nil {
+			return nil, fmt.Errorf("read CA cert: %w", err)
+		}
+	}
+	if len(caPEM) == 0 || !caPool.AppendCertsFromPEM(caPEM) {
+		return nil, fmt.Errorf("no usable CA certificate for server verification")
+	}
+
+	return &http.Client{
+		Timeout: 10 * time.Minute,
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{
+				MinVersion:   tls.VersionTLS12,
+				Certificates: []tls.Certificate{clientCert},
+				RootCAs:      caPool,
+				ServerName:   cfg.Server.TLSServerName,
+			},
+		},
+	}, nil
+}
+
 // updateAgent downloads and installs new agent version.
 func (h *Handler) updateAgent(ctx context.Context, params map[string]string) (string, error) {
 	version := params["version"]
@@ -1524,12 +1630,19 @@ func (h *Handler) updateAgent(ctx context.Context, params map[string]string) (st
 	}
 
 	// Download binary to a staging path (root dir is Admin+SYSTEM).
+	// The download endpoint requires mTLS so the server can verify the peer
+	// certificate's CN matches the agent_id bound to the package row. A
+	// plain http.DefaultClient would be rejected with 403.
 	stagePath := `C:\ProgramData\EDR\edr-agent.patch.exe`
+	httpClient, err := h.mtlsHTTPClient()
+	if err != nil {
+		return "", fmt.Errorf("build mTLS client for update download: %w", err)
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return "", fmt.Errorf("build download request: %w", err)
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("download failed: %w", err)
 	}

@@ -380,6 +380,11 @@ func (s *Server) SendCommandResult(ctx context.Context, res *edrv1.CommandResult
 					s.logger.Infof("[Control] Agent %s marked SUSPENDED after stop_agent ACK", agentID)
 				case cmdType == "quarantine_file" || cmdType == "restore_quarantine_file" || cmdType == "delete_quarantine_file":
 					s.applyQuarantineInventoryOnSuccess(ctx, res, cmd, agentID)
+				case cmdType == "uninstall_agent":
+					// Final confirmation: agent has cleaned itself up and is about to exit.
+					// Latch the status so no further commands are ever dispatched.
+					s.updateAgentStatus(ctx, agentID, models.AgentStatusUninstalled)
+					s.logger.Infof("[Uninstall] Agent %s confirmed uninstall (command %s) — status=uninstalled", agentID, res.CommandId)
 				}
 			}
 		}

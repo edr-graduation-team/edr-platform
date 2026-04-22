@@ -85,6 +85,7 @@ const RESPONSE_OPTIONS: { value: CommandType; label: string; destructive?: boole
     { value: 'enable_sysmon', label: 'Enable Sysmon (install + channel)' },
     { value: 'disable_sysmon', label: 'Disable Sysmon (uninstall)' },
     { value: 'update_agent', label: 'Upgrade agent (in-place)' },
+    { value: 'uninstall_agent', label: 'Uninstall agent (permanent)', destructive: true },
 ];
 
 function buildCommandParameters(cmd: CommandType, f: Record<string, string>): Record<string, string> {
@@ -159,6 +160,11 @@ function buildCommandParameters(cmd: CommandType, f: Record<string, string>): Re
         case 'restart_machine':
         case 'shutdown_machine':
             return { confirm: f.confirm === 'true' ? 'true' : 'false' };
+        case 'uninstall_agent': {
+            const o: Record<string, string> = {};
+            if (f.reason?.trim()) o.reason = f.reason.trim();
+            return o;
+        }
         default:
             return {};
     }
@@ -212,7 +218,7 @@ export default function EndpointDetail() {
         confirm: 'false',
     });
     const [destructiveOpen, setDestructiveOpen] = useState(false);
-    const [pendingDestructive, setPendingDestructive] = useState<'restart_machine' | 'shutdown_machine' | null>(null);
+    const [pendingDestructive, setPendingDestructive] = useState<'restart_machine' | 'shutdown_machine' | 'uninstall_agent' | null>(null);
 
     const { data: agent, isLoading: agentLoading, error: agentError } = useQuery({
         queryKey: ['agent', agentId],
@@ -290,7 +296,7 @@ export default function EndpointDetail() {
     const submitCommand = () => {
         const opt = RESPONSE_OPTIONS.find((o) => o.value === cmdType);
         if (opt?.destructive) {
-            setPendingDestructive(cmdType as 'restart_machine' | 'shutdown_machine');
+            setPendingDestructive(cmdType as 'restart_machine' | 'shutdown_machine' | 'uninstall_agent');
             setDestructiveOpen(true);
             return;
         }
@@ -306,9 +312,15 @@ export default function EndpointDetail() {
     const confirmDestructive = () => {
         if (!pendingDestructive) return;
         const timeout = Math.min(3600, Math.max(0, parseInt(fields.timeout || '300', 10) || 300));
+        // Uninstall carries an optional reason instead of a boolean confirm,
+        // since the server-side audit trail is more useful than a re-confirm.
+        const parameters =
+            pendingDestructive === 'uninstall_agent'
+                ? buildCommandParameters('uninstall_agent', fields)
+                : { confirm: 'true' };
         execMutation.mutate({
             command_type: pendingDestructive,
-            parameters: { confirm: 'true' },
+            parameters,
             timeout,
         });
         setDestructiveOpen(false);
@@ -378,10 +390,14 @@ export default function EndpointDetail() {
                                     ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400'
                                     : eff === 'offline'
                                       ? 'bg-slate-500/15 text-slate-600'
-                                      : 'bg-amber-500/15 text-amber-700 dark:text-amber-300'
+                                      : eff === 'uninstalled'
+                                        ? 'bg-rose-500/15 text-rose-700 dark:text-rose-400'
+                                        : eff === 'pending_uninstall'
+                                          ? 'bg-rose-500/10 text-rose-600 dark:text-rose-300'
+                                          : 'bg-amber-500/15 text-amber-700 dark:text-amber-300'
                             }`}
                         >
-                            {eff}
+                            {eff === 'pending_uninstall' ? 'Uninstalling…' : eff}
                         </span>
                         {agent.is_isolated && (
                             <span className="px-3 py-1 rounded-full text-xs font-bold uppercase bg-rose-500/15 text-rose-600 dark:text-rose-400">
@@ -1473,6 +1489,9 @@ function ResponseTab({
 
     const upgradeMutation = useMutation({
         mutationFn: async () => {
+            // Bind the package to THIS agent's identity. The download endpoint
+            // verifies the agent_id against the peer mTLS certificate CN and
+            // revokes the link after the first successful download (or expiry).
             const pkg = await agentPackagesApi.create({
                 server_ip: upgradeForm.serverIP || undefined,
                 server_domain: upgradeForm.serverDomain || undefined,
@@ -1481,6 +1500,7 @@ function ResponseTab({
                 skip_config: false,
                 install_sysmon: upgradeForm.installSysmon,
                 expires_in_seconds: 900,
+                agent_id: agentId,
             });
             await agentsApi.executeCommand(agentId, {
                 command_type: 'update_agent',
@@ -1736,6 +1756,22 @@ function ResponseTab({
 
                         {(cmdType === 'restart_machine' || cmdType === 'shutdown_machine') && (
                             <p className="text-xs text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 p-3 rounded-lg border border-amber-200 dark:border-amber-800/30 font-medium">You will be asked to confirm — these actions affect the whole host.</p>
+                        )}
+
+                        {cmdType === 'uninstall_agent' && (
+                            <>
+                                <label className="text-xs text-slate-500">Reason (audit trail)</label>
+                                <input
+                                    className="input w-full text-xs"
+                                    placeholder="Decommission / replaced host / offboarding"
+                                    value={fields.reason || ''}
+                                    onChange={(e) => patch('reason', e.target.value)}
+                                    disabled={!canExec}
+                                />
+                                <p className="text-xs text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-900/20 p-3 rounded-lg border border-rose-200 dark:border-rose-800/30 font-medium">
+                                    Permanent: the agent will release its protections, confirm back to the server, and remove itself. No further commands will be accepted.
+                                </p>
+                            </>
                         )}
                         </div>
 

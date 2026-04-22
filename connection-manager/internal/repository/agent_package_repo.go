@@ -2,20 +2,20 @@ package repository
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type PostgresAgentPackageRepository struct {
-	db *sql.DB
+	pool *pgxpool.Pool
 }
 
-func NewPostgresAgentPackageRepository(db *sql.DB) *PostgresAgentPackageRepository {
-	return &PostgresAgentPackageRepository{db: db}
+func NewPostgresAgentPackageRepository(pool *pgxpool.Pool) *PostgresAgentPackageRepository {
+	return &PostgresAgentPackageRepository{pool: pool}
 }
 
 func (r *PostgresAgentPackageRepository) Create(ctx context.Context, row AgentPackageRow) error {
@@ -39,7 +39,7 @@ func (r *PostgresAgentPackageRepository) Create(ctx context.Context, row AgentPa
 	}
 	b, _ := json.Marshal(row.BuildParams)
 
-	_, err := r.db.ExecContext(ctx, `
+	_, err := r.pool.Exec(ctx, `
 		INSERT INTO agent_packages (id, agent_id, sha256, filename, storage_path, build_params, expires_at)
 		VALUES ($1,$2,$3,$4,$5,$6,$7)
 	`, row.ID, row.AgentID, row.SHA256, row.Filename, row.StoragePath, b, row.ExpiresAt)
@@ -49,9 +49,9 @@ func (r *PostgresAgentPackageRepository) Create(ctx context.Context, row AgentPa
 func (r *PostgresAgentPackageRepository) Get(ctx context.Context, id uuid.UUID) (*AgentPackageRow, error) {
 	var row AgentPackageRow
 	var buildParamsRaw []byte
-	var agentID sql.NullString
-	var consumedAt sql.NullTime
-	err := r.db.QueryRowContext(ctx, `
+	var agentID *uuid.UUID
+	var consumedAt *time.Time
+	err := r.pool.QueryRow(ctx, `
 		SELECT id, agent_id, sha256, filename, storage_path, build_params, created_at, expires_at, consumed_at
 		FROM agent_packages
 		WHERE id=$1
@@ -59,33 +59,30 @@ func (r *PostgresAgentPackageRepository) Get(ctx context.Context, id uuid.UUID) 
 	if err != nil {
 		return nil, err
 	}
-	if agentID.Valid {
-		if parsed, perr := uuid.Parse(agentID.String); perr == nil {
-			row.AgentID = parsed
-		}
+	if agentID != nil {
+		row.AgentID = *agentID
 	}
-	if consumedAt.Valid {
-		t := consumedAt.Time
-		row.ConsumedAt = &t
+	if consumedAt != nil {
+		row.ConsumedAt = consumedAt
 	}
 	_ = json.Unmarshal(buildParamsRaw, &row.BuildParams)
 	return &row, nil
 }
 
 func (r *PostgresAgentPackageRepository) MarkConsumed(ctx context.Context, id uuid.UUID) error {
-	_, err := r.db.ExecContext(ctx, `
+	_, err := r.pool.Exec(ctx, `
 		UPDATE agent_packages SET consumed_at = NOW() WHERE id=$1 AND consumed_at IS NULL
 	`, id)
 	return err
 }
 
 func (r *PostgresAgentPackageRepository) Delete(ctx context.Context, id uuid.UUID) error {
-	_, err := r.db.ExecContext(ctx, `DELETE FROM agent_packages WHERE id=$1`, id)
+	_, err := r.pool.Exec(ctx, `DELETE FROM agent_packages WHERE id=$1`, id)
 	return err
 }
 
 func (r *PostgresAgentPackageRepository) ListExpired(ctx context.Context, before time.Time) ([]*AgentPackageRow, error) {
-	rows, err := r.db.QueryContext(ctx, `
+	rows, err := r.pool.Query(ctx, `
 		SELECT id, agent_id, sha256, filename, storage_path, build_params, created_at, expires_at, consumed_at
 		FROM agent_packages
 		WHERE expires_at < $1
@@ -99,19 +96,16 @@ func (r *PostgresAgentPackageRepository) ListExpired(ctx context.Context, before
 	for rows.Next() {
 		var row AgentPackageRow
 		var buildParamsRaw []byte
-		var agentID sql.NullString
-		var consumedAt sql.NullTime
+		var agentID *uuid.UUID
+		var consumedAt *time.Time
 		if err := rows.Scan(&row.ID, &agentID, &row.SHA256, &row.Filename, &row.StoragePath, &buildParamsRaw, &row.CreatedAt, &row.ExpiresAt, &consumedAt); err != nil {
 			return nil, err
 		}
-		if agentID.Valid {
-			if parsed, perr := uuid.Parse(agentID.String); perr == nil {
-				row.AgentID = parsed
-			}
+		if agentID != nil {
+			row.AgentID = *agentID
 		}
-		if consumedAt.Valid {
-			t := consumedAt.Time
-			row.ConsumedAt = &t
+		if consumedAt != nil {
+			row.ConsumedAt = consumedAt
 		}
 		_ = json.Unmarshal(buildParamsRaw, &row.BuildParams)
 		out = append(out, &row)

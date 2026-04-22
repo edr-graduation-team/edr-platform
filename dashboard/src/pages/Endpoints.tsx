@@ -1022,7 +1022,7 @@ export default function Endpoints() {
                                     <th className="py-3 px-2">Last activity</th>
                                 </tr>
                             </thead>
-                            <tbody>
+                            <tbody style={{ contentVisibility: 'auto', containIntrinsicSize: '900px' } as any}>
                                 {agents.map((agent, rowIdx) => (
                                     <tr
                                         key={agent.id}

@@ -92,7 +92,10 @@ const CommandRow = React.memo(function CommandRow({ command: item }: { command: 
     const { icon: Icon, color, bg } = getCommandStyles(item.command_type);
 
     return (
-        <div className="p-4 rounded-xl border transition-all duration-200 group relative bg-slate-50/50 dark:bg-slate-800/40 border-slate-200/80 dark:border-slate-700/50 hover:bg-white dark:hover:bg-slate-800/60 hover:border-slate-300 dark:hover:border-slate-600/50">
+        <div
+            className="p-4 rounded-xl border transition-all duration-200 group relative bg-slate-50/50 dark:bg-slate-800/40 border-slate-200/80 dark:border-slate-700/50 hover:bg-white dark:hover:bg-slate-800/60 hover:border-slate-300 dark:hover:border-slate-600/50"
+            style={{ contentVisibility: 'auto', containIntrinsicSize: '180px' } as any}
+        >
             {/* Status Indicator Bar */}
             <div className={`absolute left-0 top-0 bottom-0 w-1 rounded-l-xl ${
                 item.status === 'completed' ? 'bg-emerald-500' :

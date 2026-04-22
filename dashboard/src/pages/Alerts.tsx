@@ -1376,7 +1376,7 @@ export default function Alerts() {
                                         <th className="py-4 px-4">Actions</th>
                                     </tr>
                                 </thead>
-                                <tbody>
+                                <tbody style={{ contentVisibility: 'auto', containIntrinsicSize: '1100px' } as any}>
                                     {alerts.map((alert) => {
                                         const StatusIcon = statusIcons[alert.status] || AlertTriangle;
                                         const hasContext = !!alert.context_snapshot;

@@ -958,6 +958,48 @@ func canonicalEventLogChannel(raw string) string {
 	}
 }
 
+// resolveEventLogChannels returns one or more candidate channels for a given shorthand.
+// This lets the agent gracefully degrade when certain channels are missing (e.g. PowerShell).
+func resolveEventLogChannels(raw string) []string {
+	s := strings.TrimSpace(raw)
+	if s == "" {
+		return nil
+	}
+	// If caller passed an explicit channel path, try it as-is.
+	if strings.Contains(s, "/") {
+		return []string{s}
+	}
+	switch strings.ToLower(s) {
+	case "powershell":
+		// Newer channel (Operational) first, then classic legacy channel.
+		return []string{
+			"Microsoft-Windows-PowerShell/Operational",
+			"Windows PowerShell",
+		}
+	case "sysmon":
+		return []string{"Microsoft-Windows-Sysmon/Operational"}
+	default:
+		return []string{canonicalEventLogChannel(s)}
+	}
+}
+
+func ensureEventChannelEnabled(ctx context.Context, channel string) error {
+	// Best-effort enable. If the channel doesn't exist, we return an error and the caller can fallback.
+	_, err := exec.CommandContext(ctx, "wevtutil", "sl", channel, "/e:true").CombinedOutput()
+	return err
+}
+
+func isChannelNotFound(err error, output []byte) bool {
+	if err == nil {
+		return false
+	}
+	s := strings.ToLower(string(output))
+	// Common Windows wording for missing event channel.
+	return strings.Contains(s, "the specified channel could not be found") ||
+		strings.Contains(s, "channel not found") ||
+		strings.Contains(s, "15007")
+}
+
 func collectForensicsMaxEvents(params map[string]string) int {
 	const def = 500
 	const hardMax = 5000
@@ -1018,20 +1060,53 @@ func (h *Handler) collectForensics(ctx context.Context, params map[string]string
 				continue
 			}
 
-			channel := canonicalEventLogChannel(logName)
-			query := fmt.Sprintf("*[System[TimeCreated[timediff(@SystemTime) <= %d]]]", ms)
-			cmd := exec.CommandContext(ctx, wevt, "qe", channel, "/q:"+query, "/c:"+strconv.Itoa(maxEv), "/f:text")
-			output, err := cmd.CombinedOutput()
-			if err != nil {
-				h.logger.Warnf("[C2] wevtutil xpath failed for %q (%q): %v — fallback /rd:true", logName, channel, err)
-				cmd2 := exec.CommandContext(ctx, wevt, "qe", channel, "/c:"+strconv.Itoa(maxEv), "/f:text", "/rd:true")
-				output, err = cmd2.CombinedOutput()
-				if err != nil {
-					em := trimForensicsErr(fmt.Sprintf("%v: %s", err, string(output)), 400)
-					h.logger.Warnf("[C2] Log collection failed for %q: %s", channel, em)
-					results = append(results, fmt.Sprintf("%s: failed (%s)", channel, em))
-					continue
+			candidates := resolveEventLogChannels(logName)
+			if len(candidates) == 0 {
+				continue
+			}
+
+			var channel string
+			var output []byte
+			var lastErr error
+			ok := false
+
+			for _, cand := range candidates {
+				channel = cand
+				// Try to enable the channel first (best effort). This fixes cases where the channel exists but is disabled.
+				_ = ensureEventChannelEnabled(ctx, channel)
+
+				query := fmt.Sprintf("*[System[TimeCreated[timediff(@SystemTime) <= %d]]]", ms)
+				cmd := exec.CommandContext(ctx, wevt, "qe", channel, "/q:"+query, "/c:"+strconv.Itoa(maxEv), "/f:text")
+				output, lastErr = cmd.CombinedOutput()
+				if lastErr != nil {
+					// Channel missing? try fallback candidate instead of failing the whole command.
+					if isChannelNotFound(lastErr, output) && len(candidates) > 1 {
+						h.logger.Warnf("[C2] Event channel missing for %q (%q): %v — trying fallback", logName, channel, lastErr)
+						continue
+					}
+
+					h.logger.Warnf("[C2] wevtutil xpath failed for %q (%q): %v — fallback /rd:true", logName, channel, lastErr)
+					cmd2 := exec.CommandContext(ctx, wevt, "qe", channel, "/c:"+strconv.Itoa(maxEv), "/f:text", "/rd:true")
+					output, lastErr = cmd2.CombinedOutput()
+					if lastErr != nil {
+						// still not found? try next candidate if any
+						if isChannelNotFound(lastErr, output) && len(candidates) > 1 {
+							h.logger.Warnf("[C2] Event channel missing for %q (%q) after fallback: %v — trying next", logName, channel, lastErr)
+							continue
+						}
+						continue
+					}
 				}
+
+				ok = true
+				break
+			}
+
+			if !ok {
+				em := trimForensicsErr(fmt.Sprintf("%v: %s", lastErr, string(output)), 400)
+				h.logger.Warnf("[C2] Log collection failed for %q: %s", logName, em)
+				results = append(results, fmt.Sprintf("%s: failed (%s)", logName, em))
+				continue
 			}
 
 			eventCount := strings.Count(string(output), "Event[")

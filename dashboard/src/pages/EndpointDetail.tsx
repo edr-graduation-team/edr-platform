@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import {
-    ArrowLeft, Activity, Terminal, Shield, HardDrive, Clock, Loader2,
+    ArrowLeft, Activity, Terminal, Shield, HardDrive, Loader2,
     Server, Network, AlertTriangle, CheckCircle2, XCircle, Settings,
     RefreshCw, ChevronLeft, ChevronRight,
 } from 'lucide-react';
@@ -224,11 +224,7 @@ export default function EndpointDetail() {
 
     const canViewAlerts = authApi.canViewAlerts();
 
-    const { data: recentCmds } = useQuery({
-        queryKey: ['agent-commands', agentId, 'overview'],
-        queryFn: () => agentsApi.getCommands(agentId, { limit: 5 }),
-        enabled: !!agentId && tab === 'overview',
-    });
+    // Commands are fetched in Response tab (cmdPage). Overview uses that list for quick status panels.
 
     const { data: cmdPage, isLoading: cmdsLoading } = useQuery({
         queryKey: ['agent-commands', agentId, 'response'],
@@ -341,7 +337,7 @@ export default function EndpointDetail() {
         );
     }
 
-    const lastCmd = recentCmds?.data?.[0];
+    // lastCmd previously shown in Overview; Response tab now owns command details.
 
     return (
         <div className="relative flex flex-col min-h-[calc(100vh-2rem)] -mx-4 sm:-mx-6 lg:-mx-8 -my-4 sm:-my-6 lg:-my-8 p-4 sm:p-6 lg:p-8 bg-slate-200 dark:bg-gradient-to-br dark:from-slate-900 dark:via-[#0b1120] dark:to-slate-900">
@@ -420,7 +416,7 @@ export default function EndpointDetail() {
                             agent={agent}
                             eff={eff}
                             riskRow={riskRow}
-                            lastCmd={lastCmd}
+                            cmds={cmdPage?.data || []}
                             overviewAlerts={overviewAlerts?.alerts ?? []}
                             overviewAlertsLoading={overviewAlertsLoading}
                             cmEvents={eventsPayload?.data || []}
@@ -520,7 +516,7 @@ function OverviewTab({
     agent,
     eff,
     riskRow,
-    lastCmd,
+    cmds,
     overviewAlerts,
     overviewAlertsLoading,
     cmEvents,
@@ -528,7 +524,7 @@ function OverviewTab({
     agent: Agent;
     eff: string;
     riskRow?: EndpointRiskSummary;
-    lastCmd?: CommandListItem;
+    cmds: CommandListItem[];
     overviewAlerts: Alert[];
     overviewAlertsLoading: boolean;
     cmEvents: CmEventSummary[];
@@ -543,6 +539,18 @@ function OverviewTab({
     const certDaysLeft = certExpiry ? Math.ceil((certExpiry.getTime() - Date.now()) / 86400000) : null;
     const cpuPct = agent.cpu_usage || 0;
     const memPct = agent.memory_mb && agent.memory_used_mb ? Math.min(100, (agent.memory_used_mb / agent.memory_mb) * 100) : 0;
+
+    const sysmonCmd = useMemo(() => {
+        const list = cmds || [];
+        return list.find((c) => c.command_type === 'enable_sysmon' || c.command_type === 'disable_sysmon');
+    }, [cmds]);
+
+    const sysmonStatus = (() => {
+        if (!sysmonCmd) return { label: 'Unknown', tone: 'muted' as const };
+        const ok = sysmonCmd.status === 'completed';
+        if (sysmonCmd.command_type === 'enable_sysmon') return { label: ok ? 'Enabled' : 'Enable failed', tone: ok ? ('ok' as const) : ('bad' as const) };
+        return { label: ok ? 'Disabled' : 'Disable failed', tone: ok ? ('warn' as const) : ('bad' as const) };
+    })();
 
     return (
         <div className="space-y-6">
@@ -583,17 +591,43 @@ function OverviewTab({
                 </div>
                 <div>
                     <h3 className="text-sm font-bold text-slate-700 dark:text-slate-200 mb-2 flex items-center gap-2">
-                        <Clock className="w-4 h-4" /> Last command
+                        <Settings className="w-4 h-4" /> Sysmon
                     </h3>
-                    {lastCmd ? (
-                        <div className="text-sm space-y-1">
-                            <div><span className="text-slate-500">Type:</span> <code>{lastCmd.command_type}</code></div>
-                            <div><span className="text-slate-500">Status:</span> {lastCmd.status}</div>
-                            <div><span className="text-slate-500">Issued:</span> {new Date(lastCmd.issued_at).toLocaleString()}</div>
+                    <div className="text-sm space-y-2">
+                        <div className="flex items-center justify-between gap-3">
+                            <span className="text-slate-500">Status</span>
+                            <span
+                                className={`px-2 py-0.5 rounded-full text-xs font-semibold border ${
+                                    sysmonStatus.tone === 'ok'
+                                        ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/20'
+                                        : sysmonStatus.tone === 'warn'
+                                        ? 'bg-amber-500/10 text-amber-800 dark:text-amber-300 border-amber-500/20'
+                                        : sysmonStatus.tone === 'bad'
+                                        ? 'bg-rose-500/10 text-rose-700 dark:text-rose-300 border-rose-500/20'
+                                        : 'bg-slate-500/10 text-slate-700 dark:text-slate-300 border-slate-500/20'
+                                }`}
+                            >
+                                {sysmonStatus.label}
+                            </span>
                         </div>
-                    ) : (
-                        <p className="text-slate-500 text-sm">No commands yet.</p>
-                    )}
+                        <div className="text-xs text-slate-500">
+                            Channel: <code>Microsoft-Windows-Sysmon/Operational</code>
+                        </div>
+                        {sysmonCmd ? (
+                            <div className="text-xs text-slate-500 space-y-1">
+                                <div>
+                                    Last action: <code>{sysmonCmd.command_type}</code> · {new Date(sysmonCmd.issued_at).toLocaleString()}
+                                </div>
+                                {sysmonCmd.result?.output ? (
+                                    <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white/60 dark:bg-slate-900/40 p-2 text-[11px] text-slate-700 dark:text-slate-200 whitespace-pre-wrap">
+                                        {String((sysmonCmd.result as any).output)}
+                                    </div>
+                                ) : null}
+                            </div>
+                        ) : (
+                            <p className="text-slate-500 text-sm">No Sysmon actions recorded yet.</p>
+                        )}
+                    </div>
                 </div>
             </div>
 

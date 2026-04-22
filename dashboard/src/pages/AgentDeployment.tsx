@@ -19,6 +19,7 @@ interface BuildFormState {
     serverDomain: string;
     serverPort: string;
     tokenId: string;
+    installSysmon: boolean;
 }
 
 function loadFormState(): BuildFormState {
@@ -26,7 +27,7 @@ function loadFormState(): BuildFormState {
         const raw = sessionStorage.getItem(STORAGE_KEY);
         if (raw) return JSON.parse(raw);
     } catch { /* ignore */ }
-    return { serverIP: '', serverDomain: '', serverPort: '47051', tokenId: '' };
+    return { serverIP: '', serverDomain: '', serverPort: '47051', tokenId: '', installSysmon: false };
 }
 
 function saveFormState(state: BuildFormState) {
@@ -63,8 +64,8 @@ function BuildModal({
         saveFormState(form);
     }, [form]);
 
-    const updateField = (field: keyof BuildFormState, value: string) => {
-        setForm(prev => ({ ...prev, [field]: value }));
+    const updateField = (field: keyof BuildFormState, value: string | boolean) => {
+        setForm(prev => ({ ...prev, [field]: value as never }));
     };
 
     const handleBuild = async (skip: boolean) => {
@@ -92,6 +93,7 @@ function BuildModal({
                 server_port: skip ? undefined : (form.serverPort || '47051'),
                 token_id: form.tokenId,
                 skip_config: skip,
+                install_sysmon: form.installSysmon,
             });
 
             setBuildProgress('Build complete. Starting download...');
@@ -219,6 +221,25 @@ function BuildModal({
                     <div className="relative flex justify-center text-xs">
                         <span className="bg-white dark:bg-gray-800 px-3 text-gray-500">Server Configuration</span>
                     </div>
+                </div>
+
+                {/* Optional bootstrap features */}
+                <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white/70 dark:bg-slate-900/40 p-4 space-y-2">
+                    <label className="flex items-start gap-3 text-sm text-slate-700 dark:text-slate-200">
+                        <input
+                            type="checkbox"
+                            className="mt-1"
+                            checked={form.installSysmon}
+                            onChange={(e) => updateField('installSysmon', e.target.checked)}
+                            disabled={isBuilding}
+                        />
+                        <span>
+                            <span className="font-semibold">Install and enable Sysmon on first run</span>
+                            <span className="block text-xs text-slate-500 mt-0.5">
+                                Best-effort bootstrap: installs Sysmon (if missing) and enables <code>Microsoft-Windows-Sysmon/Operational</code>.
+                            </span>
+                        </span>
+                    </label>
                 </div>
 
                 {/* Server Config */}

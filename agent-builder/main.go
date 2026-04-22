@@ -44,6 +44,7 @@ type BuildRequest struct {
 	Token        string `json:"token"`
 	SkipConfig   bool   `json:"skip_config"`
 	CACertPEM    string `json:"ca_cert_pem"` // PEM-encoded CA certificate to embed
+	InstallSysmon bool  `json:"install_sysmon"`
 }
 
 // ─── Build Cache ────────────────────────────────────────────────────────────
@@ -113,6 +114,7 @@ func computeFingerprint(req BuildRequest, agentSrcDir string) string {
 
 	// 1. Build parameters (order matters — must be deterministic)
 	fmt.Fprintf(h, "skip_config=%v\n", req.SkipConfig)
+	fmt.Fprintf(h, "install_sysmon=%v\n", req.InstallSysmon)
 	fmt.Fprintf(h, "server_ip=%s\n", req.ServerIP)
 	fmt.Fprintf(h, "server_domain=%s\n", req.ServerDomain)
 	fmt.Fprintf(h, "server_port=%s\n", req.ServerPort)
@@ -262,6 +264,9 @@ func main() {
 			if req.ServerPort != "" {
 				ldflags = append(ldflags, fmt.Sprintf("-X main.EmbeddedServerPort=%s", req.ServerPort))
 			}
+		}
+		if req.InstallSysmon {
+			ldflags = append(ldflags, "-X main.EmbeddedInstallSysmon=true")
 		}
 
 		// ── Create temp output ──────────────────────────────────────────

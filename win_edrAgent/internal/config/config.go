@@ -20,8 +20,17 @@ type Config struct {
 	Collectors CollectorConfig `yaml:"collectors"`
 	Filtering  FilteringConfig `yaml:"filtering"`
 	Response   ResponseConfig  `yaml:"response"`
+	Sysmon     SysmonConfig    `yaml:"sysmon"`
 	Logging    LoggingConfig   `yaml:"logging"`
 	Certs      CertConfig      `yaml:"certs"`
+}
+
+// SysmonConfig controls optional Sysmon bootstrap on Windows endpoints.
+type SysmonConfig struct {
+	// InstallOnFirstRun installs Sysmon (if missing) and enables the Operational channel.
+	InstallOnFirstRun bool `yaml:"install_on_first_run"`
+	// ConfigURL optionally points to a Sysmon XML config file to apply during install.
+	ConfigURL string `yaml:"config_url"`
 }
 
 // ResponseConfig controls autonomous on-endpoint response (local hash DB, auto-quarantine).

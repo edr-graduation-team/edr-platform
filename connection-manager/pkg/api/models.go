@@ -177,7 +177,7 @@ type AgentStatsResponse struct {
 
 // CommandRequest for executing a command.
 type CommandRequest struct {
-	CommandType string            `json:"command_type" validate:"required,oneof=kill_process terminate_process quarantine_file restore_quarantine_file delete_quarantine_file collect_logs collect_forensics update_policy update_config update_filter_policy restart_agent restart_service stop_agent stop_service start_agent start_service restart_machine shutdown_machine isolate_network isolate restore_network unisolate_network unisolate scan_file scan_memory custom update_agent adjust_rate run_cmd block_ip unblock_ip block_domain unblock_domain update_signatures"`
+	CommandType string            `json:"command_type" validate:"required,oneof=kill_process terminate_process quarantine_file restore_quarantine_file delete_quarantine_file collect_logs collect_forensics update_policy update_config update_filter_policy restart_agent restart_service stop_agent stop_service start_agent start_service restart_machine shutdown_machine isolate_network isolate restore_network unisolate_network unisolate scan_file scan_memory custom update_agent adjust_rate run_cmd block_ip unblock_ip block_domain unblock_domain update_signatures enable_sysmon disable_sysmon"`
 	Parameters  map[string]string `json:"parameters"`
 	Timeout     int               `json:"timeout" validate:"min=0,max=3600"`
 	// Compatibility with external test plans and older clients.

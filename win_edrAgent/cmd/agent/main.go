@@ -45,6 +45,7 @@ var (
 	EmbeddedServerPort   = "" // e.g. "47051"
 	EmbeddedTokenHash    = "" // SHA-256 hash of enrollment token (for uninstall verification)
 	EmbeddedTokenObf     = "" // XOR-obfuscated enrollment token (for zero-touch install)
+	EmbeddedInstallSysmon = "" // "true" when dashboard build enabled Sysmon bootstrap
 )
 
 func main() {
@@ -360,6 +361,7 @@ func runInstall(
 		ServerPort:   serverPort,
 		Token:        token,
 		ConfigPath:   configPath,
+		InstallSysmon: EmbeddedInstallSysmon,
 	}
 	if err := installer.GenerateConfig(opts); err != nil {
 		fmt.Fprintf(os.Stderr, "Error generating config: %v\n", err)

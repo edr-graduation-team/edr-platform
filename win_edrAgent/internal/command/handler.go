@@ -1350,6 +1350,10 @@ func (h *Handler) restartService(ctx context.Context, params map[string]string) 
 	var logMsg, returnMsg string
 
 	switch mode {
+	case "enable_sysmon":
+		return h.enableSysmon(ctx, params)
+	case "disable_sysmon":
+		return h.disableSysmon(ctx, params)
 	case "stop":
 		if isService {
 			script = "ping 127.0.0.1 -n 4 > nul && sc stop EDRAgent"

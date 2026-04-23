@@ -789,6 +789,22 @@ func mapCommandType(cmdType string) edrv1.CommandType {
 		return edrv1.CommandType_COMMAND_TYPE_ADJUST_RATE
 	case "run_cmd", "custom":
 		return edrv1.CommandType(9) // COMMAND_TYPE_RUN_CMD
+	case "post_isolation_triage":
+		return edrv1.CommandType_COMMAND_TYPE_POST_ISOLATION_TRIAGE
+	case "process_tree_snapshot":
+		return edrv1.CommandType_COMMAND_TYPE_PROCESS_TREE_SNAPSHOT
+	case "persistence_scan":
+		return edrv1.CommandType_COMMAND_TYPE_PERSISTENCE_SCAN
+	case "lsass_access_audit":
+		return edrv1.CommandType_COMMAND_TYPE_LSASS_ACCESS_AUDIT
+	case "filesystem_timeline":
+		return edrv1.CommandType_COMMAND_TYPE_FILESYSTEM_TIMELINE
+	case "network_last_seen":
+		return edrv1.CommandType_COMMAND_TYPE_NETWORK_LAST_SEEN
+	case "agent_integrity_check":
+		return edrv1.CommandType_COMMAND_TYPE_AGENT_INTEGRITY_CHECK
+	case "memory_dump":
+		return edrv1.CommandType_COMMAND_TYPE_MEMORY_DUMP
 	default:
 		return edrv1.CommandType_COMMAND_TYPE_UNSPECIFIED
 	}

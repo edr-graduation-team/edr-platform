@@ -203,6 +203,18 @@ func (r *PostgresAlertRepository) List(ctx context.Context, filter AlertFilter) 
 		argNum++
 	}
 
+	if filter.FromTime != nil {
+		baseQuery += fmt.Sprintf(" AND detected_at >= $%d", argNum)
+		args = append(args, *filter.FromTime)
+		argNum++
+	}
+
+	if filter.ToTime != nil {
+		baseQuery += fmt.Sprintf(" AND detected_at <= $%d", argNum)
+		args = append(args, *filter.ToTime)
+		argNum++
+	}
+
 	// Count total
 	var total int
 	err := r.db.QueryRow(ctx, "SELECT COUNT(*) "+baseQuery, args...).Scan(&total)

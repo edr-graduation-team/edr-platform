@@ -1,0 +1,27 @@
+title: Security/System Event Log Cleared
+id: a1b2c3d4-0002-post-isolation-eventlog-clear
+status: experimental
+description: Detects clearing of Windows event logs via wevtutil or PowerShell Clear-EventLog, a common anti-forensics technique used after compromise.
+author: EDR Platform Post-Isolation Rules
+date: 2026/04/23
+tags:
+  - attack.defense_evasion
+  - attack.t1070.001
+  - post_isolation
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  wevtutil:
+    Image|endswith: '\wevtutil.exe'
+    CommandLine|contains:
+      - ' cl '
+      - ' clear-log '
+  powershell_clear:
+    CommandLine|contains:
+      - 'Clear-EventLog'
+      - 'Remove-EventLog'
+  condition: wevtutil or powershell_clear
+falsepositives:
+  - Authorized log rotation by administrators
+level: high

@@ -126,6 +126,19 @@ func (s *Server) RegisterRoutes(handlers *Handlers) {
 	agents.GET("/:id/forensic-collections", handlers.ListForensicCollections, handlers.RequirePermission("responses", "read"))
 	agents.GET("/:id/forensic-collections/:commandId/events", handlers.ListForensicEvents, handlers.RequirePermission("responses", "read"))
 
+	// ── Post-isolation incident endpoints ────────────────────────────────
+	agents.GET("/:id/incident", handlers.GetIncidentSummary, handlers.RequirePermission("responses", "read"))
+	agents.GET("/:id/playbook-runs", handlers.ListPlaybookRuns, handlers.RequirePermission("responses", "read"))
+	agents.POST("/:id/collect-memory", handlers.CollectMemoryDump, handlers.RequirePermission("responses", "execute"))
+	agents.GET("/:id/iocs", handlers.ListIocEnrichment, handlers.RequirePermission("responses", "read"))
+	agents.GET("/:id/triage-snapshots", handlers.ListTriageSnapshots, handlers.RequirePermission("responses", "read"))
+	agents.GET("/:id/post-isolation-alerts", handlers.ListPostIsolationAlerts, handlers.RequirePermission("alerts", "read"))
+	agents.POST("/:id/incident/false-positive", handlers.MarkIncidentFalsePositive, handlers.RequirePermission("responses", "execute"))
+	agents.POST("/:id/incident/escalate", handlers.EscalateIncident, handlers.RequirePermission("responses", "execute"))
+
+	// ── Playbook run detail ───────────────────────────────────────────────
+	protected.GET("/playbook-runs/:runId", handlers.GetPlaybookRun, handlers.RequirePermission("responses", "read"))
+
 	// ── Command history endpoints (Action Center) ────────────────────────
 	commands := protected.Group("/commands")
 	commands.GET("", handlers.ListCommands, handlers.RequirePermission("responses", "read"))

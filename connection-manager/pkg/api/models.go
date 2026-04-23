@@ -177,7 +177,7 @@ type AgentStatsResponse struct {
 
 // CommandRequest for executing a command.
 type CommandRequest struct {
-	CommandType string            `json:"command_type" validate:"required,oneof=kill_process terminate_process quarantine_file restore_quarantine_file delete_quarantine_file collect_logs collect_forensics update_policy update_config update_filter_policy restart_agent restart_service stop_agent stop_service start_agent start_service restart_machine shutdown_machine isolate_network isolate restore_network unisolate_network unisolate scan_file scan_memory custom update_agent uninstall_agent adjust_rate run_cmd block_ip unblock_ip block_domain unblock_domain update_signatures enable_sysmon disable_sysmon"`
+	CommandType string            `json:"command_type" validate:"required,oneof=kill_process terminate_process quarantine_file restore_quarantine_file delete_quarantine_file collect_logs collect_forensics update_policy update_config update_filter_policy restart_agent restart_service stop_agent stop_service start_agent start_service restart_machine shutdown_machine isolate_network isolate restore_network unisolate_network unisolate scan_file scan_memory custom update_agent uninstall_agent adjust_rate run_cmd block_ip unblock_ip block_domain unblock_domain update_signatures enable_sysmon disable_sysmon post_isolation_triage process_tree_snapshot persistence_scan lsass_access_audit filesystem_timeline network_last_seen agent_integrity_check memory_dump"`
 	Parameters  map[string]string `json:"parameters"`
 	Timeout     int               `json:"timeout" validate:"min=0,max=3600"`
 	// Compatibility with external test plans and older clients.
@@ -476,4 +476,79 @@ type EventDetail struct {
 type EventExportRequest struct {
 	EventSearchRequest
 	Format string `json:"format" validate:"oneof=json csv"`
+}
+
+// ============================================================================
+// POST-ISOLATION INCIDENT MODELS
+// ============================================================================
+
+// IncidentResponse wraps the full incident payload for a given agent.
+type IncidentResponse struct {
+	Data IncidentData `json:"data"`
+	Meta ResponseMeta `json:"meta"`
+}
+
+// IncidentData is the aggregated post-isolation incident for a single agent.
+type IncidentData struct {
+	AgentID     string             `json:"agent_id"`
+	IsIsolated  bool               `json:"is_isolated"`
+	Run         *PlaybookRunDTO    `json:"run,omitempty"`
+	Steps       []PlaybookStepDTO  `json:"steps"`
+	Snapshots   []TriageSnapshotDTO `json:"snapshots"`
+	Iocs        []IocEnrichmentDTO  `json:"iocs"`
+}
+
+// PlaybookRunDTO is the API representation of a playbook run.
+type PlaybookRunDTO struct {
+	ID         int64          `json:"id"`
+	Playbook   string         `json:"playbook"`
+	Trigger    string         `json:"trigger"`
+	Status     string         `json:"status"`
+	StartedAt  time.Time      `json:"started_at"`
+	FinishedAt *time.Time     `json:"finished_at,omitempty"`
+	Summary    map[string]any `json:"summary,omitempty"`
+}
+
+// PlaybookStepDTO is the API representation of a single playbook step.
+type PlaybookStepDTO struct {
+	ID          int64      `json:"id"`
+	StepName    string     `json:"step_name"`
+	CommandType string     `json:"command_type"`
+	Status      string     `json:"status"`
+	CommandID   *string    `json:"command_id,omitempty"`
+	StartedAt   *time.Time `json:"started_at,omitempty"`
+	FinishedAt  *time.Time `json:"finished_at,omitempty"`
+	Error       string     `json:"error,omitempty"`
+}
+
+// TriageSnapshotDTO is the API representation of a triage snapshot.
+type TriageSnapshotDTO struct {
+	ID        int64          `json:"id"`
+	Kind      string         `json:"kind"`
+	Payload   map[string]any `json:"payload"`
+	CreatedAt time.Time      `json:"created_at"`
+}
+
+// IocEnrichmentDTO is the API representation of an IOC enrichment record.
+type IocEnrichmentDTO struct {
+	ID        int64      `json:"id"`
+	IocType   string     `json:"ioc_type"`
+	IocValue  string     `json:"ioc_value"`
+	Provider  string     `json:"provider"`
+	Verdict   string     `json:"verdict"`
+	Score     int        `json:"score"`
+	FetchedAt time.Time  `json:"fetched_at"`
+}
+
+// CollectMemoryRequest triggers a manual memory dump.
+type CollectMemoryRequest struct {
+	OutputDir string `json:"output_dir"`
+	Confirm   bool   `json:"confirm" validate:"required"`
+}
+
+// PlaybookRunListResponse for listing playbook runs.
+type PlaybookRunListResponse struct {
+	Data       []PlaybookRunDTO   `json:"data"`
+	Pagination PaginationResponse `json:"pagination"`
+	Meta       ResponseMeta       `json:"meta"`
 }

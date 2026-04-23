@@ -857,14 +857,29 @@ func mapProtoCommandType(protoType string) command.CommandType {
 		return command.CmdDeleteQuarantineFile
 	case "COMMAND_TYPE_UNINSTALL_AGENT", "21":
 		return command.CmdUninstallAgent
-	case "COMMAND_TYPE_RESTART", "10": // Machine reboot (enum value 10)
+	case "COMMAND_TYPE_RESTART", "10":
 		return command.CmdRestart
-	case "COMMAND_TYPE_SHUTDOWN", "11": // Machine shutdown (enum value 11)
+	case "COMMAND_TYPE_SHUTDOWN", "11":
 		return command.CmdShutdown
 	case "COMMAND_TYPE_RUN_CMD", "9":
 		return command.CmdRunCommand
+	case "COMMAND_TYPE_POST_ISOLATION_TRIAGE", "22":
+		return command.CmdPostIsolationTriage
+	case "COMMAND_TYPE_PROCESS_TREE_SNAPSHOT", "23":
+		return command.CmdProcessTreeSnapshot
+	case "COMMAND_TYPE_PERSISTENCE_SCAN", "24":
+		return command.CmdPersistenceScan
+	case "COMMAND_TYPE_LSASS_ACCESS_AUDIT", "25":
+		return command.CmdLsassAccessAudit
+	case "COMMAND_TYPE_FILESYSTEM_TIMELINE", "26":
+		return command.CmdFilesystemTimeline
+	case "COMMAND_TYPE_NETWORK_LAST_SEEN", "27":
+		return command.CmdNetworkLastSeen
+	case "COMMAND_TYPE_AGENT_INTEGRITY_CHECK", "28":
+		return command.CmdAgentIntegrityCheck
+	case "COMMAND_TYPE_MEMORY_DUMP", "29":
+		return command.CmdMemoryDump
 	default:
-		// Fall through: try using the raw string (e.g., "TERMINATE_PROCESS")
 		return command.CommandType(protoType)
 	}
 }

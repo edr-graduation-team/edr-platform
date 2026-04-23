@@ -1248,3 +1248,194 @@ export const rolesApi = {
         return response.data.data;
     },
 };
+
+// ============================================================================
+// Post-Isolation Incident Types
+// ============================================================================
+
+export type PlaybookStepStatus = 'pending' | 'running' | 'success' | 'failed' | 'skipped';
+export type PlaybookRunStatus = 'running' | 'completed' | 'partial' | 'failed' | 'false_positive';
+export type IocVerdict = 'clean' | 'suspicious' | 'malicious' | 'unknown';
+export type IocType = 'hash' | 'ip' | 'domain';
+
+export interface PostIsolationAlert {
+    id: string;
+    severity: 'critical' | 'high' | 'medium' | 'low' | 'informational';
+    title: string;
+    description?: string;
+    rule_name?: string;
+    status: string;
+    risk_score: number;
+    detected_at: string;
+}
+
+export interface PlaybookRun {
+    id: number;
+    playbook: string;
+    trigger: string;
+    status: PlaybookRunStatus;
+    started_at: string;
+    finished_at?: string;
+    summary?: Record<string, unknown>;
+}
+
+export interface PlaybookStep {
+    id: number;
+    step_name: string;
+    command_type: string;
+    status: PlaybookStepStatus;
+    command_id?: string;
+    started_at?: string;
+    finished_at?: string;
+    error?: string;
+}
+
+export interface TriageSnapshot {
+    id: number;
+    kind: string;
+    payload: Record<string, unknown>;
+    created_at: string;
+}
+
+export interface IocEnrichment {
+    id: number;
+    ioc_type: IocType;
+    ioc_value: string;
+    provider: string;
+    verdict: IocVerdict;
+    score: number;
+    fetched_at: string;
+}
+
+export interface IncidentData {
+    agent_id: string;
+    is_isolated: boolean;
+    run?: PlaybookRun;
+    steps: PlaybookStep[];
+    snapshots: TriageSnapshot[];
+    iocs: IocEnrichment[];
+}
+
+export interface ProcessInfo {
+    pid: number;
+    ppid: number;
+    name: string;
+    path?: string;
+    sha256?: string;
+    signed: boolean;
+    net_conns?: string[];
+}
+
+export interface PersistenceItem {
+    type: string;
+    location: string;
+    value: string;
+    sha256?: string;
+}
+
+export interface LsassAccessEvent {
+    time_created: string;
+    event_id: string;
+    actor_pid: string;
+    actor_path?: string;
+    access_mask?: string;
+}
+
+export interface TimelineFile {
+    path: string;
+    mtime: string;
+    size_bytes: number;
+    sha256?: string;
+}
+
+export interface NetConn {
+    proto: string;
+    local_addr: string;
+    remote_addr: string;
+    state: string;
+    pid?: string;
+}
+
+export interface DnsEntry {
+    name: string;
+    type: string;
+    answer?: string;
+}
+
+export interface AgentIntegrity {
+    exe_path: string;
+    exe_sha256: string;
+    signature_valid: boolean;
+    etw_healthy: boolean;
+    checked_at: string;
+}
+
+// ============================================================================
+// Post-Isolation Incident API
+// ============================================================================
+
+export const incidentApi = {
+    getSummary: async (agentId: string): Promise<IncidentData> => {
+        const response = await connectionApi.get<{ data: IncidentData }>(
+            `/api/v1/agents/${agentId}/incident`
+        );
+        return response.data.data;
+    },
+
+    listRuns: async (agentId: string, limit = 20): Promise<PlaybookRun[]> => {
+        const response = await connectionApi.get<{ data: PlaybookRun[] }>(
+            `/api/v1/agents/${agentId}/playbook-runs`,
+            { params: { limit } }
+        );
+        return response.data.data;
+    },
+
+    getRunSteps: async (runId: number): Promise<PlaybookStep[]> => {
+        const response = await connectionApi.get<{ data: { steps: PlaybookStep[] } }>(
+            `/api/v1/playbook-runs/${runId}`
+        );
+        return response.data.data.steps;
+    },
+
+    listIocs: async (agentId: string, limit = 100): Promise<IocEnrichment[]> => {
+        const response = await connectionApi.get<{ data: IocEnrichment[] }>(
+            `/api/v1/agents/${agentId}/iocs`,
+            { params: { limit } }
+        );
+        return response.data.data;
+    },
+
+    listSnapshots: async (agentId: string, kind?: string): Promise<TriageSnapshot[]> => {
+        const response = await connectionApi.get<{ data: TriageSnapshot[] }>(
+            `/api/v1/agents/${agentId}/triage-snapshots`,
+            { params: kind ? { kind } : undefined }
+        );
+        return response.data.data;
+    },
+
+    collectMemory: async (agentId: string, outputDir?: string): Promise<{ command_id: string }> => {
+        const response = await connectionApi.post<{ command_id: string }>(
+            `/api/v1/agents/${agentId}/collect-memory`,
+            { confirm: true, output_dir: outputDir ?? '' }
+        );
+        return response.data;
+    },
+
+    listAlerts: async (agentId: string, since?: string, limit = 50): Promise<PostIsolationAlert[]> => {
+        const params: Record<string, string | number> = { limit };
+        if (since) params.since = since;
+        const response = await connectionApi.get<{ data: PostIsolationAlert[] }>(
+            `/api/v1/agents/${agentId}/post-isolation-alerts`,
+            { params }
+        );
+        return response.data.data ?? [];
+    },
+
+    markFalsePositive: async (agentId: string): Promise<void> => {
+        await connectionApi.post(`/api/v1/agents/${agentId}/incident/false-positive`);
+    },
+
+    escalate: async (agentId: string): Promise<void> => {
+        await connectionApi.post(`/api/v1/agents/${agentId}/incident/escalate`);
+    },
+};

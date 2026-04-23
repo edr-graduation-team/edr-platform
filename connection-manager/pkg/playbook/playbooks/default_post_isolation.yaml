@@ -1,0 +1,59 @@
+name: default_post_isolation
+version: 1
+trigger: isolation.succeeded
+description: "Automatic triage + forensic collection triggered immediately after endpoint isolation"
+timeout_seconds: 300
+
+steps:
+  - id: triage
+    name: post_isolation_triage
+    command_type: post_isolation_triage
+    description: "Composite triage: process tree + persistence + network + integrity"
+    timeout_seconds: 60
+    on_failure: continue
+
+  - id: ptree
+    name: process_tree_snapshot
+    command_type: process_tree_snapshot
+    description: "Full parent-child process tree with modules"
+    timeout_seconds: 30
+    on_failure: continue
+
+  - id: persistence
+    name: persistence_scan
+    command_type: persistence_scan
+    description: "Scan Run keys, Scheduled Tasks, Services, WMI, Startup folders"
+    timeout_seconds: 45
+    on_failure: continue
+
+  - id: lsass
+    name: lsass_access_audit
+    command_type: lsass_access_audit
+    description: "Security log 4656/4663 filtered to lsass.exe accesses"
+    timeout_seconds: 30
+    params:
+      hours_back: "24"
+    on_failure: continue
+
+  - id: network
+    name: network_last_seen
+    command_type: network_last_seen
+    description: "Last TCP connections and DNS cache"
+    timeout_seconds: 20
+    on_failure: continue
+
+  - id: timeline
+    name: filesystem_timeline
+    command_type: filesystem_timeline
+    description: "Files modified within 6 hours of isolation"
+    timeout_seconds: 60
+    params:
+      window_hours: "6"
+    on_failure: continue
+
+  - id: integrity
+    name: agent_integrity_check
+    command_type: agent_integrity_check
+    description: "Verify agent binary signature and ETW health"
+    timeout_seconds: 20
+    on_failure: continue

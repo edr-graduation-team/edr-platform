@@ -1,0 +1,26 @@
+title: Windows Defender Disabled via PowerShell
+id: a1b2c3d4-0001-post-isolation-defender-disable
+status: experimental
+description: Detects disabling of Windows Defender real-time protection via Set-MpPreference, typically used by ransomware or post-exploitation tools to evade detection.
+author: EDR Platform Post-Isolation Rules
+date: 2026/04/23
+tags:
+  - attack.defense_evasion
+  - attack.t1562.001
+  - post_isolation
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  selection:
+    CommandLine|contains|all:
+      - 'Set-MpPreference'
+      - 'DisableRealtimeMonitoring'
+  selection_value:
+    CommandLine|contains:
+      - '$true'
+      - '1'
+  condition: selection and selection_value
+falsepositives:
+  - Legitimate system administration scripts
+level: high

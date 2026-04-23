@@ -1,0 +1,32 @@
+title: EDR Agent Service Tampering Attempt
+id: a1b2c3d4-0004-post-isolation-agent-tamper
+status: experimental
+description: Detects attempts to stop, disable, or delete the EDR agent service. Attackers may target security tools after gaining initial access.
+author: EDR Platform Post-Isolation Rules
+date: 2026/04/23
+tags:
+  - attack.defense_evasion
+  - attack.t1562.001
+  - post_isolation
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  sc_stop:
+    Image|endswith: '\sc.exe'
+    CommandLine|contains:
+      - 'edr'
+      - 'edr-agent'
+      - 'edrAgent'
+    CommandLine|contains:
+      - ' stop '
+      - ' delete '
+      - ' disabled '
+  taskkill_edr:
+    Image|endswith: '\taskkill.exe'
+    CommandLine|contains:
+      - 'edr'
+  condition: sc_stop or taskkill_edr
+falsepositives:
+  - Legitimate uninstall operations performed by the C2 server (use uninstall_agent command instead)
+level: critical

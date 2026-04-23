@@ -396,6 +396,16 @@ enum CommandType {
   COMMAND_TYPE_RESTORE_QUARANTINE_FILE = 19;
   COMMAND_TYPE_DELETE_QUARANTINE_FILE = 20;
   COMMAND_TYPE_UNINSTALL_AGENT = 21; // Server-initiated uninstall: sole allowed uninstall path
+
+  // Post-isolation triage commands (22–29)
+  COMMAND_TYPE_POST_ISOLATION_TRIAGE   = 22; // Composite: runs 5 light snapshots in parallel
+  COMMAND_TYPE_PROCESS_TREE_SNAPSHOT   = 23; // Full parent-child tree + modules + TCP per PID
+  COMMAND_TYPE_PERSISTENCE_SCAN        = 24; // Run/RunOnce + Tasks + Services + WMI + AppInit
+  COMMAND_TYPE_LSASS_ACCESS_AUDIT      = 25; // Security log 4656/4663 filtered to lsass.exe
+  COMMAND_TYPE_FILESYSTEM_TIMELINE     = 26; // Files modified within ±window_hours of isolation
+  COMMAND_TYPE_NETWORK_LAST_SEEN       = 27; // Last DNS queries + TCP connections before cutoff
+  COMMAND_TYPE_AGENT_INTEGRITY_CHECK   = 28; // Verify agent binary signature + ETW health
+  COMMAND_TYPE_MEMORY_DUMP             = 29; // Full RAM acquisition via WinPMEM (analyst-approved)
 }
 
 // CommandResult - Agent-to-server feedback for a completed command (C2 loop closure)

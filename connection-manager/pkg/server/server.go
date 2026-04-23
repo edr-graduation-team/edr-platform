@@ -67,6 +67,15 @@ type Server struct {
 	commandRepo      repository.CommandRepository
 	quarantineRepo   repository.QuarantineRepository
 	forensicRepo     repository.ForensicRepository
+	incidentRepo     repository.IncidentRepository
+	playbookEngine   PlaybookEngine
+}
+
+// PlaybookEngine is the interface the gRPC server uses to trigger playbooks.
+// Using an interface avoids an import cycle (playbook → server → playbook).
+type PlaybookEngine interface {
+	OnIsolationSucceeded(agentID uuid.UUID)
+	OnCommandResult(ctx context.Context, agentID uuid.UUID, commandID uuid.UUID, status, output string)
 }
 
 // SetCommandRepo injects the command repository for C2 result persistence.
@@ -81,6 +90,16 @@ func (s *Server) SetQuarantineRepo(repo repository.QuarantineRepository) {
 
 func (s *Server) SetForensicRepo(repo repository.ForensicRepository) {
 	s.forensicRepo = repo
+}
+
+// SetIncidentRepo injects the incident repository for playbook/triage tracking.
+func (s *Server) SetIncidentRepo(repo repository.IncidentRepository) {
+	s.incidentRepo = repo
+}
+
+// SetPlaybookEngine injects the playbook engine for post-isolation automation.
+func (s *Server) SetPlaybookEngine(engine PlaybookEngine) {
+	s.playbookEngine = engine
 }
 
 // NewServer creates a new gRPC server with all handler dependencies injected.
@@ -355,6 +374,15 @@ func (s *Server) SendCommandResult(ctx context.Context, res *edrv1.CommandResult
 		s.persistForensicBundleBestEffort(ctx, res)
 	}
 
+	// Notify playbook engine so it can update step status + persist triage snapshots.
+	if s.playbookEngine != nil {
+		if cmdID, err := uuid.Parse(res.CommandId); err == nil {
+			if agentID, err := uuid.Parse(res.AgentId); err == nil {
+				s.playbookEngine.OnCommandResult(ctx, agentID, cmdID, res.Status, res.Output)
+			}
+		}
+	}
+
 	// ── Status side-effects for successful commands ────────────────────────────
 	// Look up the command from DB (to get command_type) and apply side-effects:
 	//   - isolate_network   → set is_isolated=true
@@ -369,6 +397,10 @@ func (s *Server) SendCommandResult(ctx context.Context, res *edrv1.CommandResult
 				case cmdType == "isolate_network":
 					s.updateAgentIsolation(ctx, agentID, true)
 					s.logger.Infof("[Isolation] Agent %s is now ISOLATED", agentID)
+					// Trigger post-isolation playbook asynchronously
+					if s.playbookEngine != nil {
+						s.playbookEngine.OnIsolationSucceeded(agentID)
+					}
 				case cmdType == "restore_network" || cmdType == "unisolate_network":
 					s.updateAgentIsolation(ctx, agentID, false)
 					s.logger.Infof("[Isolation] Agent %s isolation RESTORED", agentID)
@@ -403,7 +435,35 @@ func (s *Server) persistForensicBundleBestEffort(ctx context.Context, res *edrv1
 		return
 	}
 	cmdType := strings.ToLower(string(cmd.CommandType))
+	triageTypes := map[string]bool{
+		"collect_logs":          true,
+		"collect_forensics":     true,
+		"post_isolation_triage": true,
+		"process_tree_snapshot": true,
+		"persistence_scan":      true,
+		"lsass_access_audit":    true,
+		"filesystem_timeline":   true,
+		"network_last_seen":     true,
+		"agent_integrity_check": true,
+		"memory_dump":           true,
+	}
+	if !triageTypes[cmdType] {
+		return
+	}
+	// For triage types, use the command type as the log_type for storage
 	if cmdType != "collect_logs" && cmdType != "collect_forensics" {
+		// Store directly in forensic_collections under the triage command type
+		agentID, _ := uuid.Parse(res.AgentId)
+		issuedAt := cmd.IssuedAt
+		completedAt := cmd.CompletedAt
+		_ = s.forensicRepo.UpsertCollection(ctx, repository.ForensicCollectionSummary{
+			CommandID:   cmdID,
+			AgentID:     agentID,
+			CommandType: cmdType,
+			IssuedAt:    issuedAt,
+			CompletedAt: completedAt,
+			Summary:     map[string]any{"output_preview": truncate(res.Output, 256)},
+		})
 		return
 	}
 
@@ -495,4 +555,12 @@ func (s *Server) updateAgentStatus(ctx context.Context, agentID uuid.UUID, statu
 // GetRegistry returns the server's AgentRegistry for use by the REST API.
 func (s *Server) GetRegistry() *handlers.AgentRegistry {
 	return s.registry
+}
+
+// truncate trims a string to maxLen bytes (for DB preview fields).
+func truncate(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "…"
 }

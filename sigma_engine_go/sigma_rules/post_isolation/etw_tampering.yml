@@ -1,0 +1,23 @@
+title: ETW Autologger Tampering
+id: a1b2c3d4-0005-post-isolation-etw-tamper
+status: experimental
+description: Detects registry modifications to ETW autologger sessions, used by attackers to blind security tools that rely on ETW telemetry.
+author: EDR Platform Post-Isolation Rules
+date: 2026/04/23
+tags:
+  - attack.defense_evasion
+  - attack.t1562.006
+  - post_isolation
+logsource:
+  category: registry_set
+  product: windows
+detection:
+  etw_autologger:
+    TargetObject|contains:
+      - '\SYSTEM\CurrentControlSet\Control\WMI\Autologger\'
+    Details|contains:
+      - '0'
+  condition: etw_autologger
+falsepositives:
+  - Legitimate ETW configuration changes by administrators
+level: high

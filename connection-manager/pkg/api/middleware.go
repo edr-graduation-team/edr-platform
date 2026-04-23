@@ -42,6 +42,7 @@ type Handlers struct {
 	contextPolicyRepo   repository.ContextPolicyRepository   // context-aware policy controls
 	grpcAddress         string                               // C2 gRPC address (host:port) injected into isolate params
 	fallbackStore       *handlers.EventFallbackStore         // DB fallback store reliability stats
+	incidentRepo        repository.IncidentRepository        // post-isolation playbook + triage tracking
 }
 
 // NewHandlers creates a new handlers instance.
@@ -136,6 +137,11 @@ func (h *Handlers) SetContextPolicyRepo(repo repository.ContextPolicyRepository)
 // SetFallbackStore sets the EventFallbackStore for reliability health.
 func (h *Handlers) SetFallbackStore(store *handlers.EventFallbackStore) {
 	h.fallbackStore = store
+}
+
+// SetIncidentRepo sets the IncidentRepository for post-isolation tracking.
+func (h *Handlers) SetIncidentRepo(repo repository.IncidentRepository) {
+	h.incidentRepo = repo
 }
 
 // UserClaims represents authenticated user info.

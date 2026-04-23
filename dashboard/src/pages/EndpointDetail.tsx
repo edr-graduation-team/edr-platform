@@ -27,9 +27,11 @@ import {
 } from '../api/client';
 import { EventDetailModal, Modal, useToast } from '../components';
 import { formatRelativeTime, getEffectiveStatus } from '../utils/agentDisplay';
+import { IncidentTab } from './IncidentTab';
 
 type DetailTab =
     | 'overview'
+    | 'incident'
     | 'response'
     | 'quarantine'
     | 'activity'
@@ -40,6 +42,7 @@ type DetailTab =
 
 const TAB_LABELS: { id: DetailTab; label: string }[] = [
     { id: 'overview', label: 'Overview' },
+    { id: 'incident', label: '🔴 Incident' },
     { id: 'response', label: 'Response' },
     { id: 'quarantine', label: 'Quarantine' },
     { id: 'activity', label: 'Activity' },
@@ -446,6 +449,16 @@ export default function EndpointDetail() {
                             overviewAlerts={overviewAlerts?.alerts ?? []}
                             overviewAlertsLoading={overviewAlertsLoading}
                             cmEvents={eventsPayload?.data || []}
+                        />
+                    )}
+
+                    {tab === 'incident' && (
+                        <IncidentTab
+                            agent={agent}
+                            onUnIsolate={() => {
+                                setCmdType('restore_network');
+                                setTab('response');
+                            }}
                         />
                     )}
 

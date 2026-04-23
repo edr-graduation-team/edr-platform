@@ -33,6 +33,7 @@ import (
 	"github.com/edr-platform/connection-manager/pkg/kafka"
 	"github.com/edr-platform/connection-manager/pkg/metrics"
 	"github.com/edr-platform/connection-manager/pkg/models"
+	"github.com/edr-platform/connection-manager/pkg/playbook"
 	"github.com/edr-platform/connection-manager/pkg/security"
 	"github.com/edr-platform/connection-manager/pkg/server"
 )
@@ -423,6 +424,18 @@ func main() {
 		evtHandler.SetEventRepo(eventRepo)
 		apiHandlers.SetForensicRepo(forensicRepo)
 		logger.Info("User management and RBAC enabled")
+
+		// ── Post-Isolation Pipeline ──────────────────────────────────────
+		// Wire incident repository + playbook engine.
+		incidentRepo := repository.NewPostgresIncidentRepository(pool)
+		apiHandlers.SetIncidentRepo(incidentRepo)
+		grpcServer.SetIncidentRepo(incidentRepo)
+
+		if commandRepo != nil {
+			pb := playbook.NewEngine(logger, incidentRepo, commandRepo, grpcServer.GetRegistry())
+			grpcServer.SetPlaybookEngine(pb)
+			logger.Info("Post-isolation playbook engine enabled")
+		}
 	}
 
 	restAPIServer.RegisterRoutes(apiHandlers)

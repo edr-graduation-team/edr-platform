@@ -54,6 +54,16 @@ const (
 	CmdRestoreQuarantineFile CommandType = "RESTORE_QUARANTINE_FILE"
 	CmdDeleteQuarantineFile  CommandType = "DELETE_QUARANTINE_FILE"
 	CmdUninstallAgent        CommandType = "UNINSTALL_AGENT"
+
+	// Post-isolation triage commands
+	CmdPostIsolationTriage  CommandType = "POST_ISOLATION_TRIAGE"
+	CmdProcessTreeSnapshot  CommandType = "PROCESS_TREE_SNAPSHOT"
+	CmdPersistenceScan      CommandType = "PERSISTENCE_SCAN"
+	CmdLsassAccessAudit     CommandType = "LSASS_ACCESS_AUDIT"
+	CmdFilesystemTimeline   CommandType = "FILESYSTEM_TIMELINE"
+	CmdNetworkLastSeen      CommandType = "NETWORK_LAST_SEEN"
+	CmdAgentIntegrityCheck  CommandType = "AGENT_INTEGRITY_CHECK"
+	CmdMemoryDump           CommandType = "MEMORY_DUMP"
 )
 
 // =============================================================================
@@ -302,6 +312,22 @@ func (h *Handler) Execute(ctx context.Context, cmd *Command) *Result {
 		output, err = h.deleteQuarantineFile(ctx, cmd.Parameters)
 	case CmdUninstallAgent:
 		output, err = h.uninstallAgent(ctx, cmd.Parameters)
+	case CmdPostIsolationTriage:
+		output, err = h.postIsolationTriage(ctx, cmd.Parameters)
+	case CmdProcessTreeSnapshot:
+		output, err = h.processTreeSnapshot(ctx, cmd.Parameters)
+	case CmdPersistenceScan:
+		output, err = h.persistenceScan(ctx, cmd.Parameters)
+	case CmdLsassAccessAudit:
+		output, err = h.lsassAccessAudit(ctx, cmd.Parameters)
+	case CmdFilesystemTimeline:
+		output, err = h.filesystemTimeline(ctx, cmd.Parameters)
+	case CmdNetworkLastSeen:
+		output, err = h.networkLastSeen(ctx, cmd.Parameters)
+	case CmdAgentIntegrityCheck:
+		output, err = h.agentIntegrityCheck(ctx, cmd.Parameters)
+	case CmdMemoryDump:
+		output, err = h.memoryDump(ctx, cmd.Parameters)
 	default:
 		err = fmt.Errorf("unknown command type: %s", cmd.Type)
 	}

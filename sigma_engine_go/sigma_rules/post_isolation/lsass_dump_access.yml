@@ -1,0 +1,34 @@
+title: LSASS Memory Access for Credential Dumping
+id: a1b2c3d4-0006-post-isolation-lsass-dump
+status: experimental
+description: Detects process access to LSASS memory using access masks associated with credential dumping tools like Mimikatz (PROCESS_VM_READ + PROCESS_QUERY_INFORMATION).
+author: EDR Platform Post-Isolation Rules
+date: 2026/04/23
+tags:
+  - attack.credential_access
+  - attack.t1003.001
+  - post_isolation
+logsource:
+  product: windows
+  category: process_access
+detection:
+  lsass_access:
+    TargetImage|endswith: '\lsass.exe'
+    GrantedAccess|contains:
+      - '0x1010'
+      - '0x1410'
+      - '0x1438'
+      - '0x143a'
+      - '0x1fffff'
+  filter_system:
+    SourceImage|startswith:
+      - 'C:\Windows\System32\'
+      - 'C:\Windows\SysWOW64\'
+    SourceImage|endswith:
+      - '\svchost.exe'
+      - '\WerFault.exe'
+      - '\werfault.exe'
+  condition: lsass_access and not filter_system
+falsepositives:
+  - Security products, AV scanners, crash dump utilities
+level: critical

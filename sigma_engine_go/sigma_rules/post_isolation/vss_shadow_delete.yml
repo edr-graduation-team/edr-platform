@@ -1,0 +1,41 @@
+title: Volume Shadow Copy Deletion
+id: a1b2c3d4-0003-post-isolation-vss-delete
+status: experimental
+description: Detects deletion of Volume Shadow Copies — a hallmark of ransomware activity to prevent file recovery.
+author: EDR Platform Post-Isolation Rules
+date: 2026/04/23
+tags:
+  - attack.impact
+  - attack.t1490
+  - post_isolation
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  vssadmin:
+    Image|endswith: '\vssadmin.exe'
+    CommandLine|contains:
+      - 'delete shadows'
+      - 'Delete Shadows'
+  wmic:
+    Image|endswith: '\wmic.exe'
+    CommandLine|contains:
+      - 'shadowcopy'
+      - 'ShadowCopy'
+      - 'delete'
+  powershell_vss:
+    CommandLine|contains:
+      - 'Get-WmiObject Win32_ShadowCopy'
+      - 'Win32_ShadowCopy'
+    CommandLine|contains:
+      - '.Delete()'
+  bcdedit:
+    Image|endswith: '\bcdedit.exe'
+    CommandLine|contains|all:
+      - '/set'
+      - 'recoveryenabled'
+      - 'no'
+  condition: vssadmin or wmic or powershell_vss or bcdedit
+falsepositives:
+  - Backup software managing shadow copies
+level: critical

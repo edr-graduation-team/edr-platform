@@ -561,8 +561,22 @@ func (r *PostgresAgentRepository) UpsertByHostname(ctx context.Context, agent *m
 	defer tx.Rollback(ctx)
 
 	// 1. Delete ALL FK-dependent rows referencing the previous agent with this hostname.
-	//    Each table has agent_id → agents(id), so all must be cleared before the id can change.
+	//    Each table has agent_id → agents(id) (or otherwise blocks changing agents.id),
+	//    so all must be cleared before the ON CONFLICT DO UPDATE can replace the id.
+	//
+	//    Order: tables with secondary FKs to other agent-scoped tables first (e.g. ioc_enrichment
+	//    → playbook_runs), then the rest. Must include *every* child of agents — omitting
+	//    e.g. "events" caused 23503 on re-enrollment.
 	childTables := []string{
+		"ioc_enrichment",
+		"triage_snapshots",
+		"forensic_collections",
+		"playbook_runs",
+		"events",
+		"enrollment_token_consumptions",
+		"vulnerability_findings",
+		"agent_quarantine_items",
+		"agent_patch_profiles",
 		"certificates",
 		"installation_tokens",
 		"csrs",
@@ -580,6 +594,16 @@ func (r *PostgresAgentRepository) UpsertByHostname(ctx context.Context, agent *m
 		if err != nil {
 			return fmt.Errorf("failed to clean %s for re-enrollment: %w", table, err)
 		}
+	}
+
+	// Unbind per-agent download rows without deleting the shared package (see 023 migration).
+	_, err = tx.Exec(ctx, `
+		UPDATE agent_packages
+		SET agent_id = NULL, consumed_at = NULL
+		WHERE agent_id IN (SELECT id FROM agents WHERE hostname = $1)
+	`, agent.Hostname)
+	if err != nil {
+		return fmt.Errorf("failed to unbind agent_packages for re-enrollment: %w", err)
 	}
 
 	// 2. UPSERT the agent row — now safe to change the id (no FK references remain).

@@ -191,46 +191,9 @@ func (s *edrService) Execute(args []string, r <-chan svc.ChangeRequest, changes 
 		s.logger.Info("[SCM] Process self-protection enabled — tamper-resistant")
 	}
 
-	// ── Anti-Tamper Layer 2: Service DACL Hardening ────────────────────────
-	// Prevents Administrators from stopping or deleting the service via:
-	//   - sc stop EDRAgent      → ACCESS DENIED
-	//   - sc delete EDRAgent    → ACCESS DENIED
-	//   - Stop-Service EDRAgent → ACCESS DENIED
-	//   - net stop EDRAgent     → ACCESS DENIED
-	// Only SYSTEM retains full control. This is restored during uninstall
-	// via RestoreServiceDACL() before the service can be stopped.
-	if err := protection.HardenServiceDACL(ServiceName); err != nil {
-		s.logger.Warnf("[SCM] Service DACL hardening failed (non-fatal): %v", err)
-	} else {
-		s.logger.Info("[SCM] Service DACL hardened — only SYSTEM can stop/delete")
-	}
-
-	// ── Anti-Tamper Layer 3: Registry Key Protection ───────────────────
-	// Protects HKLM\SYSTEM\CurrentControlSet\Services\EDRAgent AND all
-	// numbered ControlSets (ControlSet001, 002...) from direct registry
-	// deletion by Administrators via regedit, reg.exe, or PowerShell.
-	if err := protection.HardenServiceRegistryKey(ServiceName); err != nil {
-		s.logger.Warnf("[SCM] Registry key hardening failed (non-fatal): %v", err)
-	} else {
-		s.logger.Info("[SCM] Service registry keys hardened (all ControlSets) — reg delete blocked")
-	}
-
-	// ── Anti-Tamper Layer 4: Agent Config Registry Protection ─────────
-	// Protects HKLM\SOFTWARE\EDR\Agent (token hash, critical config backup)
-	if err := protection.HardenAgentRegistryKey(); err != nil {
-		s.logger.Warnf("[SCM] Agent registry key hardening failed (non-fatal): %v", err)
-	} else {
-		s.logger.Info("[SCM] Agent config registry hardened — SYSTEM full, Admin read-only")
-	}
-
-	// ── Anti-Tamper Layer 5: NTFS — SYSTEM-only on agent data dirs + binary ─
-	if s.cfg != nil {
-		if err := security.HardenAgentDirectoriesExclusive(s.cfg.DataDirectoriesToHarden(), s.logger); err != nil {
-			s.logger.Warnf("[SCM] Agent directory hardening failed (non-fatal): %v", err)
-		} else {
-			s.logger.Info("[SCM] Agent data directories hardened (SYSTEM-only, uninstall restores ACLs)")
-		}
-	}
+	// NOTE: Anti-tamper layers 2-5 are applied ONLY after successful enrollment
+	// and agent startup. This prevents a failed enrollment from leaving the host
+	// in a half-hardened state (service stops, but directories/registry are locked).
 
 	// ── Continuous Protection Watchdog: Process DACL ──────────────────
 	// Re-applies process DACL every 10 seconds. If an attacker manages to
@@ -361,7 +324,7 @@ func (s *edrService) Execute(args []string, r <-chan svc.ChangeRequest, changes 
 		case err := <-agentErrCh:
 			startupDone = true
 			if err != nil {
-				// Startup failed: tell SCM we are stopping with an error code
+			// Startup failed: tell SCM we are stopping with an error code
 				// so it records a proper "service terminated unexpectedly" event
 				// instead of a confusing 1053 timeout.
 				s.logger.Errorf("[SCM] Async startup failed: %v — transitioning to Stopped", err)
@@ -370,6 +333,8 @@ func (s *edrService) Execute(args []string, r <-chan svc.ChangeRequest, changes 
 				return false, 1
 			}
 			s.logger.Info("[SCM] Agent startup complete — fully operational")
+			// Now that enrollment succeeded and the agent is live, apply tamper layers.
+			s.applyPostEnrollHardening(ctx)
 
 		case reason := <-serverUninstallCh:
 			s.logger.Infof("[SCM] Server-issued uninstall received (reason=%q) — tearing down protections", reason)
@@ -549,6 +514,57 @@ func (s *edrService) releaseSelfProtections() {
 			s.logger.Info("[UNINSTALL] Agent data directory ACLs restored for cleanup")
 		}
 	}
+}
+
+func (s *edrService) applyPostEnrollHardening(ctx context.Context) {
+	// ── Anti-Tamper Layer 2: Service DACL Hardening ────────────────────────
+	if err := protection.HardenServiceDACL(ServiceName); err != nil {
+		s.logger.Warnf("[SCM] Service DACL hardening failed (non-fatal): %v", err)
+	} else {
+		s.logger.Info("[SCM] Service DACL hardened — only SYSTEM can stop/delete")
+	}
+
+	// ── Anti-Tamper Layer 3: Registry Key Protection ───────────────────
+	if err := protection.HardenServiceRegistryKey(ServiceName); err != nil {
+		s.logger.Warnf("[SCM] Registry key hardening failed (non-fatal): %v", err)
+	} else {
+		s.logger.Info("[SCM] Service registry keys hardened (all ControlSets) — reg delete blocked")
+	}
+
+	// ── Anti-Tamper Layer 4: Agent Config Registry Protection ─────────
+	if err := protection.HardenAgentRegistryKey(); err != nil {
+		s.logger.Warnf("[SCM] Agent registry key hardening failed (non-fatal): %v", err)
+	} else {
+		s.logger.Info("[SCM] Agent config registry hardened — SYSTEM full, Admin read-only")
+	}
+
+	// ── Anti-Tamper Layer 5: NTFS — SYSTEM-only on agent data dirs + binary ─
+	if s.cfg != nil {
+		if err := security.HardenAgentDirectoriesExclusive(s.cfg.DataDirectoriesToHarden(), s.logger); err != nil {
+			s.logger.Warnf("[SCM] Agent directory hardening failed (non-fatal): %v", err)
+		} else {
+			s.logger.Info("[SCM] Agent data directories hardened (SYSTEM-only, uninstall restores ACLs)")
+		}
+	}
+
+	// ── Continuous Protection Watchdog: Registry Integrity ────────────
+	go func() {
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				_ = protection.HardenServiceRegistryKey(ServiceName)
+				_ = protection.HardenAgentRegistryKey()
+				if s.cfg != nil {
+					_ = security.HardenAgentDirectoriesExclusive(s.cfg.DataDirectoriesToHarden(), nil)
+				}
+			}
+		}
+	}()
+	s.logger.Info("[SCM] Registry + directory integrity watchdog started (every 5s)")
 }
 
 // scheduleSystemCleanupTask registers a one-shot SYSTEM scheduled task that

@@ -17,6 +17,10 @@
 
 FROM golang:1.24-alpine
 
+# Some environments start containers with an empty PATH. Ensure the Go toolchain
+# and standard Unix utilities are always resolvable.
+ENV PATH="/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
 # Install build dependencies:
 #   - git: for Go module downloads
 #   - ca-certificates, tzdata: standard

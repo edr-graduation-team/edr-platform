@@ -97,6 +97,7 @@ func EnsureEnrolled(cfg *config.Config, logger *logging.Logger, configFilePath s
 	if cfg.Certs.BootstrapToken == "" {
 		return fmt.Errorf("%w; set certs.bootstrap_token in config", ErrBootstrapTokenRequired)
 	}
+	logger.Infof("Enrollment bootstrap token ready: len=%d", len(strings.TrimSpace(cfg.Certs.BootstrapToken)))
 
 	csrPEM, err := cm.GenerateCSR(cfg.Agent.ID, cfg.Agent.Hostname)
 	if err != nil {
@@ -158,6 +159,13 @@ func EnsureEnrolled(cfg *config.Config, logger *logging.Logger, configFilePath s
 		return fmt.Errorf("hardware_id is required for enrollment (could not determine a stable device id)")
 	}
 	logger.Infof("Enrollment hardware_id ready: source=%s len=%d", src, len(hardwareID))
+	// NOTE: Our protobuf files were manually patched in some environments where
+	// protoc is unavailable. To guarantee the server receives the hardware_id
+	// even if the generated descriptor is stale, also send it via Tags (which is
+	// always present in the original schema).
+	tags := map[string]string{
+		"hardware_id": hardwareID,
+	}
 	req := &pb.AgentRegistrationRequest{
 		InstallationToken: cfg.Certs.BootstrapToken,
 		AgentId:           cfg.Agent.ID,
@@ -165,6 +173,7 @@ func EnsureEnrolled(cfg *config.Config, logger *logging.Logger, configFilePath s
 		Hostname:          cfg.Agent.Hostname,
 		OsType:            "windows",
 		HardwareId:        hardwareID,
+		Tags:              tags,
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), registerTimeout)

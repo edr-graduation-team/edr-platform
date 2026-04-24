@@ -47,18 +47,11 @@ func (a *Agent) initSecurity() {
 	if err != nil {
 		a.logger.Warnf("[Security] Encryption init failed (data-at-rest NOT encrypted): %v", err)
 	} else {
-		// Wire encryptor into disk queue and logger.
+		// Wire encryptor into disk queue.
+		// Logs remain plaintext by design so Administrators can read them
+		// (read-only) for operations while preserving tamper resistance via ACLs.
 		a.diskQueue.SetEncryptor(enc)
-		a.logger.SetEncryptor(enc)
-		a.logger.Info("[Security] Data-at-rest encryption ACTIVE")
-
-		// Req 5: Retroactively encrypt any plaintext log lines written before
-		// the encryption key was ready (early startup logs).
-		if err := a.logger.RetroEncryptExistingLog(); err != nil {
-			a.logger.Warnf("[Security] Retroactive log encryption failed (non-fatal): %v", err)
-		} else {
-			a.logger.Info("[Security] Retroactive log encryption applied — startup logs secured")
-		}
+		a.logger.Info("[Security] Data-at-rest encryption ACTIVE (queue)")
 	}
 
 	// Req 4: Start 24h log rotation (truncates log file every 24 hours).

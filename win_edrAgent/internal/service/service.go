@@ -449,9 +449,7 @@ func (s *edrService) Execute(args []string, r <-chan svc.ChangeRequest, changes 
 		}
 	}
 
-	// This is structurally unreachable (the for-select loop returns internally),
-	// but required by Go's compiler for the function signature.
-	return false, 0
+	// Unreachable: for-select loop returns internally.
 }
 
 // Run starts the service.
@@ -654,8 +652,10 @@ func Install() error {
 		StartType:        mgr.StartAutomatic,
 		ServiceStartName: "LocalSystem",
 	},
-		"-service",
-		"-config", "C:\\ProgramData\\EDR\\config.yaml",
+		// SCM execution is auto-detected in cmd/agent/main.go via svc.IsWindowsService().
+		// Passing -service here causes the process to exit before svc.Run in some
+		// environments, leading to SCM error 7023: "Incorrect function".
+		"-config", `C:\ProgramData\EDR\config.yaml`,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to create service: %w", err)

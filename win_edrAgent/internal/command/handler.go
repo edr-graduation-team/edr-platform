@@ -1576,12 +1576,21 @@ func (h *Handler) uninstallAgent(_ context.Context, params map[string]string) (s
 		return "", fmt.Errorf("uninstall hook not registered — agent cannot honour UNINSTALL_AGENT")
 	}
 
-	h.logger.Warnf("[C2] UNINSTALL_AGENT received (reason=%q) — releasing protections and scheduling removal", reason)
-	if err := hook(reason); err != nil {
-		return "", fmt.Errorf("uninstall hook failed: %w", err)
-	}
+	// CRITICAL RELIABILITY DETAIL:
+	// We must ACK the command back to the server (SendCommandResult) BEFORE the
+	// service begins teardown. Triggering uninstall synchronously risks racing
+	// with the outbound ACK if the service stops quickly.
+	//
+	// Therefore we schedule the uninstall hook shortly after returning SUCCESS.
+	h.logger.Warnf("[C2] UNINSTALL_AGENT received (reason=%q) — scheduling uninstall teardown after ACK", reason)
+	go func() {
+		time.Sleep(3 * time.Second)
+		if err := hook(reason); err != nil {
+			h.logger.Errorf("[C2] Uninstall hook failed (post-ACK): %v", err)
+		}
+	}()
 
-	return fmt.Sprintf("Uninstall scheduled (reason=%s). Service will stop and agent files will be removed.", reason), nil
+	return fmt.Sprintf("Uninstall scheduled (reason=%s). Agent will confirm to server then remove itself.", reason), nil
 }
 
 // mtlsHTTPClient builds an HTTP client that presents the agent's enrolled

@@ -98,16 +98,16 @@ var (
 	procConvertStringSecurityDescriptorToSD = advapi32.NewProc("ConvertStringSecurityDescriptorToSecurityDescriptorW")
 )
 
-// HardenServiceDACL modifies the security descriptor of the named service
-// so that only SYSTEM retains full control. Administrators can query status
-// and START the service (RP) via services.msc / Start-Service / sc start, but
-// cannot stop, pause, delete, or change the service configuration.
+// HardenServiceDACL modifies the security descriptor of the named service so that:
+//   - SYSTEM retains full control
+//   - Administrators can query status and START the service (RP) via services.msc /
+//     Start-Service / sc start, but cannot stop, pause, delete, or change config
+//   - Non-admin users have no access via GUI/CLI
 //
 // SDDL breakdown:
 //
 //	(A;;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;SY)  → SYSTEM: full control
 //	(A;;CCLCSWRPLOCRRC;;;BA)              → Admins: query + START (RP); no STOP (WP)
-//	(A;;CCLCSWLOCRRC;;;IU)                → Interactive Users: query-only
 //
 // Access rights removed from Administrators:
 //   - SERVICE_STOP           (WP) = 0x0020
@@ -143,11 +143,10 @@ func HardenServiceDACL(serviceName string) error {
 	// Hardened SDDL:
 	// SYSTEM = full control
 	// Administrators = query + SERVICE_START (RP); no STOP/DELETE/CHANGE_CONFIG
-	// Interactive Users = query-only
+	// No access for non-admin users.
 	const hardenedSDDL = "D:" +
 		"(A;;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;SY)" + // SYSTEM: full (including SERVICE_CHANGE_CONFIG)
-		"(A;;CCLCSWRPLOCRRC;;;BA)" + // Admins: query + SERVICE_START (RP), no STOP/DELETE
-		"(A;;CCLCSWLOCRRC;;;IU)" // Interactive: query-only
+		"(A;;CCLCSWRPLOCRRC;;;BA)" // Admins: query + SERVICE_START (RP), no STOP/DELETE
 
 	sd, sdSize, err := convertSDDLToSD(hardenedSDDL)
 	if err != nil {
@@ -575,7 +574,7 @@ func convertSDDLToSD(sddl string) (sd unsafe.Pointer, sdSize uint32, err error) 
 		return nil, 0, err
 	}
 
-	var sdPtr uintptr
+	var sdPtr unsafe.Pointer
 	var size uint32
 
 	// SDDL_REVISION_1 = 1
@@ -589,6 +588,6 @@ func convertSDDLToSD(sddl string) (sd unsafe.Pointer, sdSize uint32, err error) 
 		return nil, 0, fmt.Errorf("ConvertStringSecurityDescriptorToSecurityDescriptorW: %w", callErr)
 	}
 
-	return unsafe.Pointer(sdPtr), size, nil
+	return sdPtr, size, nil
 }
 

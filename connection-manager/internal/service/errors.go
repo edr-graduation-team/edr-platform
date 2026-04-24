@@ -7,6 +7,7 @@ import "errors"
 var (
 	ErrInvalidToken    = errors.New("invalid or expired installation token")
 	ErrExpiredToken    = errors.New("installation token has expired")
+	ErrInvalidRequest  = errors.New("invalid registration request")
 	ErrDuplicateAgent  = errors.New("agent with this hostname already exists")
 	ErrAgentNotFound   = errors.New("agent not found")
 	ErrCertNotFound    = errors.New("certificate not found")

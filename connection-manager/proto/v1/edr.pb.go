@@ -2949,6 +2949,8 @@ type AgentRegistrationRequest struct {
 	// Network info
 	IpAddresses []string `protobuf:"bytes,30,rep,name=ip_addresses,json=ipAddresses,proto3" json:"ip_addresses,omitempty"`
 	MacAddress  string   `protobuf:"bytes,31,opt,name=mac_address,json=macAddress,proto3" json:"mac_address,omitempty"`
+	// Stable device fingerprint (e.g. Windows MachineGuid). Used for idempotent enrollment.
+	HardwareId string `protobuf:"bytes,32,opt,name=hardware_id,json=hardwareId,proto3" json:"hardware_id,omitempty"`
 	// Metadata
 	Tags          map[string]string `protobuf:"bytes,40,rep,name=tags,proto3" json:"tags,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	unknownFields protoimpl.UnknownFields
@@ -3058,6 +3060,13 @@ func (x *AgentRegistrationRequest) GetIpAddresses() []string {
 func (x *AgentRegistrationRequest) GetMacAddress() string {
 	if x != nil {
 		return x.MacAddress
+	}
+	return ""
+}
+
+func (x *AgentRegistrationRequest) GetHardwareId() string {
+	if x != nil {
+		return x.HardwareId
 	}
 	return ""
 }

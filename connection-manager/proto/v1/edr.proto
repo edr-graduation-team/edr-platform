@@ -549,6 +549,8 @@ message AgentRegistrationRequest {
   // Network info
   repeated string ip_addresses = 30;
   string mac_address = 31;
+  // Stable device fingerprint (e.g. Windows MachineGuid). Used for idempotent enrollment.
+  string hardware_id = 32;
   
   // Metadata
   map<string, string> tags = 40;

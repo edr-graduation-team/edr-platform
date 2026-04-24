@@ -16,6 +16,7 @@ type Agent struct {
 	// Device information
 	OSType    string `db:"os_type" json:"os_type"`       // windows, linux, macos
 	OSVersion string `db:"os_version" json:"os_version"` // e.g., "Windows 10 21H2"
+	HardwareID string `db:"hardware_id" json:"hardware_id"`
 	CPUCount  int    `db:"cpu_count" json:"cpu_count"`
 	MemoryMB  int64  `db:"memory_mb" json:"memory_mb"`
 

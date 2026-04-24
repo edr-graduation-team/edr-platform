@@ -166,7 +166,15 @@ type EnrollmentTokenRepository interface {
 	Revoke(ctx context.Context, id uuid.UUID) error
 
 	// Delete deletes an enrollment token.
+	// Deprecated for enrollment idempotency: prefer Revoke/expiry so consumption checks remain possible.
 	Delete(ctx context.Context, id uuid.UUID) error
+
+	// HasConsumption returns true if this hardware_id has already consumed this token.
+	HasConsumption(ctx context.Context, tokenID uuid.UUID, hardwareID string) (bool, error)
+
+	// RecordConsumption inserts a (token_id, hardware_id) consumption record.
+	// Returns inserted=true if this is the first time this hardware_id consumes the token.
+	RecordConsumption(ctx context.Context, tokenID uuid.UUID, hardwareID string, agentID uuid.UUID) (inserted bool, err error)
 }
 
 // UserRepository defines the interface for user data access.

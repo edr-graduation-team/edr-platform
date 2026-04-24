@@ -12,6 +12,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	urlpkg "net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -1571,7 +1572,7 @@ func (h *Handler) uninstallAgent(_ context.Context, params map[string]string) (s
 // the only transport allowed to download personalised agent packages — the
 // server rejects requests without a valid peer certificate whose CN matches
 // the package's bound agent_id.
-func (h *Handler) mtlsHTTPClient() (*http.Client, error) {
+func (h *Handler) mtlsHTTPClient(serverName string) (*http.Client, error) {
 	h.mu.Lock()
 	cfg := h.currentCfg
 	h.mu.Unlock()
@@ -1614,7 +1615,10 @@ func (h *Handler) mtlsHTTPClient() (*http.Client, error) {
 				MinVersion:   tls.VersionTLS12,
 				Certificates: []tls.Certificate{clientCert},
 				RootCAs:      caPool,
-				ServerName:   cfg.Server.TLSServerName,
+				// Dynamic + reliable: if serverName is empty, Go will verify the certificate
+				// against the request URL host (works correctly across redirects).
+				// If provided, it overrides for special deployments.
+				ServerName: strings.TrimSpace(serverName),
 			},
 		},
 	}, nil
@@ -1660,23 +1664,45 @@ func (h *Handler) updateAgent(ctx context.Context, params map[string]string) (st
 	// certificate's CN matches the agent_id bound to the package row. A
 	// plain http.DefaultClient would be rejected with 403.
 	stagePath := `C:\ProgramData\EDR\edr-agent.patch.exe`
-	httpClient, err := h.mtlsHTTPClient()
+
+	// Flexible scheme handling:
+	// - Some deployments expose the package endpoint over HTTP, others HTTPS.
+	// - We try both (in a safe order) so upgrades are resilient.
+	// TLS ServerName handling:
+	// - We rely on the request URL hostname (dynamic) unless an explicit override is passed.
+	urlsToTry := buildHTTPAndHTTPSCandidates(strings.TrimSpace(url))
+	httpClient, err := h.mtlsHTTPClient("")
 	if err != nil {
 		return "", fmt.Errorf("build mTLS client for update download: %w", err)
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return "", fmt.Errorf("build download request: %w", err)
+
+	var resp *http.Response
+	var lastErr error
+	for _, u := range urlsToTry {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+		if err != nil {
+			lastErr = fmt.Errorf("build download request: %w", err)
+			continue
+		}
+		r, err := httpClient.Do(req)
+		if err != nil {
+			lastErr = fmt.Errorf("download failed: %w", err)
+			continue
+		}
+		// If server responded, decide based on status. If not OK, capture and try next.
+		if r.StatusCode != http.StatusOK {
+			b, _ := io.ReadAll(io.LimitReader(r.Body, 4096))
+			_ = r.Body.Close()
+			lastErr = fmt.Errorf("download failed: status=%d body=%s", r.StatusCode, strings.TrimSpace(string(b)))
+			continue
+		}
+		resp = r
+		break
 	}
-	resp, err := httpClient.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("download failed: %w", err)
+	if resp == nil {
+		return "", lastErr
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return "", fmt.Errorf("download failed: status=%d body=%s", resp.StatusCode, strings.TrimSpace(string(b)))
-	}
 
 	tmp := stagePath + ".tmp"
 	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0700)
@@ -1706,7 +1732,8 @@ func (h *Handler) updateAgent(ctx context.Context, params map[string]string) (st
 	st := time.Now().Add(1 * time.Minute).Format("15:04")
 	dst := `C:\ProgramData\EDR\bin\edr-agent.exe`
 	// Keep a backup.
-	tr := fmt.Sprintf(`cmd /c sc stop EDRAgent ^& timeout /t 2 /nobreak ^& del /f /q "%s.old" ^& ren "%s" "edr-agent.exe.old" ^& copy /y "%s" "%s" ^& del /f /q "%s" ^& sc start EDRAgent`,
+	// Robustness: allow longer stop time, force-kill the process if needed, then swap.
+	tr := fmt.Sprintf(`cmd /c sc stop EDRAgent ^& timeout /t 6 /nobreak ^& taskkill /F /IM edr-agent.exe >nul 2>nul ^& timeout /t 2 /nobreak ^& del /f /q "%s.old" ^& ren "%s" "edr-agent.exe.old" ^& copy /y "%s" "%s" ^& del /f /q "%s" ^& sc start EDRAgent`,
 		dst, dst, stagePath, dst, stagePath,
 	)
 	create := exec.Command("schtasks", "/Create", "/TN", taskName, "/RU", "SYSTEM", "/SC", "ONCE", "/ST", st, "/F", "/TR", tr)
@@ -1720,6 +1747,39 @@ func (h *Handler) updateAgent(ctx context.Context, params map[string]string) (st
 	_ = exec.Command("schtasks", "/Delete", "/TN", taskName, "/F").Run()
 
 	return fmt.Sprintf("Agent upgrade scheduled: version=%s sha256=%s (service will restart shortly)", version, got[:16]+"..."), nil
+}
+
+func buildHTTPAndHTTPSCandidates(raw string) []string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	u, err := urlpkg.Parse(raw)
+	if err != nil || u == nil {
+		// If parsing fails, just try as-is.
+		return []string{raw}
+	}
+	// If scheme missing, prefer https then http.
+	if u.Scheme == "" {
+		httpsU := *u
+		httpsU.Scheme = "https"
+		httpU := *u
+		httpU.Scheme = "http"
+		return []string{httpsU.String(), httpU.String()}
+	}
+	// If scheme is http/https, try original first then the other.
+	if strings.EqualFold(u.Scheme, "http") {
+		alt := *u
+		alt.Scheme = "https"
+		return []string{u.String(), alt.String()}
+	}
+	if strings.EqualFold(u.Scheme, "https") {
+		alt := *u
+		alt.Scheme = "http"
+		return []string{u.String(), alt.String()}
+	}
+	// Unknown scheme: try as-is only.
+	return []string{u.String()}
 }
 
 // restartService handles all agent service control commands.

@@ -297,6 +297,7 @@ func (s *Server) RegisterAgent(ctx context.Context, req *edrv1.AgentRegistration
 		Hostname:          req.Hostname,
 		OSType:            req.OsType,
 		OSVersion:         req.OsVersion,
+		HardwareID:        req.HardwareId,
 		CPUCount:          int(req.CpuCount),
 		MemoryMB:          req.MemoryMb,
 		AgentVersion:      req.AgentVersion,

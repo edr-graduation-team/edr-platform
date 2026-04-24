@@ -214,6 +214,25 @@ func resolveInstallParam(cliVal, embeddedVal, paramName string) string {
 	return ""
 }
 
+// applyEmbeddedGRPCPortIfDefault overwrites *port when the CLI left the
+// default (50051) or empty, and the build has EmbeddedServerPort (dashboard).
+// The flag default is 50051, so resolveInstallParam would otherwise never use
+// embedded (e.g. 47051 for public gRPC behind NAT/SG).
+func applyEmbeddedGRPCPortIfDefault(port *string) {
+	if port == nil {
+		return
+	}
+	p := *port
+	if p != "" && p != "50051" {
+		return
+	}
+	if EmbeddedServerPort != "" {
+		*port = EmbeddedServerPort
+	} else if p == "" {
+		*port = "50051"
+	}
+}
+
 // printInstallHelp displays a formatted help message for missing install parameters.
 func printInstallHelp(missingParams []string) {
 	fmt.Fprintf(os.Stderr, "\n╔══════════════════════════════════════════════════════════════╗\n")
@@ -299,15 +318,7 @@ func runInstall(
 	serverIP = resolveInstallParam(serverIP, EmbeddedServerIP, "server-ip")
 	serverDomain = resolveInstallParam(serverDomain, EmbeddedServerDomain, "server-domain")
 	serverPort = resolveInstallParam(serverPort, EmbeddedServerPort, "server-port")
-
-	if serverPort == "" || serverPort == "50051" {
-		// Use embedded or default
-		if EmbeddedServerPort != "" {
-			serverPort = EmbeddedServerPort
-		} else if serverPort == "" {
-			serverPort = "50051"
-		}
-	}
+	applyEmbeddedGRPCPortIfDefault(&serverPort)
 
 	// ── Validate required parameters ─────────────────────────────────────────
 	var missing []string
@@ -493,6 +504,10 @@ func runUpdate(
 	serverIP = resolveInstallParam(serverIP, EmbeddedServerIP, "server-ip")
 	serverDomain = resolveInstallParam(serverDomain, EmbeddedServerDomain, "server-domain")
 	serverPort = resolveInstallParam(serverPort, EmbeddedServerPort, "server-port")
+	// Match runInstall: the flag default is "50051", so resolveInstallParam never
+	// consults embedded — same bug would force the public C2 port (e.g. 47051) to
+	// be lost on in-place upgrade, breaking AWS SG / port-forward setups.
+	applyEmbeddedGRPCPortIfDefault(&serverPort)
 
 	srcPath, err := os.Executable()
 	if err != nil {

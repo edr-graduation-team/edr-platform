@@ -572,9 +572,18 @@ func runUpdateStage2(
 			cfg = config.DefaultConfig()
 		}
 	}
-	if strings.TrimSpace(serverDomain) != "" && strings.TrimSpace(serverPort) != "" {
-		cfg.Server.Address = fmt.Sprintf("%s:%s", strings.TrimSpace(serverDomain), strings.TrimSpace(serverPort))
-		cfg.Server.TLSServerName = strings.TrimSpace(serverDomain)
+	sd := strings.TrimSpace(serverDomain)
+	sp := strings.TrimSpace(serverPort)
+	if sd != "" && sp != "" {
+		cfg.Server.Address = fmt.Sprintf("%s:%s", sd, sp)
+		// The gRPC listener uses a cert with CN/SAN for the Connection Manager
+		// service (e.g. edr-connection-manager), not the hosts-file name
+		// (edr.local). Using serverDomain here breaks TLS with
+		// "certificate is valid for ... not edr.local".
+		tls := strings.TrimSpace(cfg.Server.TLSServerName)
+		if tls == "" || strings.EqualFold(tls, sd) {
+			cfg.Server.TLSServerName = config.DefaultGRPCServerCertName
+		}
 	}
 	if strings.TrimSpace(token) != "" {
 		// BootstrapToken lives on CertConfig; the root Config only aggregates

@@ -1673,7 +1673,12 @@ func (h *Handler) updateAgent(ctx context.Context, params map[string]string) (st
 		}
 		if cfg, err := config.LoadFromRegistry(); err == nil && cfg != nil {
 			cfg.Server.Address = fmt.Sprintf("%s:%s", sd, sp)
-			cfg.Server.TLSServerName = sd
+			// Same rule as install/update: do not set TLSServerName to the dial
+			// hostname; the CM cert is issued for DefaultGRPCServerCertName.
+			tls := strings.TrimSpace(cfg.Server.TLSServerName)
+			if tls == "" || strings.EqualFold(tls, sd) {
+				cfg.Server.TLSServerName = config.DefaultGRPCServerCertName
+			}
 			_ = cfg.SaveToRegistry()
 			h.logger.Infof("[C2] UPDATE_AGENT config override applied: server=%s:%s", sd, sp)
 		}

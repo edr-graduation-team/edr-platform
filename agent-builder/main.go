@@ -149,6 +149,33 @@ func computeFingerprint(req BuildRequest, agentSrcDir string) string {
 		fmt.Fprintf(h, "go_mod_hash=%x\n", modHash)
 	}
 
+	// 6. Agent source fingerprint (critical):
+	// go.sum/go.mod do NOT change for most code edits. If we only hash those,
+	// the build cache can serve stale binaries after source changes.
+	//
+	// We hash a small set of high-impact source files that affect enrollment,
+	// service behavior, and security policies. This keeps builds fast while
+	// making cache invalidation reliable.
+	importantFiles := []string{
+		filepath.Join(agentSrcDir, "cmd", "agent", "main.go"),
+		filepath.Join(agentSrcDir, "internal", "enrollment", "enroll.go"),
+		filepath.Join(agentSrcDir, "internal", "enrollment", "hardware_id_windows.go"),
+		filepath.Join(agentSrcDir, "internal", "service", "service.go"),
+		filepath.Join(agentSrcDir, "internal", "command", "handler.go"),
+		filepath.Join(agentSrcDir, "internal", "protection", "tamper.go"),
+		filepath.Join(agentSrcDir, "internal", "security", "acl_windows.go"),
+		filepath.Join(agentSrcDir, "internal", "agent", "agent_security_windows.go"),
+	}
+	for _, p := range importantFiles {
+		if data, err := os.ReadFile(p); err == nil {
+			sum := sha256.Sum256(data)
+			fmt.Fprintf(h, "src_file=%s sha256=%x\n", filepath.Base(p), sum)
+		} else {
+			// Include the error to avoid false cache hits when the filesystem layout differs.
+			fmt.Fprintf(h, "src_file=%s unreadable=%v\n", filepath.Base(p), err)
+		}
+	}
+
 	return hex.EncodeToString(h.Sum(nil))
 }
 

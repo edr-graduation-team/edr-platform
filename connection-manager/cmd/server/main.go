@@ -431,6 +431,12 @@ func main() {
 		apiHandlers.SetIncidentRepo(incidentRepo)
 		grpcServer.SetIncidentRepo(incidentRepo)
 
+		apiHandlers.SetVulnRepo(repository.NewPostgresVulnerabilityRepository(pool))
+		logger.Info("Vulnerability findings API enabled (vulnerability_findings)")
+
+		apiHandlers.SetSiemRepo(repository.NewPostgresSiemConnectorRepository(pool))
+		logger.Info("SIEM connectors API enabled (siem_connectors)")
+
 		if commandRepo != nil {
 			pb := playbook.NewEngine(logger, incidentRepo, commandRepo, grpcServer.GetRegistry())
 			grpcServer.SetPlaybookEngine(pb)

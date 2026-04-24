@@ -22,3 +22,4 @@ export { default as StatCard } from './StatCard';
 export { default as LiveIndicator } from './LiveIndicator';
 export { default as ThreatMeter } from './ThreatMeter';
 export { default as EmptyState } from './EmptyState';
+export { default as InsightHero } from './InsightHero';

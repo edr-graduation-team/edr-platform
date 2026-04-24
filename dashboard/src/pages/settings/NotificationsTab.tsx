@@ -60,8 +60,8 @@ function ToggleSwitch({
             onClick={onChange}
             className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent
         transition-colors duration-200 ease-in-out
-        focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-gray-800 focus-visible:ring-primary-500
-        ${checked ? SEVERITY_ACTIVE_COLOR[severity] : 'bg-gray-300 dark:bg-gray-600'}`}
+        focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-slate-800 focus-visible:ring-primary-500
+        ${checked ? SEVERITY_ACTIVE_COLOR[severity] : 'bg-slate-300 dark:bg-slate-600'}`}
         >
             <span className="sr-only">Toggle notification</span>
             <span
@@ -141,8 +141,8 @@ export default function NotificationsTab({ settings, onChange, onSave, saved }: 
                             <Bell className="w-5 h-5 text-amber-600 dark:text-amber-400" />
                         </div>
                         <div>
-                            <h2 className="text-base font-semibold text-gray-900 dark:text-white">Notification Matrix</h2>
-                            <p className="text-xs text-gray-500 dark:text-gray-400">
+                            <h2 className="text-base font-semibold text-slate-900 dark:text-white">Notification Matrix</h2>
+                            <p className="text-xs text-slate-500 dark:text-slate-400">
                                 Control delivery per severity level — {enabledCount}/{totalCount} channels active
                             </p>
                         </div>
@@ -150,11 +150,11 @@ export default function NotificationsTab({ settings, onChange, onSave, saved }: 
                 </div>
 
                 {/* ── Matrix Table ── */}
-                <div className="overflow-x-auto rounded-xl border border-gray-100 dark:border-gray-700">
+                <div className="overflow-x-auto rounded-xl border border-slate-100 dark:border-slate-700">
                     <table className="w-full">
                         <thead>
-                            <tr className="bg-gray-50 dark:bg-gray-700/60 border-b border-gray-200 dark:border-gray-700">
-                                <th className="text-left py-3.5 px-5 text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 w-40">
+                            <tr className="bg-slate-50 dark:bg-slate-700/60 border-b border-slate-200 dark:border-slate-700">
+                                <th className="text-left py-3.5 px-5 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 w-40">
                                     Severity
                                 </th>
                                 {DELIVERY_METHODS.map((method) => {
@@ -163,7 +163,7 @@ export default function NotificationsTab({ settings, onChange, onSave, saved }: 
                                     return (
                                         <th
                                             key={method.id}
-                                            className="text-center py-3.5 px-6 text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400"
+                                            className="text-center py-3.5 px-6 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400"
                                         >
                                             <div className="flex flex-col items-center gap-1.5">
                                                 <div className="flex items-center gap-1.5">
@@ -180,7 +180,7 @@ export default function NotificationsTab({ settings, onChange, onSave, saved }: 
                                         </th>
                                     );
                                 })}
-                                <th className="text-center py-3.5 px-5 text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                                <th className="text-center py-3.5 px-5 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
                                     All
                                 </th>
                             </tr>
@@ -191,9 +191,9 @@ export default function NotificationsTab({ settings, onChange, onSave, saved }: 
                                 return (
                                     <tr
                                         key={severity.id}
-                                        className={`border-b border-gray-100 dark:border-gray-700 last:border-0 transition-colors ${idx % 2 === 0
-                                            ? 'bg-white dark:bg-gray-800'
-                                            : 'bg-gray-50/50 dark:bg-gray-800/60'
+                                        className={`border-b border-slate-100 dark:border-slate-700 last:border-0 transition-colors ${idx % 2 === 0
+                                            ? 'bg-white dark:bg-slate-800'
+                                            : 'bg-slate-50/50 dark:bg-slate-800/60'
                                             } hover:bg-primary-50 dark:hover:bg-primary-900/10`}
                                     >
                                         {/* Severity Label */}
@@ -228,8 +228,8 @@ export default function NotificationsTab({ settings, onChange, onSave, saved }: 
                                             <button
                                                 onClick={() => toggleAllForSeverity(severity.id, !severityAllOn)}
                                                 className={`text-xs font-medium px-2.5 py-1 rounded-full transition-colors ${severityAllOn
-                                                    ? `ring-1 ${SEVERITY_RING[severity.id]} text-gray-700 dark:text-gray-300 hover:bg-red-50 dark:hover:bg-red-900/20`
-                                                    : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600'
+                                                    ? `ring-1 ${SEVERITY_RING[severity.id]} text-slate-700 dark:text-slate-300 hover:bg-red-50 dark:hover:bg-red-900/20`
+                                                    : 'bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-600'
                                                     }`}
                                             >
                                                 {severityAllOn ? 'None' : 'All'}
@@ -243,13 +243,13 @@ export default function NotificationsTab({ settings, onChange, onSave, saved }: 
                 </div>
 
                 {/* ── Quick Actions Footer ── */}
-                <div className="mt-5 pt-4 border-t border-gray-100 dark:border-gray-700 flex flex-wrap items-center gap-3">
-                    <span className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">
+                <div className="mt-5 pt-4 border-t border-slate-100 dark:border-slate-700 flex flex-wrap items-center gap-3">
+                    <span className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wide">
                         Quick Actions:
                     </span>
                     <button
                         onClick={() => onChange(createDefaultNotifications())}
-                        className="px-3 py-1.5 text-xs font-medium bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
+                        className="px-3 py-1.5 text-xs font-medium bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors"
                     >
                         Reset to Defaults
                     </button>
@@ -257,7 +257,7 @@ export default function NotificationsTab({ settings, onChange, onSave, saved }: 
                         onClick={() => {
                             SEVERITIES.forEach((s) => toggleAllForSeverity(s.id, !allEnabled));
                         }}
-                        className="px-3 py-1.5 text-xs font-medium bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
+                        className="px-3 py-1.5 text-xs font-medium bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors"
                     >
                         {allEnabled ? 'Disable All Channels' : 'Enable All Channels'}
                     </button>

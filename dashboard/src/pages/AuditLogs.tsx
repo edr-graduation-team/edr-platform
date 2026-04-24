@@ -23,7 +23,7 @@ import { useDebounce } from '../hooks/useDebounce';
 
 const ACTION_ICONS: Record<string, { icon: typeof Activity; color: string }> = {
     login: { icon: User, color: 'text-green-500' },
-    logout: { icon: User, color: 'text-gray-500' },
+    logout: { icon: User, color: 'text-slate-500' },
     login_failed: { icon: X, color: 'text-red-500' },
     create: { icon: Check, color: 'text-green-500' },
     update: { icon: RefreshCw, color: 'text-blue-500' },
@@ -37,7 +37,7 @@ const ACTION_ICONS: Record<string, { icon: typeof Activity; color: string }> = {
     register: { icon: Check, color: 'text-green-500' },
     deploy_policy: { icon: Activity, color: 'text-blue-500' },
     revoke_token: { icon: X, color: 'text-red-500' },
-    change_settings: { icon: Settings, color: 'text-gray-500' },
+    change_settings: { icon: Settings, color: 'text-slate-500' },
 };
 
 const RESOURCE_BADGES: Record<string, { label: string; color: string }> = {
@@ -50,7 +50,7 @@ const RESOURCE_BADGES: Record<string, { label: string; color: string }> = {
     session: { label: 'Session', color: 'bg-purple-500/10 text-purple-500 border border-purple-500/20' },
     system: { label: 'System', color: 'bg-slate-500/10 text-slate-500 border border-slate-500/20' },
     dashboard: { label: 'Dashboard', color: 'bg-teal-500/10 text-teal-500 border border-teal-500/20' },
-    settings: { label: 'Settings', color: 'bg-gray-500/10 text-gray-400 border border-gray-500/20' },
+    settings: { label: 'Settings', color: 'bg-slate-500/10 text-slate-400 border border-slate-500/20' },
     token: { label: 'Token', color: 'bg-yellow-500/10 text-yellow-500 border border-yellow-500/20' },
 };
 
@@ -98,21 +98,21 @@ function formatLogDate(iso: string): string {
 function AuditDetailModal({ log, isOpen, onClose }: { log: AuditLog | null; isOpen: boolean; onClose: () => void }) {
     if (!log) return null;
 
-    const iconConfig = ACTION_ICONS[log.action] || { icon: Activity, color: 'text-gray-500' };
+    const iconConfig = ACTION_ICONS[log.action] || { icon: Activity, color: 'text-slate-500' };
     const Icon = iconConfig.icon;
 
     return (
         <Modal isOpen={isOpen} onClose={onClose} title="Audit Log Details" size="lg">
-            <div className="space-y-4">
-                <div className="flex items-center gap-4 p-4 bg-gray-50 dark:bg-gray-900/50 rounded-lg">
+            <div className="space-y-4 animate-slide-up-fade">
+                <div className="flex items-center gap-4 p-4 bg-slate-50 dark:bg-slate-900/50 rounded-lg">
                     <div
                         className={`p-3 rounded-lg ${log.result === 'success' ? 'bg-green-100 dark:bg-green-900/30' : 'bg-red-100 dark:bg-red-900/30'}`}
                     >
                         <Icon className={`w-6 h-6 ${iconConfig.color}`} />
                     </div>
                     <div className="flex-1">
-                        <h3 className="text-lg font-semibold text-gray-900 dark:text-white">{formatAction(log.action)}</h3>
-                        <p className="text-sm text-gray-500">{formatLogDate(log.timestamp)}</p>
+                        <h3 className="text-lg font-semibold text-slate-900 dark:text-white">{formatAction(log.action)}</h3>
+                        <p className="text-sm text-slate-500">{formatLogDate(log.timestamp)}</p>
                     </div>
                     <span
                         className={`px-2.5 py-1 text-xs font-semibold rounded-md border ${
@@ -127,29 +127,29 @@ function AuditDetailModal({ log, isOpen, onClose }: { log: AuditLog | null; isOp
 
                 <div className="grid grid-cols-2 gap-4">
                     <div>
-                        <label className="text-xs text-gray-500 uppercase tracking-wider">User</label>
-                        <p className="font-medium text-gray-900 dark:text-white">{log.username}</p>
-                        <p className="text-xs text-gray-500">{log.user_id}</p>
+                        <label className="text-xs text-slate-500 uppercase tracking-wider">User</label>
+                        <p className="font-medium text-slate-900 dark:text-white">{log.username}</p>
+                        <p className="text-xs text-slate-500">{log.user_id}</p>
                     </div>
                     <div>
-                        <label className="text-xs text-gray-500 uppercase tracking-wider">Resource</label>
-                        <p className="font-medium text-gray-900 dark:text-white">{log.resource_type}</p>
-                        <p className="text-xs text-gray-500 font-mono">{log.resource_id || 'N/A'}</p>
+                        <label className="text-xs text-slate-500 uppercase tracking-wider">Resource</label>
+                        <p className="font-medium text-slate-900 dark:text-white">{log.resource_type}</p>
+                        <p className="text-xs text-slate-500 font-mono">{log.resource_id || 'N/A'}</p>
                     </div>
                     <div>
-                        <label className="text-xs text-gray-500 uppercase tracking-wider">IP Address</label>
-                        <p className="font-mono text-gray-900 dark:text-white">{log.ip_address || 'N/A'}</p>
+                        <label className="text-xs text-slate-500 uppercase tracking-wider">IP Address</label>
+                        <p className="font-mono text-slate-900 dark:text-white">{log.ip_address || 'N/A'}</p>
                     </div>
                     <div>
-                        <label className="text-xs text-gray-500 uppercase tracking-wider">Log ID</label>
-                        <p className="font-mono text-xs text-gray-600 dark:text-gray-400">{log.id}</p>
+                        <label className="text-xs text-slate-500 uppercase tracking-wider">Log ID</label>
+                        <p className="font-mono text-xs text-slate-600 dark:text-slate-400">{log.id}</p>
                     </div>
                 </div>
 
                 {log.user_agent && (
                     <div>
-                        <label className="text-xs text-gray-500 uppercase tracking-wider">User Agent</label>
-                        <p className="text-sm text-gray-600 dark:text-gray-400 font-mono break-all">{log.user_agent}</p>
+                        <label className="text-xs text-slate-500 uppercase tracking-wider">User Agent</label>
+                        <p className="text-sm text-slate-600 dark:text-slate-400 font-mono break-all">{log.user_agent}</p>
                     </div>
                 )}
 
@@ -162,8 +162,8 @@ function AuditDetailModal({ log, isOpen, onClose }: { log: AuditLog | null; isOp
 
                 {log.details && (
                     <div>
-                        <label className="text-xs text-gray-500 uppercase tracking-wider">Extra info</label>
-                        <p className="text-sm text-gray-700 dark:text-gray-300">{log.details}</p>
+                        <label className="text-xs text-slate-500 uppercase tracking-wider">Extra info</label>
+                        <p className="text-sm text-slate-700 dark:text-slate-300">{log.details}</p>
                     </div>
                 )}
 
@@ -171,16 +171,16 @@ function AuditDetailModal({ log, isOpen, onClose }: { log: AuditLog | null; isOp
                     <div className="grid grid-cols-2 gap-4">
                         {log.old_value && (
                             <div>
-                                <label className="text-xs text-gray-500 uppercase tracking-wider">Old Value</label>
-                                <pre className="mt-1 p-3 text-xs bg-red-50 dark:bg-red-900/20 rounded-lg overflow-auto max-h-40 text-gray-800 dark:text-gray-200">
+                                <label className="text-xs text-slate-500 uppercase tracking-wider">Old Value</label>
+                                <pre className="mt-1 p-3 text-xs bg-red-50 dark:bg-red-900/20 rounded-lg overflow-auto max-h-40 text-slate-800 dark:text-slate-200">
                                     {JSON.stringify(log.old_value, null, 2)}
                                 </pre>
                             </div>
                         )}
                         {log.new_value && (
                             <div>
-                                <label className="text-xs text-gray-500 uppercase tracking-wider">New Value</label>
-                                <pre className="mt-1 p-3 text-xs bg-green-50 dark:bg-green-900/20 rounded-lg overflow-auto max-h-40 text-gray-800 dark:text-gray-200">
+                                <label className="text-xs text-slate-500 uppercase tracking-wider">New Value</label>
+                                <pre className="mt-1 p-3 text-xs bg-green-50 dark:bg-green-900/20 rounded-lg overflow-auto max-h-40 text-slate-800 dark:text-slate-200">
                                     {JSON.stringify(log.new_value, null, 2)}
                                 </pre>
                             </div>
@@ -350,10 +350,10 @@ export default function AuditLogs() {
     if (!canViewAudit) {
         return (
             <div className="card text-center py-12">
-                <Shield className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-                <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">Access Denied</h3>
-                <p className="text-gray-500">You don&apos;t have permission to view audit logs.</p>
-                <p className="text-sm text-gray-400 mt-2">Required role: Admin or Security</p>
+                <Shield className="w-12 h-12 text-slate-400 mx-auto mb-4" />
+                <h3 className="text-lg font-medium text-slate-900 dark:text-white mb-2">Access Denied</h3>
+                <p className="text-slate-500">You don&apos;t have permission to view audit logs.</p>
+                <p className="text-sm text-slate-400 mt-2">Required role: Admin or Security</p>
             </div>
         );
     }
@@ -362,8 +362,8 @@ export default function AuditLogs() {
         return (
             <div className="card text-center py-12">
                 <AlertTriangle className="w-12 h-12 text-red-400 mx-auto mb-4" />
-                <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">Failed to Load Audit Logs</h3>
-                <p className="text-gray-500">Please try again later.</p>
+                <h3 className="text-lg font-medium text-slate-900 dark:text-white mb-2">Failed to Load Audit Logs</h3>
+                <p className="text-slate-500">Please try again later.</p>
             </div>
         );
     }
@@ -375,8 +375,8 @@ export default function AuditLogs() {
         >
             {/* Title — compact, above Standard toolbar */}
             <div className="mb-3 shrink-0">
-                <h1 className="text-xl font-bold text-gray-900 dark:text-white">Audit Logs</h1>
-                <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                <h2 className="text-lg font-bold text-slate-900 dark:text-white">Audit Logs</h2>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
                     Platform activity (Standard grid — columns align with Platform audit viewer)
                 </p>
             </div>
@@ -460,11 +460,11 @@ export default function AuditLogs() {
 
             {/* Filter panel — Platform “cover” style */}
             {filterPanelOpen && (
-                <div className="border border-gray-200 dark:border-gray-700 border-t-0 rounded-b-lg bg-white dark:bg-slate-900/90 p-4 space-y-4 shadow-sm">
+                <div className="border border-slate-200 dark:border-slate-700 border-t-0 rounded-b-lg bg-white dark:bg-slate-900/90 p-4 space-y-4 shadow-sm">
                     <div className="flex flex-wrap gap-4 items-end">
                         <DateRangePicker value={dateRange} onChange={setDateRange} label="Log creation date" />
                         <div className="min-w-[140px]">
-                            <label className="block text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1">
+                            <label className="block text-[11px] font-semibold text-slate-500 uppercase tracking-wide mb-1">
                                 Staff
                             </label>
                             <input
@@ -472,17 +472,17 @@ export default function AuditLogs() {
                                 placeholder="Staff"
                                 value={filters.staff}
                                 onChange={(e) => setFilters((f) => ({ ...f, staff: e.target.value }))}
-                                className="w-full rounded-md border border-gray-200 dark:border-gray-600 bg-white dark:bg-slate-800 px-2 py-1.5 text-sm text-gray-900 dark:text-gray-100"
+                                className="w-full rounded-md border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 px-2 py-1.5 text-sm text-slate-900 dark:text-slate-100"
                             />
                         </div>
                         <div>
-                            <label className="block text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1">
+                            <label className="block text-[11px] font-semibold text-slate-500 uppercase tracking-wide mb-1">
                                 Event name
                             </label>
                             <select
                                 value={filters.action}
                                 onChange={(e) => setFilters((f) => ({ ...f, action: e.target.value }))}
-                                className="rounded-md border border-gray-200 dark:border-gray-600 bg-white dark:bg-slate-800 px-2 py-1.5 text-sm min-w-[180px]"
+                                className="rounded-md border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 px-2 py-1.5 text-sm min-w-[180px]"
                             >
                                 <option value="">All</option>
                                 <option value="login">Login</option>
@@ -501,13 +501,13 @@ export default function AuditLogs() {
                             </select>
                         </div>
                         <div>
-                            <label className="block text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1">
+                            <label className="block text-[11px] font-semibold text-slate-500 uppercase tracking-wide mb-1">
                                 Resource
                             </label>
                             <select
                                 value={filters.resource_type}
                                 onChange={(e) => setFilters((f) => ({ ...f, resource_type: e.target.value }))}
-                                className="rounded-md border border-gray-200 dark:border-gray-600 bg-white dark:bg-slate-800 px-2 py-1.5 text-sm min-w-[140px]"
+                                className="rounded-md border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 px-2 py-1.5 text-sm min-w-[140px]"
                             >
                                 <option value="">All types</option>
                                 <option value="user">User</option>
@@ -522,22 +522,22 @@ export default function AuditLogs() {
                             </select>
                         </div>
                         <div className="flex-1 min-w-[200px]">
-                            <label className="block text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1">
+                            <label className="block text-[11px] font-semibold text-slate-500 uppercase tracking-wide mb-1">
                                 Search
                             </label>
                             <div className="relative">
-                                <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                                <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                                 <input
                                     type="text"
                                     placeholder="User, action, resource…"
                                     value={filters.search}
                                     onChange={(e) => setFilters((f) => ({ ...f, search: e.target.value }))}
-                                    className="w-full rounded-md border border-gray-200 dark:border-gray-600 bg-white dark:bg-slate-800 pl-8 pr-2 py-1.5 text-sm"
+                                    className="w-full rounded-md border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 pl-8 pr-2 py-1.5 text-sm"
                                 />
                             </div>
                         </div>
                     </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 pt-2 border-t border-gray-100 dark:border-gray-800">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 pt-2 border-t border-slate-100 dark:border-slate-800">
                         {(
                             [
                                 ['affected', 'Affected object', filters.affected],
@@ -548,7 +548,7 @@ export default function AuditLogs() {
                             ] as const
                         ).map(([key, label, val]) => (
                             <div key={key}>
-                                <label className="block text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1">
+                                <label className="block text-[11px] font-semibold text-slate-500 uppercase tracking-wide mb-1">
                                     {label}
                                 </label>
                                 <input
@@ -556,12 +556,12 @@ export default function AuditLogs() {
                                     placeholder={label}
                                     value={val}
                                     onChange={(e) => setFilters((f) => ({ ...f, [key]: e.target.value }))}
-                                    className="w-full rounded-md border border-gray-200 dark:border-gray-600 bg-white dark:bg-slate-800 px-2 py-1.5 text-sm"
+                                    className="w-full rounded-md border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 px-2 py-1.5 text-sm"
                                 />
                             </div>
                         ))}
                     </div>
-                    <p className="text-[11px] text-gray-400">
+                    <p className="text-[11px] text-slate-400">
                         Column filters (Staff, Affected object, values…) apply to the current result page. Use date range
                         and server filters for broad queries.
                     </p>
@@ -569,13 +569,13 @@ export default function AuditLogs() {
             )}
 
             {/* Table card */}
-            <div className="border border-gray-200 dark:border-gray-700 rounded-b-lg overflow-hidden bg-white dark:bg-slate-900/50 flex flex-col min-h-[320px]">
+            <div className="border border-slate-200 dark:border-slate-700 rounded-b-lg overflow-hidden bg-white dark:bg-slate-900/50 flex flex-col min-h-[320px]">
                 {isLoading ? (
                     <div className="p-4">
                         <SkeletonTable rows={8} columns={9} />
                     </div>
                 ) : filteredLogs.length === 0 ? (
-                    <div className="text-center py-16 text-gray-500">
+                    <div className="text-center py-16 text-slate-500">
                         <p className="italic text-sm" style={{ color: '#6E6E6E' }}>
                             No results found.
                         </p>
@@ -584,39 +584,39 @@ export default function AuditLogs() {
                     <div className="overflow-x-auto">
                         <table className="w-full text-left text-sm border-collapse items table-striped">
                             <thead>
-                                <tr className="border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-slate-800/80">
-                                    <th className="py-2.5 px-3 text-[11px] font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-400 whitespace-nowrap min-w-[150px]">
+                                <tr className="border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/80">
+                                    <th className="py-2.5 px-3 text-[11px] font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-400 whitespace-nowrap min-w-[150px]">
                                         Staff
                                     </th>
-                                    <th className="py-2.5 px-3 text-[11px] font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-400 whitespace-nowrap">
+                                    <th className="py-2.5 px-3 text-[11px] font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-400 whitespace-nowrap">
                                         Event name
                                     </th>
-                                    <th className="py-2.5 px-3 text-[11px] font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-400 whitespace-nowrap min-w-[120px]">
+                                    <th className="py-2.5 px-3 text-[11px] font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-400 whitespace-nowrap min-w-[120px]">
                                         Affected object
                                     </th>
-                                    <th className="py-2.5 px-3 text-[11px] font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-400 whitespace-nowrap max-w-[140px]">
+                                    <th className="py-2.5 px-3 text-[11px] font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-400 whitespace-nowrap max-w-[140px]">
                                         Old value
                                     </th>
-                                    <th className="py-2.5 px-3 text-[11px] font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-400 whitespace-nowrap max-w-[140px]">
+                                    <th className="py-2.5 px-3 text-[11px] font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-400 whitespace-nowrap max-w-[140px]">
                                         New value
                                     </th>
-                                    <th className="py-2.5 px-3 text-[11px] font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-400 whitespace-nowrap max-w-[160px]">
+                                    <th className="py-2.5 px-3 text-[11px] font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-400 whitespace-nowrap max-w-[160px]">
                                         Extra info
                                     </th>
-                                    <th className="py-2.5 px-3 text-[11px] font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-400 whitespace-nowrap font-mono text-xs">
+                                    <th className="py-2.5 px-3 text-[11px] font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-400 whitespace-nowrap font-mono text-xs">
                                         Session ID
                                     </th>
-                                    <th className="py-2.5 px-3 text-[11px] font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-400 whitespace-nowrap w-[180px]">
+                                    <th className="py-2.5 px-3 text-[11px] font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-400 whitespace-nowrap w-[180px]">
                                         Log creation date
                                     </th>
-                                    <th className="py-2.5 px-3 text-[11px] font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-400 text-right w-12">
+                                    <th className="py-2.5 px-3 text-[11px] font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-400 text-right w-12">
                                         {' '}
                                     </th>
                                 </tr>
                             </thead>
                             <tbody>
                                 {filteredLogs.map((log, i) => {
-                                    const iconConfig = ACTION_ICONS[log.action] || { icon: Activity, color: 'text-gray-500' };
+                                    const iconConfig = ACTION_ICONS[log.action] || { icon: Activity, color: 'text-slate-500' };
                                     const Icon = iconConfig.icon;
                                     const resourceBadge = RESOURCE_BADGES[log.resource_type] || {
                                         label: log.resource_type,
@@ -625,8 +625,8 @@ export default function AuditLogs() {
                                     return (
                                         <tr
                                             key={log.id}
-                                            className={`border-b border-gray-100 dark:border-gray-800/80 ${
-                                                i % 2 === 1 ? 'bg-gray-50/80 dark:bg-slate-800/40' : ''
+                                            className={`border-b border-slate-100 dark:border-slate-800/80 ${
+                                                i % 2 === 1 ? 'bg-slate-50/80 dark:bg-slate-800/40' : ''
                                             } hover:bg-cyan-500/5 dark:hover:bg-slate-800/60`}
                                         >
                                             <td className="py-2 px-3 align-top">
@@ -644,7 +644,7 @@ export default function AuditLogs() {
                                             <td className="py-2 px-3 align-top">
                                                 <div className="flex items-center gap-2">
                                                     <Icon className={`w-4 h-4 shrink-0 ${iconConfig.color}`} />
-                                                    <span className="text-gray-800 dark:text-gray-200">
+                                                    <span className="text-slate-800 dark:text-slate-200">
                                                         {formatAction(log.action)}
                                                     </span>
                                                 </div>
@@ -656,32 +656,32 @@ export default function AuditLogs() {
                                                     {resourceBadge.label}
                                                 </span>
                                                 <p
-                                                    className="text-xs text-gray-600 dark:text-gray-400 font-mono mt-1 truncate max-w-[220px]"
+                                                    className="text-xs text-slate-600 dark:text-slate-400 font-mono mt-1 truncate max-w-[220px]"
                                                     title={log.resource_id || ''}
                                                 >
                                                     {affectedObjectLabel(log)}
                                                 </p>
                                             </td>
-                                            <td className="py-2 px-3 align-top log-text-col text-xs font-mono text-gray-600 dark:text-gray-400 max-w-[200px] break-all">
+                                            <td className="py-2 px-3 align-top log-text-col text-xs font-mono text-slate-600 dark:text-slate-400 max-w-[200px] break-all">
                                                 {fmtCellValue(log.old_value)}
                                             </td>
-                                            <td className="py-2 px-3 align-top log-text-col text-xs font-mono text-gray-600 dark:text-gray-400 max-w-[200px] break-all">
+                                            <td className="py-2 px-3 align-top log-text-col text-xs font-mono text-slate-600 dark:text-slate-400 max-w-[200px] break-all">
                                                 {fmtCellValue(log.new_value)}
                                             </td>
-                                            <td className="py-2 px-3 align-top text-xs text-gray-600 dark:text-gray-400 max-w-[200px] break-words">
+                                            <td className="py-2 px-3 align-top text-xs text-slate-600 dark:text-slate-400 max-w-[200px] break-words">
                                                 {log.details || '—'}
                                             </td>
-                                            <td className="py-2 px-3 align-top font-mono text-[11px] text-gray-500 dark:text-gray-400 max-w-[140px] truncate" title={log.id}>
+                                            <td className="py-2 px-3 align-top font-mono text-[11px] text-slate-500 dark:text-slate-400 max-w-[140px] truncate" title={log.id}>
                                                 {log.id}
                                             </td>
-                                            <td className="py-2 px-3 align-top whitespace-nowrap text-gray-700 dark:text-gray-300 text-xs">
+                                            <td className="py-2 px-3 align-top whitespace-nowrap text-slate-700 dark:text-slate-300 text-xs">
                                                 {formatLogDate(log.timestamp)}
                                             </td>
                                             <td className="py-2 px-3 align-top text-right">
                                                 <button
                                                     type="button"
                                                     onClick={() => setSelectedLog(log)}
-                                                    className="p-1.5 text-gray-400 hover:text-cyan-500 rounded"
+                                                    className="p-1.5 text-slate-400 hover:text-cyan-500 rounded"
                                                     title="Details"
                                                 >
                                                     <Eye className="w-4 h-4" />
@@ -697,16 +697,16 @@ export default function AuditLogs() {
 
                 {/* Pagination — Platform style */}
                 {!isLoading && logs.length > 0 && (
-                    <div className="flex flex-wrap items-center justify-between gap-3 px-3 py-2 border-t border-gray-200 dark:border-gray-700 bg-gray-50/80 dark:bg-slate-900/60 text-[12px] text-gray-500">
+                    <div className="flex flex-wrap items-center justify-between gap-3 px-3 py-2 border-t border-slate-200 dark:border-slate-700 bg-slate-50/80 dark:bg-slate-900/60 text-[12px] text-slate-500">
                         <div className="flex items-center gap-2">
-                            <span className="text-gray-500">Results per page:</span>
+                            <span className="text-slate-500">Results per page:</span>
                             <select
                                 value={pageSize}
                                 onChange={(e) => {
                                     setPageSize(Number(e.target.value) as (typeof PAGE_SIZES)[number]);
                                     setPage(1);
                                 }}
-                                className="rounded border border-gray-200 dark:border-gray-600 bg-white dark:bg-slate-800 px-2 py-1 text-xs"
+                                className="rounded border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 px-2 py-1 text-xs"
                             >
                                 {PAGE_SIZES.map((n) => (
                                     <option key={n} value={n}>
@@ -715,7 +715,7 @@ export default function AuditLogs() {
                                 ))}
                             </select>
                         </div>
-                        <span className="text-gray-500">
+                        <span className="text-slate-500">
                             Displaying {displayRange} of {total} results
                         </span>
                         <div className="flex items-center gap-2">
@@ -723,7 +723,7 @@ export default function AuditLogs() {
                                 type="button"
                                 disabled={page <= 1}
                                 onClick={() => setPage((p) => Math.max(1, p - 1))}
-                                className="px-2 py-1 rounded border border-gray-200 dark:border-gray-600 disabled:opacity-40 text-xs"
+                                className="px-2 py-1 rounded border border-slate-200 dark:border-slate-600 disabled:opacity-40 text-xs"
                             >
                                 Previous
                             </button>
@@ -734,7 +734,7 @@ export default function AuditLogs() {
                                 type="button"
                                 disabled={offset + logs.length >= total}
                                 onClick={() => setPage((p) => p + 1)}
-                                className="px-2 py-1 rounded border border-gray-200 dark:border-gray-600 disabled:opacity-40 text-xs"
+                                className="px-2 py-1 rounded border border-slate-200 dark:border-slate-600 disabled:opacity-40 text-xs"
                             >
                                 Next
                             </button>

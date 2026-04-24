@@ -380,10 +380,10 @@ export default function EndpointDetail() {
 
                 <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
                     <div>
-                        <h1 className="text-2xl font-bold text-slate-900 dark:text-white flex flex-wrap items-center gap-3">
+                        <h2 className="text-2xl font-bold text-slate-900 dark:text-white flex flex-wrap items-center gap-3">
                             <Server className="w-7 h-7 text-cyan-500 shrink-0" />
                             <span className="break-all">{agent.hostname}</span>
-                        </h1>
+                        </h2>
                         <p className="text-sm text-slate-500 mt-1 font-mono break-all">{agent.id}</p>
                     </div>
                     <div className="flex flex-wrap gap-2">
@@ -871,7 +871,7 @@ function ForensicsTab({ agentId }: { agentId: string }) {
     const warnings = selected?.summary?.warnings as any[] | undefined;
 
     return (
-        <div className="space-y-4">
+        <div className="space-y-4 animate-slide-up-fade">
             <div>
                 <h2 className="text-lg font-bold text-slate-900 dark:text-white">Forensic Logs</h2>
                 <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
@@ -1805,7 +1805,7 @@ function ResponseTab({
             </div>
 
             <Modal isOpen={upgradeOpen} onClose={() => setUpgradeOpen(false)} title="Upgrade agent (in-place)">
-                <div className="space-y-4">
+                <div className="space-y-4 animate-slide-up-fade">
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                         <div>
                             <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Server IP</label>
@@ -1923,7 +1923,7 @@ function QuarantineTab({
     online: boolean;
 }) {
     return (
-        <div className="space-y-4">
+        <div className="space-y-4 animate-slide-up-fade">
             <div className="flex items-center gap-2 text-slate-600 dark:text-slate-400 text-sm">
                 <HardDrive className="w-4 h-4" />
                 Files recorded in server inventory (telemetry + manual C2 quarantine).

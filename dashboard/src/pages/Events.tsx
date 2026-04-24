@@ -45,8 +45,8 @@ const EventRow = memo(function EventRow({
     );
 });
 
-function isoDaysAgo(days: number) {
-    return new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+function isoHoursAgo(hours: number) {
+    return new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
 }
 
 function Pagination({
@@ -94,7 +94,8 @@ export default function Events() {
 
     const [agentId, setAgentId] = useState(() => sp.get('agent_id') || '');
     const [eventType, setEventType] = useState(() => sp.get('event_type') || '');
-    const [from, setFrom] = useState(() => sp.get('from') || isoDaysAgo(7));
+    // Default to last hour (security UIs should be time-bounded by default).
+    const [from, setFrom] = useState(() => sp.get('from') || isoHoursAgo(1));
     const [to, setTo] = useState(() => sp.get('to') || new Date().toISOString());
     const [page, setPage] = useState(() => Math.max(1, parseInt(sp.get('page') || '1', 10) || 1));
     const [detailId, setDetailId] = useState<string | null>(null);
@@ -164,7 +165,7 @@ export default function Events() {
                         <Activity className="w-6 h-6" />
                     </div>
                     <div className="flex-1">
-                        <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Telemetry Search</h1>
+                        <h2 className="text-2xl font-bold text-slate-900 dark:text-white">Telemetry Search</h2>
                         <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
                             Search stored telemetry via the event search panel. Click a row for{' '}
                             its raw payload.
@@ -208,7 +209,7 @@ export default function Events() {
                                 onClick={() => {
                                     setAgentId('');
                                     setEventType('');
-                                    setFrom(isoDaysAgo(7));
+                                    setFrom(isoHoursAgo(1));
                                     setTo(new Date().toISOString());
                                     setPage(1);
                                 }}

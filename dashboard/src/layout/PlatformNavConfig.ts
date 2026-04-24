@@ -56,9 +56,10 @@ export const SOC_CONTEXT_TABS: ContextTab[] = [
     { to: '/soc/correlation', label: 'Correlation' },
 ];
 
+/** Managed detection & response (MDR): service-level posture + incident queue — distinct from Security modules. */
 export const MANAGED_SECURITY_TABS: ContextTab[] = [
-    { to: '/managed-security/overview', label: 'Managed Overview' },
-    { to: '/managed-security/incidents', label: 'Incidents (Alerts)' },
+    { to: '/managed-security/overview', label: 'Operations overview' },
+    { to: '/managed-security/incidents', label: 'Incident queue' },
 ];
 
 export const ITSM_TABS: ContextTab[] = [
@@ -79,7 +80,7 @@ export const MANAGEMENT_TABS: ContextTab[] = [
     { to: '/management/devices', label: 'Devices (Fleet)' },
     { to: '/management/network', label: 'Fleet Connectivity' },
     { to: '/management/app-control', label: 'Application Control' },
-    { to: '/management/account', label: 'Account (Out of scope)' },
+    { to: '/management/account', label: 'Account' },
     { to: '/management/agent-profiles', label: 'Agents Profiles' },
     { to: '/management/agent-deploy', label: 'Agent Deployment' },
     { to: '/management/context-policies', label: 'Context Policies' },

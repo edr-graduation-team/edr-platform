@@ -342,7 +342,7 @@ function NetworkPanel({ snapshot }: { snapshot: Record<string, unknown> | null }
     const dns   = (snapshot.dns_cache as DnsEntry[]) ?? [];
 
     return (
-        <div className="space-y-4">
+        <div className="space-y-4 animate-slide-up-fade">
             <div>
                 <p className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide mb-2">
                     TCP Connections ({conns.length})

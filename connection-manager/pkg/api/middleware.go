@@ -43,6 +43,8 @@ type Handlers struct {
 	grpcAddress         string                               // C2 gRPC address (host:port) injected into isolate params
 	fallbackStore       *handlers.EventFallbackStore         // DB fallback store reliability stats
 	incidentRepo        repository.IncidentRepository        // post-isolation playbook + triage tracking
+	vulnRepo            repository.VulnerabilityRepository     // CVE / software vulnerability findings per agent
+	siemRepo            repository.SiemConnectorRepository     // SIEM / webhook export destinations
 }
 
 // NewHandlers creates a new handlers instance.
@@ -142,6 +144,16 @@ func (h *Handlers) SetFallbackStore(store *handlers.EventFallbackStore) {
 // SetIncidentRepo sets the IncidentRepository for post-isolation tracking.
 func (h *Handlers) SetIncidentRepo(repo repository.IncidentRepository) {
 	h.incidentRepo = repo
+}
+
+// SetVulnRepo sets the VulnerabilityRepository for SOC vulnerability findings.
+func (h *Handlers) SetVulnRepo(repo repository.VulnerabilityRepository) {
+	h.vulnRepo = repo
+}
+
+// SetSiemRepo sets the SiemConnectorRepository for SIEM export configuration.
+func (h *Handlers) SetSiemRepo(repo repository.SiemConnectorRepository) {
+	h.siemRepo = repo
 }
 
 // UserClaims represents authenticated user info.

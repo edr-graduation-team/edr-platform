@@ -353,6 +353,13 @@ export interface User {
     updated_at?: string;
 }
 
+/** `GET /api/v1/users` list envelope. */
+export interface UsersListResponse {
+    data: User[];
+    pagination: { total: number; limit: number; offset: number; has_more?: boolean };
+    meta?: { request_id?: string; timestamp?: string };
+}
+
 export interface Permission {
     id: string;
     resource: string;
@@ -366,6 +373,13 @@ export interface Role {
     description: string;
     is_built_in: boolean;
     permissions: Permission[];
+}
+
+/** Combined load for the RBAC matrix (`GET /roles` + `GET /permissions`). */
+export interface RolesPermissionsMatrixPayload {
+    roles: Role[];
+    permissions: Permission[];
+    meta?: { request_id?: string; timestamp?: string };
 }
 
 // ============================================================================
@@ -398,7 +412,10 @@ export const alertsApi = {
         sort?: string;
         order?: 'asc' | 'desc';
     }) => {
-        const response = await sigmaApi.get<{ alerts: Alert[]; total: number }>('/api/v1/sigma/alerts', { params });
+        const response = await sigmaApi.get<{ alerts: Alert[]; total: number; limit?: number; offset?: number }>(
+            '/api/v1/sigma/alerts',
+            { params }
+        );
         return response.data;
     },
     get: async (id: string) => {
@@ -729,6 +746,104 @@ export const contextPoliciesApi = {
     },
 };
 
+/** CVE / package vulnerability row (connection-manager `vulnerability_findings`). */
+export interface VulnerabilityFinding {
+    id: string;
+    agent_id: string;
+    hostname: string;
+    cve: string;
+    title: string;
+    description: string;
+    severity: 'critical' | 'high' | 'medium' | 'low' | 'informational' | string;
+    cvss?: number;
+    status: 'open' | 'acknowledged' | 'resolved' | 'risk_accepted' | string;
+    source: string;
+    package_name: string;
+    fixed_version: string;
+    detected_at: string;
+    published_at?: string;
+    due_at?: string;
+    created_at: string;
+    updated_at: string;
+}
+
+export type VulnerabilityListResponse = {
+    data: VulnerabilityFinding[];
+    pagination: { total: number; limit: number; offset: number; has_more: boolean };
+    meta?: { request_id?: string; timestamp?: string };
+};
+
+/** SIEM / analytics export destination (connection-manager `siem_connectors`). */
+export interface SiemConnector {
+    id: string;
+    name: string;
+    connector_type: string;
+    endpoint_url: string;
+    enabled: boolean;
+    status: string;
+    last_test_at?: string | null;
+    last_error?: string | null;
+    notes: string;
+    metadata?: Record<string, unknown>;
+    created_at: string;
+    updated_at: string;
+}
+
+export const siemConnectorsApi = {
+    list: async () => {
+        const response = await connectionApi.get<{ data: SiemConnector[] }>('/api/v1/siem/connectors');
+        return response.data.data ?? [];
+    },
+    create: async (body: { name: string; connector_type: string; endpoint_url: string; enabled: boolean; notes?: string }) => {
+        const response = await connectionApi.post<{ data: SiemConnector }>('/api/v1/siem/connectors', body);
+        return response.data.data;
+    },
+    patch: async (
+        id: string,
+        body: Partial<{
+            name: string;
+            connector_type: string;
+            endpoint_url: string;
+            enabled: boolean;
+            notes: string;
+            status: string;
+        }>
+    ) => {
+        const response = await connectionApi.patch<{ data: SiemConnector }>(
+            `/api/v1/siem/connectors/${encodeURIComponent(id)}`,
+            body
+        );
+        return response.data.data;
+    },
+    remove: async (id: string) => {
+        await connectionApi.delete(`/api/v1/siem/connectors/${encodeURIComponent(id)}`);
+    },
+};
+
+export const vulnerabilityApi = {
+    listFindings: async (params?: {
+        limit?: number;
+        offset?: number;
+        status?: string;
+        severity?: string;
+        agent_id?: string;
+        search?: string;
+    }) => {
+        const response = await connectionApi.get<VulnerabilityListResponse>('/api/v1/vuln/findings', { params });
+        return response.data;
+    },
+    getFinding: async (id: string) => {
+        const response = await connectionApi.get<{ data: VulnerabilityFinding }>(`/api/v1/vuln/findings/${encodeURIComponent(id)}`);
+        return response.data.data;
+    },
+    patchFindingStatus: async (id: string, status: VulnerabilityFinding['status']) => {
+        const response = await connectionApi.patch<{ data: VulnerabilityFinding }>(`/api/v1/vuln/findings/${encodeURIComponent(id)}`, {
+            status,
+        });
+        return response.data.data;
+    },
+};
+
 export const reliabilityApi = {
     health: async (): Promise<ReliabilityHealthResponse> => {
         const parsePayload = (data: unknown): ReliabilityHealthResponse => {
@@ -1039,6 +1154,11 @@ export const authApi = {
         localStorage.removeItem('auth_token');
         localStorage.removeItem('user');
     },
+    /** Live profile from connection-manager (`GET /api/v1/auth/me`). */
+    fetchMe: async () => {
+        const response = await connectionApi.get<{ data: User }>('/api/v1/auth/me');
+        return response.data.data;
+    },
     getCurrentUser: (): User | null => {
         const user = localStorage.getItem('user');
         return user ? JSON.parse(user) : null;
@@ -1097,6 +1217,8 @@ export const authApi = {
 
     // Roles: view roles and permissions
     canViewRoles: () => authApi.hasRole(['admin', 'security']),
+    /** Assign permissions to roles (`roles:write`) — typically admin only in seed. */
+    canManageRoles: () => authApi.hasRole(['admin']),
 
     // Audit: view audit logs
     canViewAuditLogs: () => authApi.hasRole(['admin', 'security']),
@@ -1182,10 +1304,7 @@ export const usersApi = {
         status?: string;
         search?: string;
     }) => {
-        const response = await connectionApi.get<{
-            data: User[];
-            pagination: { total: number; limit: number; offset: number };
-        }>('/api/v1/users', { params });
+        const response = await connectionApi.get<UsersListResponse>('/api/v1/users', { params });
         return response.data;
     },
     get: async (id: string) => {
@@ -1230,6 +1349,18 @@ export const rolesApi = {
     list: async () => {
         const response = await connectionApi.get<{ data: Role[] }>('/api/v1/roles');
         return response.data.data;
+    },
+    /** Loads roles and permissions together; includes `meta.request_id` from the roles response when present. */
+    loadMatrix: async (): Promise<RolesPermissionsMatrixPayload> => {
+        const [rolesRes, permsRes] = await Promise.all([
+            connectionApi.get<{ data: Role[]; meta?: { request_id?: string; timestamp?: string } }>('/api/v1/roles'),
+            connectionApi.get<{ data: Permission[] }>('/api/v1/permissions'),
+        ]);
+        return {
+            roles: rolesRes.data.data,
+            permissions: permsRes.data.data,
+            meta: rolesRes.data.meta,
+        };
     },
     create: async (data: { name: string; description: string; permission_ids: string[] }) => {
         const response = await connectionApi.post<{ data: Role }>('/api/v1/roles', data);

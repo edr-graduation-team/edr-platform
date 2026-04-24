@@ -347,7 +347,7 @@ export default function Threats() {
     if (isLoading) {
         return (
             <div className="space-y-6">
-                <div className="h-9 w-64 bg-gray-200 dark:bg-gray-700 rounded animate-pulse" />
+                <div className="h-9 w-64 bg-slate-200 dark:bg-slate-700 rounded animate-pulse" />
                 <SkeletonKPICards count={4} />
                 <SkeletonChart height={300} />
             </div>
@@ -363,10 +363,10 @@ export default function Threats() {
             <div className="relative  w-full space-y-6">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                     <div>
-                        <h1 className="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-gray-900 to-gray-600 dark:from-white dark:to-gray-300">
+                        <h2 className="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-slate-900 to-slate-600 dark:from-white dark:to-slate-300">
                             ATT&CK Analytics
-                        </h1>
-                        <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                        </h2>
+                        <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
                             Analytics view derived from alert telemetry (MITRE ATT&amp;CK tactics/techniques). For triage workflows, use <Link className="underline" to="/alerts">Alerts</Link>.
                         </p>
                     </div>

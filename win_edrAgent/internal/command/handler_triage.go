@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unsafe"
 
@@ -25,40 +26,169 @@ import (
 // ─────────────────────────────────────────────────────────────────────────────
 
 func (h *Handler) postIsolationTriage(ctx context.Context, params map[string]string) (string, error) {
-	type triageBundle struct {
-		Version       int            `json:"version"`
-		CollectedAt   string         `json:"collected_at"`
-		ProcessTree   interface{}    `json:"process_tree,omitempty"`
-		Persistence   interface{}    `json:"persistence,omitempty"`
-		NetworkLast   interface{}    `json:"network_last_seen,omitempty"`
-		Integrity     interface{}    `json:"integrity,omitempty"`
+	type triageErr struct {
+		Step  string `json:"step"`
+		Error string `json:"error"`
 	}
 
-	bundle := triageBundle{
-		Version:     1,
-		CollectedAt: time.Now().UTC().Format(time.RFC3339),
+	// NOTE: The Dashboard's IncidentTab falls back to using the payload of
+	// `post_isolation_triage` as a substitute for individual snapshots.
+	// Therefore this bundle must expose the SAME top-level keys as the
+	// dedicated commands (processes, persistence_items, tcp_conns, etc.).
+	bundle := map[string]any{
+		"version":      1,
+		"collected_at": time.Now().UTC().Format(time.RFC3339),
+		"errors":       []triageErr{},
 	}
 
-	// Run sub-commands and collect results (ignore individual errors — partial data is OK)
-	if ptOut, err := h.processTreeSnapshot(ctx, params); err == nil {
-		var v interface{}
-		_ = json.Unmarshal([]byte(ptOut), &v)
-		bundle.ProcessTree = v
+	type subResult struct {
+		step string
+		raw  string
+		err  error
 	}
-	if persOut, err := h.persistenceScan(ctx, params); err == nil {
-		var v interface{}
-		_ = json.Unmarshal([]byte(persOut), &v)
-		bundle.Persistence = v
+
+	runSub := func(step string, timeout time.Duration, fn func(context.Context) (string, error), ch chan<- subResult) {
+		subCtx := ctx
+		var cancel context.CancelFunc
+		if timeout > 0 {
+			subCtx, cancel = context.WithTimeout(ctx, timeout)
+		}
+		if cancel != nil {
+			defer cancel()
+		}
+		out, err := fn(subCtx)
+		ch <- subResult{step: step, raw: out, err: err}
 	}
-	if netOut, err := h.networkLastSeen(ctx, params); err == nil {
-		var v interface{}
-		_ = json.Unmarshal([]byte(netOut), &v)
-		bundle.NetworkLast = v
+
+	// Run lightweight triage subtasks in parallel. Each has its own timeout so
+	// a slow component can't block the entire bundle.
+	resCh := make(chan subResult, 6)
+	var wg sync.WaitGroup
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		runSub("process_tree_snapshot", 20*time.Second, func(c context.Context) (string, error) {
+			return h.processTreeSnapshot(c, params)
+		}, resCh)
+	}()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		runSub("persistence_scan", 25*time.Second, func(c context.Context) (string, error) {
+			return h.persistenceScan(c, params)
+		}, resCh)
+	}()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		runSub("lsass_access_audit", 20*time.Second, func(c context.Context) (string, error) {
+			return h.lsassAccessAudit(c, params)
+		}, resCh)
+	}()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		runSub("network_last_seen", 15*time.Second, func(c context.Context) (string, error) {
+			return h.networkLastSeen(c, params)
+		}, resCh)
+	}()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		runSub("filesystem_timeline", 30*time.Second, func(c context.Context) (string, error) {
+			return h.filesystemTimeline(c, params)
+		}, resCh)
+	}()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		runSub("agent_integrity_check", 10*time.Second, func(c context.Context) (string, error) {
+			return h.agentIntegrityCheck(c, params)
+		}, resCh)
+	}()
+
+	wg.Wait()
+	close(resCh)
+
+	// Merge results into the bundle.
+	appendErr := func(step string, err error) {
+		if err == nil {
+			return
+		}
+		ee := bundle["errors"].([]triageErr)
+		ee = append(ee, triageErr{Step: step, Error: err.Error()})
+		bundle["errors"] = ee
 	}
-	if intOut, err := h.agentIntegrityCheck(ctx, params); err == nil {
-		var v interface{}
-		_ = json.Unmarshal([]byte(intOut), &v)
-		bundle.Integrity = v
+
+	for r := range resCh {
+		if r.err != nil {
+			appendErr(r.step, r.err)
+			continue
+		}
+		trimmed := strings.TrimSpace(r.raw)
+		if trimmed == "" || !strings.HasPrefix(trimmed, "{") {
+			appendErr(r.step, fmt.Errorf("unexpected output (not JSON object)"))
+			continue
+		}
+		var payload map[string]any
+		if err := json.Unmarshal([]byte(trimmed), &payload); err != nil {
+			appendErr(r.step, fmt.Errorf("json parse failed: %w", err))
+			continue
+		}
+
+		// Preserve full nested payloads for debugging.
+		bundle[r.step] = payload
+
+		// Normalize: copy the keys the dashboard expects to the top level.
+		switch r.step {
+		case "process_tree_snapshot":
+			if v, ok := payload["processes"]; ok {
+				bundle["processes"] = v
+			}
+			if v, ok := payload["count"]; ok {
+				bundle["process_count"] = v
+			}
+		case "persistence_scan":
+			if v, ok := payload["persistence_items"]; ok {
+				bundle["persistence_items"] = v
+			}
+			if v, ok := payload["count"]; ok {
+				bundle["persistence_count"] = v
+			}
+		case "lsass_access_audit":
+			if v, ok := payload["lsass_accesses"]; ok {
+				bundle["lsass_accesses"] = v
+			}
+			if v, ok := payload["count"]; ok {
+				bundle["lsass_count"] = v
+			}
+		case "network_last_seen":
+			if v, ok := payload["tcp_conns"]; ok {
+				bundle["tcp_conns"] = v
+			}
+			if v, ok := payload["dns_cache"]; ok {
+				bundle["dns_cache"] = v
+			}
+		case "filesystem_timeline":
+			if v, ok := payload["files"]; ok {
+				bundle["files"] = v
+			}
+			if v, ok := payload["count"]; ok {
+				bundle["files_count"] = v
+			}
+		case "agent_integrity_check":
+			for _, k := range []string{"exe_path", "exe_sha256", "signature_valid", "etw_healthy"} {
+				if v, ok := payload[k]; ok {
+					bundle[k] = v
+				}
+			}
+		}
 	}
 
 	out, err := json.Marshal(bundle)
@@ -294,21 +424,15 @@ func (h *Handler) lsassAccessAudit(_ context.Context, params map[string]string) 
 		}
 	}
 
-	// Query Security log for events targeting lsass
-	// Using wevtutil with XPath filter
+	// Query Security log for events targeting LSASS within a strict time window.
+	// Use timediff(@SystemTime) in milliseconds to avoid locale/date parsing.
+	msWindow := int64(hoursBack) * 3600 * 1000
 	xpath := fmt.Sprintf(
-		`*[System[(EventID=4656 or EventID=4663)] and EventData[Data[@Name='ObjectName'] and (contains(Data[@Name='ObjectName'],'lsass') or contains(Data[@Name='ObjectName'],'LSASS'))]]`,
+		`*[System[(EventID=4656 or EventID=4663) and TimeCreated[timediff(@SystemTime) <= %d]] and EventData[Data[@Name='ObjectName'] and (contains(Data[@Name='ObjectName'],'lsass') or contains(Data[@Name='ObjectName'],'LSASS'))]]`,
+		msWindow,
 	)
-	since := time.Now().Add(-time.Duration(hoursBack) * time.Hour).Format("2006-01-02T15:04:05")
-	timeFilter := fmt.Sprintf("*[System[TimeCreated[@SystemTime>='%s']]]", since)
-	_ = timeFilter // combined with xpath below
 
-	out, err := exec.Command(
-		"wevtutil", "qe", "Security",
-		"/q:"+xpath,
-		"/f:text",
-		"/c:200",
-	).Output()
+	out, err := exec.Command("wevtutil", "qe", "Security", "/q:"+xpath, "/f:text", "/c:200").Output()
 
 	var events []lsassAccessEvent
 	if err == nil {
@@ -549,10 +673,18 @@ func (h *Handler) agentIntegrityCheck(_ context.Context, _ map[string]string) (s
 		signed = checkAuthenticode(exePath)
 	}
 
-	// Check if ETW tracing session is alive (simple heuristic: logman query)
+	// Check if ETW tracing sessions are alive (simple heuristic: logman query)
+	// Sessions created by the agent:
+	//  - Kernel session name defaults to "EDRKernelTrace" in collectors/etw.go
+	//  - Process access session defaults to "EDRProcAccessTrace" in collectors/process_access.go
 	etwHealthy := false
-	if out, err := exec.Command("logman", "query", "edr-etw-trace").Output(); err == nil {
-		etwHealthy = strings.Contains(string(out), "Running")
+	for _, sessionName := range []string{"EDRKernelTrace", "EDRProcAccessTrace"} {
+		if out, err := exec.Command("logman", "query", sessionName).Output(); err == nil {
+			if strings.Contains(strings.ToLower(string(out)), "running") {
+				etwHealthy = true
+				break
+			}
+		}
 	}
 
 	result := map[string]interface{}{

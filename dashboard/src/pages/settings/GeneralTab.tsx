@@ -48,14 +48,14 @@ export default function GeneralTab({ settings, onChange, onSave, saved }: Genera
                         <User className="w-5 h-5 text-primary-600 dark:text-primary-400" />
                     </div>
                     <div>
-                        <h2 className="text-base font-semibold text-gray-900 dark:text-white">User Profile</h2>
-                        <p className="text-xs text-gray-500 dark:text-gray-400">Manage your display name and account details</p>
+                        <h2 className="text-base font-semibold text-slate-900 dark:text-white">User Profile</h2>
+                        <p className="text-xs text-slate-500 dark:text-slate-400">Manage your display name and account details</p>
                     </div>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+                        <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">
                             Display Name
                         </label>
                         <input
@@ -67,7 +67,7 @@ export default function GeneralTab({ settings, onChange, onSave, saved }: Genera
                         />
                     </div>
                     <div>
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+                        <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">
                             Email Address
                         </label>
                         <div className="relative">
@@ -75,9 +75,9 @@ export default function GeneralTab({ settings, onChange, onSave, saved }: Genera
                                 type="email"
                                 value={settings.email}
                                 disabled
-                                className="input bg-gray-100 dark:bg-gray-700/60 cursor-not-allowed text-gray-500 dark:text-gray-400 pr-16"
+                                className="input bg-slate-100 dark:bg-slate-700/60 cursor-not-allowed text-slate-500 dark:text-slate-400 pr-16"
                             />
-                            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-medium text-gray-400 dark:text-gray-500 bg-gray-100 dark:bg-gray-700 px-1.5 py-0.5 rounded">
+                            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-medium text-slate-400 dark:text-slate-500 bg-slate-100 dark:bg-slate-700 px-1.5 py-0.5 rounded">
                                 Read-only
                             </span>
                         </div>
@@ -92,14 +92,14 @@ export default function GeneralTab({ settings, onChange, onSave, saved }: Genera
                         <Globe className="w-5 h-5 text-blue-600 dark:text-blue-400" />
                     </div>
                     <div>
-                        <h2 className="text-base font-semibold text-gray-900 dark:text-white">Timezone & Regional</h2>
-                        <p className="text-xs text-gray-500 dark:text-gray-400">Configure how dates and times are displayed</p>
+                        <h2 className="text-base font-semibold text-slate-900 dark:text-white">Timezone & Regional</h2>
+                        <p className="text-xs text-slate-500 dark:text-slate-400">Configure how dates and times are displayed</p>
                     </div>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+                        <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">
                             Timezone
                         </label>
                         <select
@@ -115,7 +115,7 @@ export default function GeneralTab({ settings, onChange, onSave, saved }: Genera
                         </select>
                     </div>
                     <div>
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+                        <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">
                             Date Format
                         </label>
                         <select
@@ -139,14 +139,14 @@ export default function GeneralTab({ settings, onChange, onSave, saved }: Genera
                         <Moon className="w-5 h-5 text-purple-600 dark:text-purple-400" />
                     </div>
                     <div>
-                        <h2 className="text-base font-semibold text-gray-900 dark:text-white">Appearance</h2>
-                        <p className="text-xs text-gray-500 dark:text-gray-400">Customize the visual theme of the platform</p>
+                        <h2 className="text-base font-semibold text-slate-900 dark:text-white">Appearance</h2>
+                        <p className="text-xs text-slate-500 dark:text-slate-400">Customize the visual theme of the platform</p>
                     </div>
                 </div>
 
-                <div className="flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-700/60 rounded-xl border border-gray-100 dark:border-gray-700">
+                <div className="flex items-center justify-between p-4 bg-slate-50 dark:bg-slate-700/60 rounded-xl border border-slate-100 dark:border-slate-700">
                     <div className="flex items-center gap-3">
-                        <div className="w-9 h-9 rounded-lg bg-white dark:bg-gray-800 shadow-sm flex items-center justify-center">
+                        <div className="w-9 h-9 rounded-lg bg-white dark:bg-slate-800 shadow-sm flex items-center justify-center">
                             {settings.darkMode ? (
                                 <Moon className="w-5 h-5 text-indigo-500" />
                             ) : (
@@ -154,8 +154,8 @@ export default function GeneralTab({ settings, onChange, onSave, saved }: Genera
                             )}
                         </div>
                         <div>
-                            <p className="text-sm font-medium text-gray-900 dark:text-white">Dark Mode</p>
-                            <p className="text-xs text-gray-500 dark:text-gray-400">
+                            <p className="text-sm font-medium text-slate-900 dark:text-white">Dark Mode</p>
+                            <p className="text-xs text-slate-500 dark:text-slate-400">
                                 {settings.darkMode ? 'Dark theme is active' : 'Light theme is active'}
                             </p>
                         </div>
@@ -169,8 +169,8 @@ export default function GeneralTab({ settings, onChange, onSave, saved }: Genera
                         aria-checked={settings.darkMode}
                         className={`relative inline-flex h-7 w-14 shrink-0 cursor-pointer rounded-full border-2 border-transparent
                             transition-colors duration-200 ease-in-out
-                            focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-gray-800
-                            ${settings.darkMode ? 'bg-primary-600' : 'bg-gray-300 dark:bg-gray-600'}`}
+                            focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-slate-800
+                            ${settings.darkMode ? 'bg-primary-600' : 'bg-slate-300 dark:bg-slate-600'}`}
                     >
                         <span className="sr-only">Toggle dark mode</span>
                         <span

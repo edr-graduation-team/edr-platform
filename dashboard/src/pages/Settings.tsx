@@ -32,7 +32,7 @@ export default function Settings() {
     }, [tab, navigate]);
 
     return (
-        <div className="h-full p-6">
+        <div className="h-full min-h-0 flex flex-col">
             <SettingsLayout activeTab={activeTab} userRole={userRole}>
                 <Outlet />
             </SettingsLayout>

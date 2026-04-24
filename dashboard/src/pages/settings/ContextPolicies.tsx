@@ -169,18 +169,18 @@ export default function ContextPolicies() {
     return (
         <div className="space-y-6">
             <div>
-                <h2 className="text-xl font-bold text-gray-900 dark:text-white">Context Policies</h2>
-                <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                <h2 className="text-xl font-bold text-slate-900 dark:text-white">Context Policies</h2>
+                <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
                     Hybrid context-aware controls. System infers context automatically, and these policies tune risk weighting by global, agent, and user scope.
                 </p>
             </div>
 
-            <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4 space-y-3">
+            <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-4 space-y-3">
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
                     <label className="space-y-1">
-                        <div className="text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide">Policy Name</div>
+                        <div className="text-xs font-semibold text-slate-600 dark:text-slate-300 uppercase tracking-wide">Policy Name</div>
                         <input
-                            className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900"
+                            className="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
                             placeholder="Example: Finance Laptops - High Sensitivity"
                             value={draft.name}
                             onChange={(e) => setDraft({ ...draft, name: e.target.value })}
@@ -188,9 +188,9 @@ export default function ContextPolicies() {
                     </label>
 
                     <label className="space-y-1">
-                        <div className="text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide">Scope Type</div>
+                        <div className="text-xs font-semibold text-slate-600 dark:text-slate-300 uppercase tracking-wide">Scope Type</div>
                         <select
-                            className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900"
+                            className="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
                             value={draft.scope_type}
                             onChange={(e) => {
                                 const nextScope = e.target.value as EditablePolicy['scope_type'];
@@ -208,10 +208,10 @@ export default function ContextPolicies() {
                     </label>
 
                     <label className="space-y-1">
-                        <div className="text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide">Scope Value</div>
+                        <div className="text-xs font-semibold text-slate-600 dark:text-slate-300 uppercase tracking-wide">Scope Value</div>
                         {draft.scope_type === 'global' ? (
                             <input
-                                className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900"
+                                className="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
                                 placeholder="Example: *"
                                 value="*"
                                 disabled
@@ -219,7 +219,7 @@ export default function ContextPolicies() {
                             />
                         ) : (
                             <select
-                                className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900"
+                                className="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
                                 value={draft.scope_value}
                                 disabled={draft.scope_type === 'agent' ? isAgentsLoading : isEndpointUsersLoading}
                                 onChange={(e) => setDraft({ ...draft, scope_value: e.target.value })}
@@ -235,11 +235,11 @@ export default function ContextPolicies() {
                             </select>
                         )}
                         {draft.scope_type === 'agent' && (
-                            <div className="mt-2 flex items-center justify-between text-xs text-gray-500 dark:text-gray-400">
+                            <div className="mt-2 flex items-center justify-between text-xs text-slate-500 dark:text-slate-400">
                                 <span>{agentOptions.length === 0 && !isAgentsLoading ? 'No agents found yet.' : `${agentOptions.length} agents available`}</span>
                                 <button
                                     type="button"
-                                    className="underline hover:text-gray-700 dark:hover:text-gray-200"
+                                    className="underline hover:text-slate-700 dark:hover:text-slate-200"
                                     onClick={() => refetchAgents()}
                                 >
                                     Refresh agents
@@ -247,11 +247,11 @@ export default function ContextPolicies() {
                             </div>
                         )}
                         {draft.scope_type === 'user' && (
-                            <div className="mt-2 flex items-center justify-between text-xs text-gray-500 dark:text-gray-400">
+                            <div className="mt-2 flex items-center justify-between text-xs text-slate-500 dark:text-slate-400">
                                 <span>{userOptions.length === 0 && !isEndpointUsersLoading ? 'No endpoint users found yet.' : `${userOptions.length} endpoint users available`}</span>
                                 <button
                                     type="button"
-                                    className="underline hover:text-gray-700 dark:hover:text-gray-200"
+                                    className="underline hover:text-slate-700 dark:hover:text-slate-200"
                                     onClick={() => refetchEndpointUsers()}
                                 >
                                     Refresh endpoint users
@@ -261,9 +261,9 @@ export default function ContextPolicies() {
                     </label>
 
                     <label className="space-y-1">
-                        <div className="text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide">Policy Status</div>
-                        <div className="h-[42px] px-3 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 flex items-center">
-                            <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-200">
+                        <div className="text-xs font-semibold text-slate-600 dark:text-slate-300 uppercase tracking-wide">Policy Status</div>
+                        <div className="h-[42px] px-3 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 flex items-center">
+                            <label className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-200">
                                 <input
                                     type="checkbox"
                                     checked={draft.enabled}
@@ -277,12 +277,12 @@ export default function ContextPolicies() {
 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                     <label className="space-y-1">
-                        <div className="text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide">User Role Weight</div>
+                        <div className="text-xs font-semibold text-slate-600 dark:text-slate-300 uppercase tracking-wide">User Role Weight</div>
                         <input
                             type="number"
                             step="0.1"
                             min="0.1"
-                            className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900"
+                            className="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
                             placeholder="Example: 1.2 (1.0 neutral)"
                             value={draft.user_role_weight}
                             onChange={(e) => setDraft({ ...draft, user_role_weight: Number(e.target.value) })}
@@ -290,12 +290,12 @@ export default function ContextPolicies() {
                     </label>
 
                     <label className="space-y-1">
-                        <div className="text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide">Device Criticality Weight</div>
+                        <div className="text-xs font-semibold text-slate-600 dark:text-slate-300 uppercase tracking-wide">Device Criticality Weight</div>
                         <input
                             type="number"
                             step="0.1"
                             min="0.1"
-                            className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900"
+                            className="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
                             placeholder="Example: 1.4 for critical servers"
                             value={draft.device_criticality_weight}
                             onChange={(e) => setDraft({ ...draft, device_criticality_weight: Number(e.target.value) })}
@@ -303,12 +303,12 @@ export default function ContextPolicies() {
                     </label>
 
                     <label className="space-y-1">
-                        <div className="text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide">Network Anomaly Factor</div>
+                        <div className="text-xs font-semibold text-slate-600 dark:text-slate-300 uppercase tracking-wide">Network Anomaly Factor</div>
                         <input
                             type="number"
                             step="0.1"
                             min="0.1"
-                            className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900"
+                            className="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
                             placeholder="Example: 1.1 outside trusted network"
                             value={draft.network_anomaly_factor}
                             onChange={(e) => setDraft({ ...draft, network_anomaly_factor: Number(e.target.value) })}
@@ -317,9 +317,9 @@ export default function ContextPolicies() {
                 </div>
 
                 <label className="space-y-1 block">
-                    <div className="text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide">Trusted Networks (CIDR)</div>
+                    <div className="text-xs font-semibold text-slate-600 dark:text-slate-300 uppercase tracking-wide">Trusted Networks (CIDR)</div>
                     <input
-                        className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900"
+                        className="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
                         placeholder="Example: 10.0.0.0/8, 192.168.1.0/24, 172.16.0.0/12"
                         value={trustedNetworksText}
                         onChange={(e) => {
@@ -333,9 +333,9 @@ export default function ContextPolicies() {
                 </label>
 
                 <label className="space-y-1 block">
-                    <div className="text-xs font-semibold text-gray-600 dark:text-gray-300 uppercase tracking-wide">Notes</div>
+                    <div className="text-xs font-semibold text-slate-600 dark:text-slate-300 uppercase tracking-wide">Notes</div>
                     <input
-                        className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900"
+                        className="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
                         placeholder="Example: Owner=SOC, reason=Tier-0 protection, review=monthly"
                         value={draft.notes || ''}
                         onChange={(e) => setDraft({ ...draft, notes: e.target.value })}
@@ -365,20 +365,20 @@ export default function ContextPolicies() {
                 )}
             </div>
 
-            <div className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4">
+            <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-4">
                 {isLoading ? (
-                    <div className="text-sm text-gray-500">Loading context policies...</div>
+                    <div className="text-sm text-slate-500">Loading context policies...</div>
                 ) : error ? (
                     <div className="text-sm text-red-500">Failed to load context policies.</div>
                 ) : (
                     <div className="space-y-2">
                         {items.map((item) => (
-                            <div key={item.id} className="flex items-center justify-between gap-3 p-3 rounded-lg border border-gray-200 dark:border-gray-700">
+                            <div key={item.id} className="flex items-center justify-between gap-3 p-3 rounded-lg border border-slate-200 dark:border-slate-700">
                                 <div className="min-w-0">
-                                    <div className="text-sm font-semibold text-gray-900 dark:text-white truncate">
-                                        {item.name} <span className="text-xs font-normal text-gray-500">({item.scope_type}:{item.scope_value})</span>
+                                    <div className="text-sm font-semibold text-slate-900 dark:text-white truncate">
+                                        {item.name} <span className="text-xs font-normal text-slate-500">({item.scope_type}:{item.scope_value})</span>
                                     </div>
-                                    <div className="text-xs text-gray-500 mt-1">
+                                    <div className="text-xs text-slate-500 mt-1">
                                         W(user/dev/net): {item.user_role_weight.toFixed(2)} / {item.device_criticality_weight.toFixed(2)} / {item.network_anomaly_factor.toFixed(2)}
                                     </div>
                                 </div>
@@ -388,7 +388,7 @@ export default function ContextPolicies() {
                                             id: item.id,
                                             payload: { ...item, enabled: !item.enabled },
                                         })}
-                                        className="px-3 py-1.5 text-xs rounded-md border border-gray-300 dark:border-gray-700"
+                                        className="px-3 py-1.5 text-xs rounded-md border border-slate-300 dark:border-slate-700"
                                     >
                                         <Save size={14} className="inline mr-1" /> {item.enabled ? 'Disable' : 'Enable'}
                                     </button>
@@ -404,7 +404,7 @@ export default function ContextPolicies() {
                             </div>
                         ))}
                         {items.length === 0 && (
-                            <div className="text-sm text-gray-500">No context policies found.</div>
+                            <div className="text-sm text-slate-500">No context policies found.</div>
                         )}
                     </div>
                 )}

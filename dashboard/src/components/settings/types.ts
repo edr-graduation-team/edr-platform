@@ -9,7 +9,12 @@ export interface SettingsNavItem {
 }
 
 export const SETTINGS_NAV: SettingsNavItem[] = [
-    { id: 'system', label: 'Platform Settings', icon: 'Settings', description: 'Platform configuration (dashboard-level settings)' },
+    {
+        id: 'system',
+        label: 'Platform preferences',
+        icon: 'Settings',
+        description: 'Dashboard-only appearance and local preferences (not server cluster config)',
+    },
 ];
 
 export function filterSettingsNavByRole(userRole?: string): SettingsNavItem[] {

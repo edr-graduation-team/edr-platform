@@ -263,7 +263,14 @@ function AppRoutes() {
               <Route path="platform-settings" element={<Navigate to="/settings/system" replace />} />
               <Route path="profile" element={<ProtectedRoute><SettingsUserProfile /></ProtectedRoute>} />
               <Route path="access/users" element={<ProtectedRoute><SettingsAccessManagement /></ProtectedRoute>} />
-              <Route path="access/roles" element={<ProtectedRoute><SettingsRBACMatrix /></ProtectedRoute>} />
+              <Route
+                path="access/roles"
+                element={
+                  <ProtectedRoute roles={['admin', 'security']}>
+                    <SettingsRBACMatrix />
+                  </ProtectedRoute>
+                }
+              />
               <Route path="security/tokens" element={
                 <Navigate to="/security/tokens" replace />
               } />

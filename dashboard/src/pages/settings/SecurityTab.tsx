@@ -14,9 +14,9 @@ function FeatureCard({ icon: Icon, iconBg, iconColor, title, eta, description, f
     return (
         <div className="card relative overflow-hidden">
             {/* ETA ribbon */}
-            <div className="absolute top-4 right-4 flex items-center gap-1 px-2.5 py-1 bg-gray-100 dark:bg-gray-700 rounded-full">
-                <Clock className="w-3 h-3 text-gray-400" />
-                <span className="text-xs text-gray-500 dark:text-gray-400 font-medium">{eta}</span>
+            <div className="absolute top-4 right-4 flex items-center gap-1 px-2.5 py-1 bg-slate-100 dark:bg-slate-700 rounded-full">
+                <Clock className="w-3 h-3 text-slate-400" />
+                <span className="text-xs text-slate-500 dark:text-slate-400 font-medium">{eta}</span>
             </div>
 
             <div className="flex items-center gap-3 mb-4">
@@ -24,19 +24,19 @@ function FeatureCard({ icon: Icon, iconBg, iconColor, title, eta, description, f
                     <Icon className={`w-5 h-5 ${iconColor}`} />
                 </div>
                 <div>
-                    <h2 className="text-base font-semibold text-gray-900 dark:text-white">{title}</h2>
+                    <h2 className="text-base font-semibold text-slate-900 dark:text-white">{title}</h2>
                     <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400">
                         Coming Soon
                     </span>
                 </div>
             </div>
 
-            <p className="text-sm text-gray-600 dark:text-gray-400 mb-4 leading-relaxed">{description}</p>
+            <p className="text-sm text-slate-600 dark:text-slate-400 mb-4 leading-relaxed">{description}</p>
 
             <div className="space-y-2">
                 {features.map((f) => (
-                    <div key={f} className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
-                        <div className="w-1.5 h-1.5 rounded-full bg-gray-300 dark:bg-gray-600 flex-shrink-0" />
+                    <div key={f} className="flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400">
+                        <div className="w-1.5 h-1.5 rounded-full bg-slate-300 dark:bg-slate-600 flex-shrink-0" />
                         {f}
                     </div>
                 ))}

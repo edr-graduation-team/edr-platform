@@ -306,6 +306,44 @@ func (r *PostgresUserRepository) List(ctx context.Context, filter UserFilter) ([
 	return users, nil
 }
 
+// Count returns how many users match the filter (same predicates as List; Limit/Offset ignored).
+func (r *PostgresUserRepository) Count(ctx context.Context, filter UserFilter) (int64, error) {
+	query := `
+		SELECT COUNT(*)
+		FROM users
+		WHERE 1=1`
+
+	args := []interface{}{}
+	argNum := 1
+
+	if filter.Role != nil {
+		query += fmt.Sprintf(" AND role = $%d", argNum)
+		args = append(args, *filter.Role)
+		argNum++
+	}
+
+	if filter.Status != nil {
+		query += fmt.Sprintf(" AND status = $%d", argNum)
+		args = append(args, *filter.Status)
+		argNum++
+	} else {
+		query += " AND status != 'deleted'"
+	}
+
+	if filter.Search != nil {
+		query += fmt.Sprintf(" AND (username ILIKE $%d OR email ILIKE $%d OR full_name ILIKE $%d)", argNum, argNum, argNum)
+		args = append(args, "%"+*filter.Search+"%")
+		argNum++
+	}
+
+	var n int64
+	err := r.pool.QueryRow(ctx, query, args...).Scan(&n)
+	if err != nil {
+		return 0, fmt.Errorf("failed to count users: %w", err)
+	}
+	return n, nil
+}
+
 // PostgresCSRRepository implements CSRRepository using PostgreSQL.
 type PostgresCSRRepository struct {
 	pool *pgxpool.Pool

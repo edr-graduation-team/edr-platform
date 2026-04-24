@@ -4,6 +4,7 @@
  */
 import { sigmaApi } from '../client';
 import type { AxiosResponse } from 'axios';
+import type { AppControlPoliciesPayload } from './appControlModel';
 
 function unwrap<T>(res: AxiosResponse<{ data?: T } | T>): T {
     const body = res.data as { data?: T };
@@ -126,7 +127,7 @@ export const parityApi = {
         get('/api/v1/management/rmm/jobs', params),
 
     getAppControlPolicies: (params?: Record<string, string>) =>
-        get('/api/v1/management/application-control/policies', params),
+        get<AppControlPoliciesPayload>('/api/v1/management/application-control/policies', params),
 
     getLicenses: () => get('/api/v1/management/licenses'),
 

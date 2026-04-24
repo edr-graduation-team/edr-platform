@@ -258,6 +258,23 @@ func (h *Handler) Execute(ctx context.Context, cmd *Command) *Result {
 
 	h.logger.Infof("Executing command: type=%s id=%s", cmd.Type, cmd.ID)
 
+	// Inject command + agent identity into parameters for downstream persistence.
+	// This enables collect_logs/collect_forensics payloads to include stable IDs
+	// without relying on the server to add extra parameters.
+	if cmd.Parameters == nil {
+		cmd.Parameters = map[string]string{}
+	}
+	if strings.TrimSpace(cmd.Parameters["command_id"]) == "" && strings.TrimSpace(cmd.ID) != "" {
+		cmd.Parameters["command_id"] = strings.TrimSpace(cmd.ID)
+	}
+	if strings.TrimSpace(cmd.Parameters["agent_id"]) == "" {
+		h.mu.Lock()
+		if h.currentCfg != nil && strings.TrimSpace(h.currentCfg.Agent.ID) != "" {
+			cmd.Parameters["agent_id"] = strings.TrimSpace(h.currentCfg.Agent.ID)
+		}
+		h.mu.Unlock()
+	}
+
 	// Check if expired
 	if !cmd.ExpiresAt.IsZero() && time.Now().After(cmd.ExpiresAt) {
 		return &Result{

@@ -282,7 +282,12 @@ func (s *agentServiceImpl) Register(ctx context.Context, req *RegisterAgentReque
 			// same device can't consume multiple seats by retrying enrollment.
 			inserted, err := s.enrollmentTokenRepo.RecordConsumption(ctx, enrollmentToken.ID, req.HardwareID, agentID)
 			if err != nil {
-				s.logger.WithError(err).Error("Failed to record enrollment token consumption")
+				s.logger.WithError(err).WithFields(logrus.Fields{
+					"token_id":     enrollmentToken.ID,
+					"agent_id":     agentID,
+					"hardware_id_present": strings.TrimSpace(req.HardwareID) != "",
+				}).Error("Failed to record enrollment token consumption")
+				return nil, ErrInternal
 			}
 
 			if inserted {

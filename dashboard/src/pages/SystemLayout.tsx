@@ -25,7 +25,7 @@ export default function SystemLayout() {
     }, [pathname]);
 
     return (
-        <div className="space-y-6">
+        <div className="flex flex-col min-h-0 w-full min-w-0 space-y-6 md:space-y-8">
             <div className="flex items-start gap-3">
                 <div
                     className="p-2 rounded-xl border"
@@ -38,14 +38,14 @@ export default function SystemLayout() {
                     <SettingsIcon className="w-6 h-6" />
                 </div>
                 <div>
-                    <h1 className="text-xl font-bold text-gray-900 dark:text-white">{meta.title}</h1>
-                    <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">{meta.desc}</p>
+                    <h2 className="text-lg font-bold text-slate-900 dark:text-white">{meta.title}</h2>
+                    <p className="text-sm text-slate-500 dark:text-slate-400 mt-0.5">{meta.desc}</p>
                 </div>
             </div>
 
             <Suspense
                 fallback={
-                    <div className="flex items-center justify-center py-16 text-sm text-gray-500 dark:text-gray-400">
+                    <div className="flex items-center justify-center py-16 text-sm text-slate-500 dark:text-slate-400">
                         Loading…
                     </div>
                 }

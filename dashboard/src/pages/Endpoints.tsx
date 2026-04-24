@@ -46,7 +46,7 @@ const COMMAND_DEFINITIONS: Record<CommandType, { label: string; icon: typeof Pla
     update_config: { label: 'Update Config', icon: Settings, description: 'Hot-reload agent configuration key', color: 'text-slate-600' },
     restore_quarantine_file: { label: 'Restore Quarantine File', icon: ArchiveRestore, description: 'Restore file from quarantine', color: 'text-green-600' },
     delete_quarantine_file: { label: 'Delete Quarantine File', icon: Trash2, description: 'Permanently delete quarantined file', color: 'text-red-600' },
-    custom: { label: 'Custom Command', icon: Zap, description: 'Execute custom command', color: 'text-gray-500' },
+    custom: { label: 'Custom Command', icon: Zap, description: 'Execute custom command', color: 'text-slate-500' },
     update_filter_policy: { label: 'Update Filter Policy', icon: Shield, description: 'Push new filtering rules to agent', color: 'text-teal-500' },
     enable_sysmon: { label: 'Enable Sysmon', icon: Shield, description: 'Install Sysmon and enable Operational channel', color: 'text-cyan-600' },
     disable_sysmon: { label: 'Disable Sysmon', icon: ShieldOff, description: 'Disable Sysmon channel and uninstall', color: 'text-slate-500' },
@@ -103,7 +103,7 @@ const HealthScoreBar = React.memo(function HealthScoreBar({ score }: { score: nu
                     style={{ width: `${Math.min(100, Math.max(0, score))}%` }}
                 />
             </div>
-            <span className="text-sm text-gray-600 dark:text-gray-300">{score.toFixed(0)}%</span>
+            <span className="text-sm text-slate-600 dark:text-slate-300">{score.toFixed(0)}%</span>
         </div>
     );
 });
@@ -231,7 +231,7 @@ function CommandExecutionModal({
                 return (
                     <div className="space-y-3">
                         <div>
-                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                                 Process ID (PID)
                             </label>
                             <input
@@ -243,7 +243,7 @@ function CommandExecutionModal({
                             />
                         </div>
                         <div>
-                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                                 Process Name (optional)
                             </label>
                             <input
@@ -261,7 +261,7 @@ function CommandExecutionModal({
                 return (
                     <div className="space-y-3">
                         <div>
-                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                                 File Path
                             </label>
                             <input
@@ -273,7 +273,7 @@ function CommandExecutionModal({
                             />
                         </div>
                         <div>
-                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                                 SHA256 Hash (optional)
                             </label>
                             <input
@@ -291,7 +291,7 @@ function CommandExecutionModal({
                 return (
                     <div className="space-y-3">
                         <div>
-                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                                 Allow List (comma-separated IPs/domains)
                             </label>
                             <input
@@ -301,7 +301,7 @@ function CommandExecutionModal({
                                 value={parameters.allow_list || ''}
                                 onChange={(e) => setParameters({ ...parameters, allow_list: e.target.value })}
                             />
-                            <p className="text-xs text-gray-500 mt-1">
+                            <p className="text-xs text-slate-500 mt-1">
                                 Device will only communicate with these addresses
                             </p>
                         </div>
@@ -312,7 +312,7 @@ function CommandExecutionModal({
                 return (
                     <div className="space-y-3">
                         <div>
-                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                                 Log Types
                             </label>
                             <div className="flex flex-wrap gap-2">
@@ -336,7 +336,7 @@ function CommandExecutionModal({
                             </div>
                         </div>
                         <div>
-                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                                 Time Range
                             </label>
                             <select
@@ -356,7 +356,7 @@ function CommandExecutionModal({
             case 'scan_file':
                 return (
                     <div>
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                        <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                             File Path to Scan
                         </label>
                         <input
@@ -375,7 +375,7 @@ function CommandExecutionModal({
                         <p className="text-xs text-amber-800 dark:text-amber-200/90 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg p-2.5">
                             The agent runs <strong>only whitelisted</strong> diagnostics (no cmd.exe): ipconfig, netstat, ping, tracert, pathping, nslookup, whoami, hostname, systeminfo, tasklist, arp, route.
                         </p>
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                        <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                             Executable + arguments
                         </label>
                         <input
@@ -391,12 +391,12 @@ function CommandExecutionModal({
             case 'scan_memory':
                 return (
                     <div className="space-y-3">
-                        <p className="text-xs text-gray-600 dark:text-gray-400 bg-slate-100 dark:bg-slate-800/80 rounded-lg p-2.5 border border-slate-200 dark:border-slate-700">
+                        <p className="text-xs text-slate-600 dark:text-slate-400 bg-slate-100 dark:bg-slate-800/80 rounded-lg p-2.5 border border-slate-200 dark:border-slate-700">
                             Pulls a <strong>forensic event sample</strong> from the endpoint (Security + System by default) — not a full physical memory image.
                             Add Sysmon below if it is installed.
                         </p>
                         <div>
-                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                                 Log channels (comma-separated keys)
                             </label>
                             <input
@@ -408,7 +408,7 @@ function CommandExecutionModal({
                             />
                         </div>
                         <div>
-                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                                 Time range
                             </label>
                             <select
@@ -438,7 +438,7 @@ function CommandExecutionModal({
                             </p>
                         </div>
                         {/* Hidden input to satisfy React state, but we'll also force it on Mount/Execute */}
-                        <p className="text-xs text-gray-500">
+                        <p className="text-xs text-slate-500">
                             By clicking Execute, you confirm this action. (Safety parameter <code>confirm="true"</code> will be sent to the agent).
                         </p>
                     </div>
@@ -456,7 +456,7 @@ function CommandExecutionModal({
                                 This will completely power off the endpoint. You will NOT be able to start it back up from this console.
                             </p>
                         </div>
-                        <p className="text-xs text-gray-500">
+                        <p className="text-xs text-slate-500">
                             By clicking Execute, you confirm this action. (Safety parameter <code>confirm="true"</code> will be sent to the agent).
                         </p>
                     </div>
@@ -464,7 +464,7 @@ function CommandExecutionModal({
 
             default:
                 return (
-                    <p className="text-sm text-gray-500">
+                    <p className="text-sm text-slate-500">
                         No additional parameters required for this command.
                     </p>
                 );
@@ -478,7 +478,7 @@ function CommandExecutionModal({
             title={`${cmdDef.label} - ${agent.hostname}`}
             size="md"
         >
-            <div className="space-y-4">
+            <div className="space-y-4 animate-slide-up-fade">
                 {/* Status indicator */}
                 {status !== 'idle' && (
                     <div className={`p-3 rounded-lg flex items-center gap-3 ${status === 'executing' ? 'bg-blue-50 dark:bg-blue-900/20' :
@@ -497,23 +497,23 @@ function CommandExecutionModal({
                 )}
 
                 {/* Target info */}
-                <div className="p-3 bg-gray-50 dark:bg-gray-900/50 rounded-lg">
+                <div className="p-3 bg-slate-50 dark:bg-slate-900/50 rounded-lg">
                     <div className="flex items-center gap-3">
                         <OSIcon os={agent.os_type} />
                         <div>
-                            <p className="font-medium text-gray-900 dark:text-white">{agent.hostname}</p>
-                            <p className="text-xs text-gray-500">{agent.os_version}</p>
+                            <p className="font-medium text-slate-900 dark:text-white">{agent.hostname}</p>
+                            <p className="text-xs text-slate-500">{agent.os_version}</p>
                         </div>
                         <StatusBadge status={agent.status} />
                     </div>
                 </div>
 
                 {/* Command description */}
-                <div className="flex items-start gap-3 p-3 border border-gray-200 dark:border-gray-700 rounded-lg">
+                <div className="flex items-start gap-3 p-3 border border-slate-200 dark:border-slate-700 rounded-lg">
                     <cmdDef.icon className={`w-5 h-5 mt-0.5 ${cmdDef.color}`} />
                     <div>
-                        <p className="font-medium text-gray-900 dark:text-white">{cmdDef.label}</p>
-                        <p className="text-sm text-gray-500">{cmdDef.description}</p>
+                        <p className="font-medium text-slate-900 dark:text-white">{cmdDef.label}</p>
+                        <p className="text-sm text-slate-500">{cmdDef.description}</p>
                     </div>
                 </div>
 
@@ -521,7 +521,7 @@ function CommandExecutionModal({
                 {status === 'idle' && renderParameterFields()}
 
                 {/* Actions */}
-                <div className="flex justify-end gap-3 pt-4 border-t border-gray-200 dark:border-gray-700">
+                <div className="flex justify-end gap-3 pt-4 border-t border-slate-200 dark:border-slate-700">
                     <button onClick={handleClose} className="btn btn-secondary">
                         {status === 'idle' ? 'Cancel' : 'Close'}
                     </button>
@@ -676,11 +676,11 @@ export default function Endpoints() {
     if (error) {
         return (
             <div className="card text-center py-12">
-                <WifiOff className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-                <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">
+                <WifiOff className="w-12 h-12 text-slate-400 mx-auto mb-4" />
+                <h3 className="text-lg font-medium text-slate-900 dark:text-white mb-2">
                     Connection Manager Unavailable
                 </h3>
-                <p className="text-gray-500 mb-4">
+                <p className="text-slate-500 mb-4">
                     Unable to connect to the Connection Manager service.
                 </p>
                 <button
@@ -697,7 +697,7 @@ export default function Endpoints() {
     return (
         <div
             data-section-id="management-devices-root"
-            className="relative flex flex-col min-h-[calc(100vh-2rem)] lg:min-h-[calc(100vh-1rem)] h-full -mx-4 sm:-mx-6 lg:-mx-8 -my-4 sm:-my-6 lg:-my-8 p-4 sm:p-6 lg:p-8 bg-slate-200 dark:bg-gradient-to-br dark:from-slate-900 dark:via-[#0b1120] dark:to-slate-900 transition-colors overflow-hidden"
+            className="relative flex flex-col min-h-[calc(100vh-2rem)] lg:min-h-[calc(100vh-1rem)] h-full w-full p-4 sm:p-6 lg:p-8 bg-slate-200 dark:bg-gradient-to-br dark:from-slate-900 dark:via-[#0b1120] dark:to-slate-900 transition-colors overflow-hidden rounded-2xl border border-slate-300/40 dark:border-slate-700/40"
         >
             {/* Background ambient glow effect for Endpoints interface */}
             <div className="absolute top-1/4 right-1/4 w-[600px] h-[600px] pointer-events-none -translate-y-1/2 translate-x-1/3" style={{ background: 'radial-gradient(circle, rgba(59,130,246,0.08) 0%, transparent 70%)' }} />
@@ -705,8 +705,8 @@ export default function Endpoints() {
             <div className="relative flex-1 flex flex-col min-h-0  w-full space-y-4 lg:space-y-5">
                 <div className="flex flex-wrap items-center justify-between gap-3 shrink-0">
                     <div>
-                        <h1 className="text-2xl sm:text-3xl font-bold text-slate-900 dark:text-white tracking-tight">Devices (Fleet)</h1>
-                        <p className="text-sm text-slate-500 mt-1">
+                        <h2 className="text-2xl sm:text-[1.75rem] font-bold text-slate-900 dark:text-white tracking-tight">Devices (Fleet)</h2>
+                        <p className="text-[15px] text-slate-500 dark:text-slate-400 mt-1.5 leading-relaxed max-w-[70ch]">
                             Fleet inventory for Open a device for response, activity, network, and configuration tabs.
                         </p>
                     </div>
@@ -766,7 +766,7 @@ export default function Endpoints() {
                                     Show all
                                 </button>
                             </div>
-                            <div className="flex-1 overflow-y-auto custom-scrollbar p-2 text-sm">
+                            <div className="flex-1 p-2 text-sm">
                                 {(!treeSearch.trim() || 'default tenant'.includes(treeSearch.trim().toLowerCase())) && (
                                     <div className="mb-1">
                                         <div className="flex items-center gap-2 px-2 py-1.5 text-slate-700 dark:text-slate-200 font-medium">
@@ -812,13 +812,6 @@ export default function Endpoints() {
                             className="sticky top-0 z-20 flex flex-wrap items-center gap-x-1 gap-y-1 px-2 py-2 border-b border-slate-700/40 shadow-[0_1px_0_rgba(0,0,0,0.06)] overflow-x-auto custom-scrollbar"
                             style={{ background: 'var(--xc-nav-bg, #0a043d)' }}
                         >
-                            <Link
-                                to="/deploy"
-                                className="inline-flex items-center gap-1.5 px-2 py-1.5 rounded text-[11px] text-white/95 hover:bg-white/10 border border-white/15 whitespace-nowrap"
-                            >
-                                <UserPlus className="w-3.5 h-3.5 shrink-0" />
-                                Enroll device
-                            </Link>
                             {authApi.canExecuteCommands() && (() => {
                                 // Always render action buttons — use a generic command list when no device is selected
                                 const genericCommands: CommandType[] = [
@@ -874,6 +867,14 @@ export default function Endpoints() {
                                     className="w-full bg-white dark:bg-slate-900/70 border border-slate-200 dark:border-slate-600 text-slate-800 dark:text-slate-100 rounded-lg pl-9 pr-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/40"
                                 />
                             </div>
+                            <Link
+                                to="/deploy"
+                                className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-900/70 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 whitespace-nowrap text-sm font-semibold"
+                                title="Enroll a new endpoint"
+                            >
+                                <UserPlus className="w-4 h-4 shrink-0" />
+                                Enroll device
+                            </Link>
                             <button
                                 type="button"
                                 onClick={() => queryClient.invalidateQueries({ queryKey: ['agents'] })}

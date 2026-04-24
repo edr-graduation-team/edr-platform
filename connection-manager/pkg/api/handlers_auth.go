@@ -135,11 +135,36 @@ func (h *Handlers) Logout(c echo.Context) error {
 	})
 }
 
-// GetCurrentUser returns the current authenticated user.
+// GetCurrentUser returns the current authenticated user (full profile when DB is available).
 func (h *Handlers) GetCurrentUser(c echo.Context) error {
 	user := getCurrentUser(c)
 	if user == nil {
 		return errorResponse(c, http.StatusUnauthorized, "AUTH_REQUIRED", "Authentication required")
+	}
+
+	if h.userRepo != nil && user.UserID != "" {
+		if uid, err := uuid.Parse(user.UserID); err == nil {
+			dbUser, err := h.userRepo.GetByID(c.Request().Context(), uid)
+			if err == nil && dbUser != nil {
+				return c.JSON(http.StatusOK, map[string]interface{}{
+					"data": UserResponse{
+						ID:        dbUser.ID,
+						Username:  dbUser.Username,
+						Email:     dbUser.Email,
+						FullName:  dbUser.FullName,
+						Role:      dbUser.Role,
+						Status:    dbUser.Status,
+						LastLogin: dbUser.LastLogin,
+						CreatedAt: dbUser.CreatedAt,
+						UpdatedAt: dbUser.UpdatedAt,
+					},
+					"meta": ResponseMeta{
+						RequestID: c.Response().Header().Get(echo.HeaderXRequestID),
+						Timestamp: time.Now().UTC().Format(time.RFC3339),
+					},
+				})
+			}
+		}
 	}
 
 	role := ""

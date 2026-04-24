@@ -141,7 +141,7 @@ function BuildModal({
 
     return (
         <Modal isOpen={isOpen} onClose={handleClose} title="Build Agent Binary" size="lg" closeOnOverlayClick={!isBuilding}>
-            <div className="space-y-5">
+            <div className="space-y-5 animate-slide-up-fade">
                 {/* Error message */}
                 {error && (
                     <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-sm text-red-700 dark:text-red-300 flex items-start gap-2">
@@ -168,14 +168,14 @@ function BuildModal({
 
                 {/* Token Selection */}
                 <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">
                         <span className="flex items-center gap-1.5">
                             <Key className="w-4 h-4 text-cyan-500" />
                             Enrollment Token <span className="text-red-500">*</span>
                         </span>
                     </label>
                     {tokensLoading ? (
-                        <div className="flex items-center gap-2 text-sm text-gray-500 py-2">
+                        <div className="flex items-center gap-2 text-sm text-slate-500 py-2">
                             <Loader2 className="w-4 h-4 animate-spin" /> Loading tokens...
                         </div>
                     ) : tokens.length === 0 ? (
@@ -207,7 +207,7 @@ function BuildModal({
                                 ))}
                             </select>
                             {selectedToken && (
-                                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
                                     Token: <span className="font-mono">{selectedToken.token.slice(0, 8)}...{selectedToken.token.slice(-4)}</span>
                                 </p>
                             )}
@@ -217,9 +217,9 @@ function BuildModal({
 
                 {/* Divider */}
                 <div className="relative">
-                    <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-gray-200 dark:border-gray-700" /></div>
+                    <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-slate-200 dark:border-slate-700" /></div>
                     <div className="relative flex justify-center text-xs">
-                        <span className="bg-white dark:bg-gray-800 px-3 text-gray-500">Server Configuration</span>
+                        <span className="bg-white dark:bg-slate-800 px-3 text-slate-500">Server Configuration</span>
                     </div>
                 </div>
 
@@ -245,7 +245,7 @@ function BuildModal({
                 {/* Server Config */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                        <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                             Server IP
                         </label>
                         <input
@@ -258,7 +258,7 @@ function BuildModal({
                         />
                     </div>
                     <div>
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                        <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                             Server Domain
                         </label>
                         <input
@@ -271,7 +271,7 @@ function BuildModal({
                         />
                     </div>
                     <div>
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                        <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                             gRPC Port
                         </label>
                         <input
@@ -295,15 +295,15 @@ function BuildModal({
 
                 {/* Building progress */}
                 {isBuilding && (
-                    <div className="p-4 bg-gray-50 dark:bg-gray-900/50 border border-gray-200 dark:border-gray-700 rounded-lg">
+                    <div className="p-4 bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700 rounded-lg">
                         <div className="flex items-center gap-3">
                             <Loader2 className="w-5 h-5 text-cyan-500 animate-spin" />
                             <div>
-                                <p className="text-sm font-medium text-gray-900 dark:text-white">Building Agent...</p>
-                                <p className="text-xs text-gray-500 dark:text-gray-400">{buildProgress}</p>
+                                <p className="text-sm font-medium text-slate-900 dark:text-white">Building Agent...</p>
+                                <p className="text-xs text-slate-500 dark:text-slate-400">{buildProgress}</p>
                             </div>
                         </div>
-                        <div className="mt-3 w-full bg-gray-200 dark:bg-gray-700 rounded-full h-1.5 overflow-hidden">
+                        <div className="mt-3 w-full bg-slate-200 dark:bg-slate-700 rounded-full h-1.5 overflow-hidden">
                             <div className="bg-cyan-500 h-full rounded-full animate-pulse" style={{ width: '60%' }} />
                         </div>
                     </div>
@@ -322,7 +322,7 @@ function BuildModal({
                     <button
                         onClick={() => handleBuild(true)}
                         disabled={isBuilding || tokens.length === 0}
-                        className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-gray-600 hover:bg-gray-700 dark:bg-gray-700 dark:hover:bg-gray-600 text-white rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed font-medium text-sm"
+                        className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-slate-600 hover:bg-slate-700 dark:bg-slate-700 dark:hover:bg-slate-600 text-white rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed font-medium text-sm"
                     >
                         <Terminal className="w-4 h-4" />
                         Build (Skip Config)
@@ -348,14 +348,14 @@ function CodeBlock({ code, label }: { code: string; label?: string }) {
     return (
         <div className="relative group">
             {label && (
-                <span className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1 block">{label}</span>
+                <span className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-1 block">{label}</span>
             )}
-            <div className="bg-gray-900 dark:bg-black rounded-lg p-4 font-mono text-sm text-green-400 overflow-x-auto">
+            <div className="bg-slate-900 dark:bg-black rounded-lg p-4 font-mono text-sm text-green-400 overflow-x-auto">
                 <pre className="whitespace-pre-wrap">{code}</pre>
             </div>
             <button
                 onClick={handleCopy}
-                className="absolute top-2 right-2 p-1.5 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded-md opacity-0 group-hover:opacity-100 transition-opacity"
+                className="absolute top-2 right-2 p-1.5 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded-md opacity-0 group-hover:opacity-100 transition-opacity"
                 title="Copy to clipboard"
             >
                 {copied ? <CheckCircle className="w-4 h-4 text-green-400" /> : <Copy className="w-4 h-4" />}
@@ -387,9 +387,9 @@ function StepCard({ step, title, children, icon: Icon }: {
             <div className="flex-1 pb-8">
                 <div className="flex items-center gap-2 mb-2">
                     <Icon className="w-5 h-5 text-cyan-500" />
-                    <h3 className="text-base font-semibold text-gray-900 dark:text-white">{title}</h3>
+                    <h3 className="text-base font-semibold text-slate-900 dark:text-white">{title}</h3>
                 </div>
-                <div className="text-sm text-gray-600 dark:text-gray-400 space-y-3">
+                <div className="text-sm text-slate-600 dark:text-slate-400 space-y-3">
                     {children}
                 </div>
             </div>
@@ -414,13 +414,13 @@ export default function AgentDeployment() {
             {/* Page Header */}
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
                 <div>
-                    <h1 className="text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-3">
+                    <h2 className="text-2xl font-bold text-slate-900 dark:text-white flex items-center gap-3">
                         <div className="p-2.5 bg-gradient-to-br from-cyan-500 to-blue-600 rounded-xl shadow-lg shadow-cyan-500/20">
                             <Download className="w-6 h-6 text-white" />
                         </div>
                         Agent Deployment
-                    </h1>
-                    <p className="text-gray-500 dark:text-gray-400 mt-1">
+                    </h2>
+                    <p className="text-slate-500 dark:text-slate-400 mt-1">
                         Build, configure, and deploy the EDR agent to endpoint machines.
                     </p>
                 </div>
@@ -443,9 +443,9 @@ export default function AgentDeployment() {
                         <div className="p-2 bg-emerald-100 dark:bg-emerald-900/30 rounded-lg">
                             <ShieldCheck className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
                         </div>
-                        <h3 className="font-semibold text-gray-900 dark:text-white">Secure Build</h3>
+                        <h3 className="font-semibold text-slate-900 dark:text-white">Secure Build</h3>
                     </div>
-                    <p className="text-sm text-gray-600 dark:text-gray-400">
+                    <p className="text-sm text-slate-600 dark:text-slate-400">
                         CA certificate is embedded at build time — no insecure network fetch required.
                     </p>
                 </div>
@@ -455,9 +455,9 @@ export default function AgentDeployment() {
                         <div className="p-2 bg-cyan-100 dark:bg-cyan-900/30 rounded-lg">
                             <Key className="w-5 h-5 text-cyan-600 dark:text-cyan-400" />
                         </div>
-                        <h3 className="font-semibold text-gray-900 dark:text-white">Valid Tokens</h3>
+                        <h3 className="font-semibold text-slate-900 dark:text-white">Valid Tokens</h3>
                     </div>
-                    <p className="text-sm text-gray-600 dark:text-gray-400">
+                    <p className="text-sm text-slate-600 dark:text-slate-400">
                         {tokensLoading ? (
                             <span className="flex items-center gap-1"><Loader2 className="w-3 h-3 animate-spin" /> Loading...</span>
                         ) : (
@@ -471,9 +471,9 @@ export default function AgentDeployment() {
                         <div className="p-2 bg-violet-100 dark:bg-violet-900/30 rounded-lg">
                             <HardDrive className="w-5 h-5 text-violet-600 dark:text-violet-400" />
                         </div>
-                        <h3 className="font-semibold text-gray-900 dark:text-white">Cross-Platform</h3>
+                        <h3 className="font-semibold text-slate-900 dark:text-white">Cross-Platform</h3>
                     </div>
-                    <p className="text-sm text-gray-600 dark:text-gray-400">
+                    <p className="text-sm text-slate-600 dark:text-slate-400">
                         Agents are compiled as Windows x64 binaries, ready for deployment on any Windows endpoint.
                     </p>
                 </div>
@@ -483,7 +483,7 @@ export default function AgentDeployment() {
             <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
                 {/* Left: Instructions */}
                 <div className="lg:col-span-3 card p-6">
-                    <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-6 flex items-center gap-2">
+                    <h2 className="text-lg font-semibold text-slate-900 dark:text-white mb-6 flex items-center gap-2">
                         <Terminal className="w-5 h-5 text-cyan-500" />
                         Deployment Guide
                     </h2>
@@ -498,7 +498,7 @@ export default function AgentDeployment() {
 
                     <StepCard step={2} title="Transfer to Endpoint" icon={HardDrive}>
                         <p>
-                            Copy the downloaded <code className="px-1.5 py-0.5 bg-gray-100 dark:bg-gray-700 rounded text-xs font-mono">edr-agent.exe</code> to
+                            Copy the downloaded <code className="px-1.5 py-0.5 bg-slate-100 dark:bg-slate-700 rounded text-xs font-mono">edr-agent.exe</code> to
                             the target Windows machine. Use a secure transfer method (USB, internal share, SCCM, etc.).
                         </p>
                     </StepCard>
@@ -511,7 +511,7 @@ export default function AgentDeployment() {
                             label="Run as Administrator"
                             code={`.\\edr-agent.exe -install`}
                         />
-                        <p className="text-xs text-gray-500 dark:text-gray-400">
+                        <p className="text-xs text-slate-500 dark:text-slate-400">
                             No additional parameters needed — server IP, domain, port, and token are all embedded.
                         </p>
                     </StepCard>
@@ -525,7 +525,7 @@ export default function AgentDeployment() {
                             label="Run as Administrator"
                             code={`.\\edr-agent.exe -install ^\n  -server-ip 192.168.1.10 ^\n  -server-domain edr.local ^\n  -server-port 47051`}
                         />
-                        <p className="text-xs text-gray-500 dark:text-gray-400">
+                        <p className="text-xs text-slate-500 dark:text-slate-400">
                             The enrollment token is still embedded — no need to pass it via CLI (security policy).
                         </p>
                     </StepCard>
@@ -546,11 +546,11 @@ export default function AgentDeployment() {
                 {/* Right: Quick Reference Panel */}
                 <div className="lg:col-span-2 space-y-4">
                     <div className="card p-5">
-                        <h3 className="font-semibold text-gray-900 dark:text-white mb-3 flex items-center gap-2">
+                        <h3 className="font-semibold text-slate-900 dark:text-white mb-3 flex items-center gap-2">
                             <Server className="w-4 h-4 text-cyan-500" />
                             Architecture Overview
                         </h3>
-                        <div className="space-y-3 text-sm text-gray-600 dark:text-gray-400">
+                        <div className="space-y-3 text-sm text-slate-600 dark:text-slate-400">
                             <div className="flex items-start gap-2">
                                 <div className="w-2 h-2 rounded-full bg-cyan-500 mt-1.5 shrink-0" />
                                 <span><strong>Build server</strong> compiles agent with embedded CA cert + token</span>
@@ -571,22 +571,22 @@ export default function AgentDeployment() {
                     </div>
 
                     <div className="card p-5">
-                        <h3 className="font-semibold text-gray-900 dark:text-white mb-3 flex items-center gap-2">
+                        <h3 className="font-semibold text-slate-900 dark:text-white mb-3 flex items-center gap-2">
                             <AlertTriangle className="w-4 h-4 text-amber-500" />
                             Important Notes
                         </h3>
-                        <ul className="space-y-2 text-sm text-gray-600 dark:text-gray-400">
+                        <ul className="space-y-2 text-sm text-slate-600 dark:text-slate-400">
                             <li className="flex items-start gap-2">
                                 <ChevronRight className="w-4 h-4 text-cyan-500 mt-0.5 shrink-0" />
-                                <span>Token is <strong className="text-gray-800 dark:text-gray-200">always required</strong> — cannot be skipped or overridden from CLI.</span>
+                                <span>Token is <strong className="text-slate-800 dark:text-slate-200">always required</strong> — cannot be skipped or overridden from CLI.</span>
                             </li>
                             <li className="flex items-start gap-2">
                                 <ChevronRight className="w-4 h-4 text-cyan-500 mt-0.5 shrink-0" />
-                                <span>Run the installer as <strong className="text-gray-800 dark:text-gray-200">Administrator</strong> on the target machine.</span>
+                                <span>Run the installer as <strong className="text-slate-800 dark:text-slate-200">Administrator</strong> on the target machine.</span>
                             </li>
                             <li className="flex items-start gap-2">
                                 <ChevronRight className="w-4 h-4 text-cyan-500 mt-0.5 shrink-0" />
-                                <span>If the CA certificate is rotated, all agents must be <strong className="text-gray-800 dark:text-gray-200">rebuilt and redeployed</strong>.</span>
+                                <span>If the CA certificate is rotated, all agents must be <strong className="text-slate-800 dark:text-slate-200">rebuilt and redeployed</strong>.</span>
                             </li>
                             <li className="flex items-start gap-2">
                                 <ChevronRight className="w-4 h-4 text-cyan-500 mt-0.5 shrink-0" />
@@ -596,12 +596,12 @@ export default function AgentDeployment() {
                     </div>
 
                     <div className="card p-5">
-                        <h3 className="font-semibold text-gray-900 dark:text-white mb-3 flex items-center gap-2">
+                        <h3 className="font-semibold text-slate-900 dark:text-white mb-3 flex items-center gap-2">
                             <Terminal className="w-4 h-4 text-cyan-500" />
                             Uninstall Command
                         </h3>
                         <CodeBlock code={`.\\edr-agent.exe -uninstall -token <uninstall-token>`} />
-                        <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
+                        <p className="text-xs text-slate-500 dark:text-slate-400 mt-2">
                             Requires an authorization token to prevent unauthorized uninstallation.
                         </p>
                     </div>

@@ -1,5 +1,7 @@
 /** Static mock payloads when parity APIs return 404 or are unreachable. */
 
+import type { AppControlPoliciesPayload } from './appControlModel';
+
 export const mockServiceSummary = {
     tenant_id: 'demo-tenant',
     window: { from: '2026-04-15T00:00:00Z', to: '2026-04-16T00:00:00Z' },
@@ -212,9 +214,120 @@ export const mockRmmJobs = mockListEnvelope([
     { id: 'j1', type: 'inventory', status: 'completed', agent_id: 'a1', started_at: '2026-04-16T05:00:00Z' },
 ]);
 
-export const mockAppControlPolicies = mockListEnvelope([
-    { id: 'ac1', name: 'Block untrusted USB apps', mode: 'enforce', violations_7d: 0 },
-]);
+export const mockAppControlPolicies: AppControlPoliciesPayload = {
+    data: [
+        {
+            id: 'ac-baseline',
+            name: 'Workstation execution baseline',
+            description: 'Allow signed Program Files; block untrusted roots and user-writable run paths.',
+            scope_type: 'fleet',
+            scope_label: 'All enrolled Windows endpoints',
+            mode: 'enforce',
+            state: 'published',
+            priority: 10,
+            rule_count: 28,
+            coverage_percent: 94,
+            endpoints_synced: 120,
+            endpoints_lagged: 8,
+            last_published_at: '2026-04-20T14:00:00Z',
+            updated_at: '2026-04-22T09:15:00Z',
+            audit_only_blocks_7d: 0,
+            enforce_blocks_7d: 42,
+        },
+        {
+            id: 'ac-dev-audit',
+            name: 'Developer overrides (audit)',
+            description: 'Broader execution in dev tags; observe only before switching to enforce.',
+            scope_type: 'tag',
+            scope_label: 'tier=dev',
+            mode: 'audit',
+            state: 'draft',
+            priority: 20,
+            rule_count: 11,
+            coverage_percent: 18,
+            endpoints_synced: 22,
+            endpoints_lagged: 1,
+            last_published_at: null,
+            updated_at: '2026-04-23T11:40:00Z',
+            audit_only_blocks_7d: 86,
+            enforce_blocks_7d: 0,
+        },
+        {
+            id: 'ac-temp-block',
+            name: 'Block execution from user temp',
+            description: 'Hash-less path rules for %TEMP% / AppData\\Local\\Temp launchers.',
+            scope_type: 'fleet',
+            scope_label: 'All enrolled Windows endpoints',
+            mode: 'enforce',
+            state: 'published',
+            priority: 15,
+            rule_count: 6,
+            coverage_percent: 94,
+            endpoints_synced: 118,
+            endpoints_lagged: 10,
+            last_published_at: '2026-04-18T08:30:00Z',
+            updated_at: '2026-04-21T16:05:00Z',
+            audit_only_blocks_7d: 0,
+            enforce_blocks_7d: 19,
+        },
+        {
+            id: 'ac-field-usb',
+            name: 'Field sales — removable media',
+            description: 'Deny known risky USB toolchains; allow corporate signed bundles only.',
+            scope_type: 'group',
+            scope_label: 'Group: Field Sales',
+            mode: 'enforce',
+            state: 'published',
+            priority: 25,
+            rule_count: 9,
+            coverage_percent: 31,
+            endpoints_synced: 38,
+            endpoints_lagged: 3,
+            last_published_at: '2026-04-10T12:00:00Z',
+            updated_at: '2026-04-19T07:50:00Z',
+            audit_only_blocks_7d: 0,
+            enforce_blocks_7d: 3,
+        },
+    ],
+    pagination: { total: 4, limit: 50, offset: 0, has_more: false },
+    meta: { request_id: 'mock-req', timestamp: new Date().toISOString() },
+    rollout_preview: [
+        {
+            hostname: 'FIN-WS-14',
+            agent_id: '00000000-0000-4000-8000-000000000101',
+            policy_sync: 'ok',
+            last_policy_sync_at: '2026-04-23T20:40:00Z',
+        },
+        {
+            hostname: 'DEV-LAP-03',
+            agent_id: '00000000-0000-4000-8000-000000000102',
+            policy_sync: 'lagging',
+            last_policy_sync_at: '2026-04-22T14:10:00Z',
+        },
+        {
+            hostname: 'HR-LT-09',
+            agent_id: '00000000-0000-4000-8000-000000000103',
+            policy_sync: 'ok',
+            last_policy_sync_at: '2026-04-23T19:55:00Z',
+        },
+        {
+            hostname: 'SALES-2-11',
+            agent_id: '00000000-0000-4000-8000-000000000104',
+            policy_sync: 'lagging',
+            last_policy_sync_at: '2026-04-21T09:00:00Z',
+        },
+        {
+            hostname: 'WS-DEMO-01',
+            agent_id: 'a1',
+            policy_sync: 'unknown',
+            last_policy_sync_at: null,
+        },
+    ],
+    audit_summary: {
+        would_block_events_7d: 128,
+        distinct_binaries_touched: 41,
+    },
+};
 
 export const mockLicenses = {
     seats_total: 500,

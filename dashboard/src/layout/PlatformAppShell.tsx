@@ -261,6 +261,18 @@ function filterSocTabs() {
     });
 }
 
+/** Same order as `SYSTEM_CONTEXT_TABS`; hide entries the user cannot open (matches route guards). */
+function filterSystemTabs() {
+    return SYSTEM_CONTEXT_TABS.filter((t) => {
+        if (t.to === '/system/profile') return true;
+        if (t.to === '/system/reliability-health') return true;
+        if (t.to === '/system/access/users') return true;
+        if (t.to === '/system/access/roles') return authApi.canViewRoles();
+        if (t.to === '/system/audit-logs') return authApi.canViewAuditLogs();
+        return true;
+    });
+}
+
 export const PlatformAppShell = memo(function PlatformAppShell({ children }: { children: ReactNode }) {
     const location = useLocation();
     const pathname = location.pathname;
@@ -289,6 +301,8 @@ export const PlatformAppShell = memo(function PlatformAppShell({ children }: { c
     }, [pathname]);
 
     const user = authApi.getCurrentUser();
+
+    const systemTabsVisible = useMemo(() => filterSystemTabs(), [user?.role]);
 
     const { data: sidebarAlertStats } = useQuery({
         queryKey: ['topNavAlertStats'],
@@ -325,7 +339,7 @@ export const PlatformAppShell = memo(function PlatformAppShell({ children }: { c
             return { title: 'SOC', variant: 'soc' as const };
         }
         if (pathname.startsWith('/managed-security')) {
-            return { title: 'Managed Security', variant: 'managed' as const };
+            return { title: 'Managed detection & response', variant: 'managed' as const };
         }
         if (pathname.startsWith('/itsm')) {
             return { title: 'Orchestration', variant: 'itsm' as const };
@@ -355,7 +369,7 @@ export const PlatformAppShell = memo(function PlatformAppShell({ children }: { c
         'fixed inset-y-0 left-0 z-[70] w-72 max-w-[85vw] border-r border-[var(--xc-nav-border)] shadow-2xl flex flex-col lg:hidden transition-transform duration-200';
 
     return (
-        <div className="min-h-screen flex flex-col bg-gray-50 dark:bg-gray-900">
+        <div className="h-screen overflow-hidden flex flex-col bg-gray-50 dark:bg-gray-900">
             <header
                 className="sticky top-0 z-50 flex flex-col border-b shadow-sm"
                 style={{ borderColor: 'var(--xc-nav-border)', background: 'var(--xc-nav-bg)' }}
@@ -455,12 +469,19 @@ export const PlatformAppShell = memo(function PlatformAppShell({ children }: { c
                             )}
                         </NavDropdown>
 
-                        <NavLink
-                            to="/managed-security/overview"
-                            className={({ isActive }) => cx(navLinkBase, isActive || managedTopActive ? navLinkActive : navLinkIdle)}
+                        <NavDropdown
+                            id="managed-security"
+                            label="MDR Operations"
+                            active={managedTopActive}
+                            openId={openId}
+                            setOpenId={setOpenId}
                         >
-                            Managed Detection &amp; Response
-                        </NavLink>
+                            {MANAGED_SECURITY_TABS.map((t) => (
+                                <DropdownLink key={t.to} to={t.to} onNavigate={() => setOpenId(null)}>
+                                    {t.label}
+                                </DropdownLink>
+                            ))}
+                        </NavDropdown>
 
                         <NavDropdown id="workflows" label="Orchestration" active={itsmTopActive} openId={openId} setOpenId={setOpenId}>
                             {ITSM_TABS.map((t) => (
@@ -484,22 +505,13 @@ export const PlatformAppShell = memo(function PlatformAppShell({ children }: { c
                             ))}
                         </NavDropdown>
 
-                        {(authApi.canViewAuditLogs() || authApi.canViewTokens() || authApi.canViewAgentDeploy()) && (
+                        {systemTabsVisible.length > 0 && (
                             <NavDropdown id="system" label="System" active={systemTopActive} openId={openId} setOpenId={setOpenId}>
-                                {authApi.canViewAuditLogs() && (
-                                    <DropdownLink to="/system/audit-logs" onNavigate={() => setOpenId(null)}>
-                                        Audit Logs
+                                {systemTabsVisible.map((t) => (
+                                    <DropdownLink key={t.to} to={t.to} onNavigate={() => setOpenId(null)}>
+                                        {t.label}
                                     </DropdownLink>
-                                )}
-                                <DropdownLink to="/system/reliability-health" onNavigate={() => setOpenId(null)}>
-                                    Reliability Health
-                                </DropdownLink>
-                                <DropdownLink to="/system/access/users" onNavigate={() => setOpenId(null)}>
-                                    Users
-                                </DropdownLink>
-                                <DropdownLink to="/system/access/roles" onNavigate={() => setOpenId(null)}>
-                                    Roles &amp; Permissions
-                                </DropdownLink>
+                                ))}
                             </NavDropdown>
                         )}
 
@@ -627,7 +639,7 @@ export const PlatformAppShell = memo(function PlatformAppShell({ children }: { c
                                     </NavLink>
                                 ))}
                             {contextRow.variant === 'system' &&
-                                SYSTEM_CONTEXT_TABS.map((t) => (
+                                systemTabsVisible.map((t) => (
                                     <NavLink
                                         key={t.to}
                                         to={t.to}
@@ -684,9 +696,19 @@ export const PlatformAppShell = memo(function PlatformAppShell({ children }: { c
                             <NavLink to="/security/endpoint-zero-trust" onClick={() => setMobileOpen(false)} className="block px-3 py-2 rounded-md hover:bg-[var(--xc-nav-hover)]">
                                 Security
                             </NavLink>
-                            <NavLink to="/managed-security/overview" onClick={() => setMobileOpen(false)} className="block px-3 py-2 rounded-md hover:bg-[var(--xc-nav-hover)]">
-                                Managed Security
-                            </NavLink>
+                            <div className="px-3 pt-2 pb-0.5 text-[10px] font-bold uppercase tracking-wider opacity-60">
+                                MDR Operations
+                            </div>
+                            {MANAGED_SECURITY_TABS.map((t) => (
+                                <NavLink
+                                    key={t.to}
+                                    to={t.to}
+                                    onClick={() => setMobileOpen(false)}
+                                    className="block px-3 py-2 rounded-md hover:bg-[var(--xc-nav-hover)]"
+                                >
+                                    {t.label}
+                                </NavLink>
+                            ))}
                             <NavLink to="/itsm/tickets" onClick={() => setMobileOpen(false)} className="block px-3 py-2 rounded-md hover:bg-[var(--xc-nav-hover)]">
                                 ITSM
                             </NavLink>
@@ -715,8 +737,10 @@ export const PlatformAppShell = memo(function PlatformAppShell({ children }: { c
                 </>
             )}
 
-            <main className="flex-1 overflow-x-hidden overflow-y-auto">
-                <div className="w-full px-4 sm:px-6 lg:px-8 py-5">{children}</div>
+            <main className="flex-1 min-h-0 overflow-x-hidden overflow-y-auto bg-slate-100/70 dark:bg-slate-950/40">
+                <div className="xc-app-workspace w-full max-w-[1920px] mx-auto px-5 sm:px-8 lg:px-10 xl:px-12 py-6 lg:py-8 text-[15px] leading-relaxed text-slate-900 dark:text-slate-100 antialiased">
+                    {children}
+                </div>
             </main>
         </div>
     );

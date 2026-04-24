@@ -424,8 +424,20 @@ func (h *Handlers) ExecuteAgentCommand(c echo.Context) error {
 		req.Parameters["mode"] = "start"
 	}
 
-	// Check if agent is online (skip for start_agent — handled above as offline-safe)
-	if req.CommandType != "start_agent" && !h.registry.IsOnline(agentID.String()) {
+	// Check if agent is online.
+	//
+	// Some commands must remain dispatchable even when the agent is offline.
+	// Most notably: restore_network (unisolate). If the agent was isolated
+	// incorrectly (e.g. allowlist misconfig) it may appear offline; returning a
+	// hard 404 here creates a dead-end in the UI. Instead we persist the command
+	// as pending so it can be delivered on next reconnect.
+	offlineSafe := req.CommandType == "start_agent" ||
+		req.CommandType == "restore_network" ||
+		req.CommandType == "unisolate_network" ||
+		req.CommandType == "unisolate"
+
+	online := h.registry.IsOnline(agentID.String())
+	if !online && !offlineSafe {
 		h.logger.Warnf("[C2] Agent %s is not online", agentID)
 		return errorResponse(c, http.StatusNotFound, "AGENT_OFFLINE", "Agent is not online — command cannot be delivered")
 	}
@@ -485,6 +497,16 @@ func (h *Handlers) ExecuteAgentCommand(c echo.Context) error {
 			return errorResponse(c, http.StatusInternalServerError, "DB_ERROR", "Failed to persist command")
 		}
 		h.logger.Infof("[C2] Command %s persisted to DB (status=pending)", commandID)
+	}
+
+	// Offline-safe commands stop here: they are queued for delivery on reconnect.
+	if !online && offlineSafe {
+		h.logger.Infof("[C2] Agent %s offline — queued offline-safe command %s as pending", agentID, req.CommandType)
+		return c.JSON(http.StatusAccepted, CommandResponse{
+			CommandID: commandID.String(),
+			Status:    "pending",
+			IssuedAt:  time.Now(),
+		})
 	}
 
 	// ── Step 1b: Inject mode parameter for agent service control commands ───────

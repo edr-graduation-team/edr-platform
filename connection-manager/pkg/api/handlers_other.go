@@ -648,6 +648,12 @@ func (h *Handlers) ListUsers(c echo.Context) error {
 		}
 	}
 
+	total, err := h.userRepo.Count(c.Request().Context(), filter)
+	if err != nil {
+		h.logger.WithError(err).Error("Failed to count users")
+		return errorResponse(c, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to count users")
+	}
+
 	users, err := h.userRepo.List(c.Request().Context(), filter)
 	if err != nil {
 		h.logger.WithError(err).Error("Failed to list users")
@@ -671,10 +677,17 @@ func (h *Handlers) ListUsers(c echo.Context) error {
 		data = append(data, resp)
 	}
 
+	hasMore := int64(filter.Offset+len(users)) < total
+
 	return c.JSON(http.StatusOK, map[string]interface{}{
-		"data":       data,
-		"pagination": PaginationResponse{Total: len(data), Limit: filter.Limit, Offset: filter.Offset},
-		"meta":       responseMeta(c),
+		"data": data,
+		"pagination": PaginationResponse{
+			Total:   int(total),
+			Limit:   filter.Limit,
+			Offset:  filter.Offset,
+			HasMore: hasMore,
+		},
+		"meta": responseMeta(c),
 	})
 }
 

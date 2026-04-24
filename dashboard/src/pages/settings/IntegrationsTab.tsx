@@ -64,14 +64,14 @@ export default function IntegrationsTab({ settings, onChange, onSave, saved }: I
                         <Globe className="w-5 h-5 text-green-600 dark:text-green-400" />
                     </div>
                     <div>
-                        <h2 className="text-base font-semibold text-gray-900 dark:text-white">Webhook</h2>
-                        <p className="text-xs text-gray-500 dark:text-gray-400">Receive alert payloads at a custom HTTP endpoint</p>
+                        <h2 className="text-base font-semibold text-slate-900 dark:text-white">Webhook</h2>
+                        <p className="text-xs text-slate-500 dark:text-slate-400">Receive alert payloads at a custom HTTP endpoint</p>
                     </div>
                 </div>
 
                 <div className="space-y-3">
                     <div>
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+                        <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">
                             Webhook URL
                         </label>
                         <div className="flex gap-2">
@@ -105,9 +105,9 @@ export default function IntegrationsTab({ settings, onChange, onSave, saved }: I
                         </p>
                     )}
 
-                    <div className="pt-3 border-t border-gray-100 dark:border-gray-700">
-                        <p className="text-xs text-gray-500 dark:text-gray-400 leading-relaxed">
-                            EDR will send a <code className="bg-gray-100 dark:bg-gray-700 px-1 py-0.5 rounded text-xs">POST</code> request
+                    <div className="pt-3 border-t border-slate-100 dark:border-slate-700">
+                        <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
+                            EDR will send a <code className="bg-slate-100 dark:bg-slate-700 px-1 py-0.5 rounded text-xs">POST</code> request
                             with a JSON body for each triggered alert. Ensure the endpoint is publicly accessible or reachable from this server.
                         </p>
                     </div>
@@ -121,18 +121,18 @@ export default function IntegrationsTab({ settings, onChange, onSave, saved }: I
                         <Hash className="w-5 h-5 text-purple-600 dark:text-purple-400" />
                     </div>
                     <div>
-                        <h2 className="text-base font-semibold text-gray-900 dark:text-white">Slack</h2>
-                        <p className="text-xs text-gray-500 dark:text-gray-400">Post alert notifications to a Slack channel</p>
+                        <h2 className="text-base font-semibold text-slate-900 dark:text-white">Slack</h2>
+                        <p className="text-xs text-slate-500 dark:text-slate-400">Post alert notifications to a Slack channel</p>
                     </div>
                 </div>
 
                 <div className="space-y-3">
                     <div>
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+                        <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">
                             Channel Name
                         </label>
                         <div className="relative">
-                            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500 font-medium">#</span>
+                            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500 font-medium">#</span>
                             <input
                                 type="text"
                                 value={settings.slackChannel.replace(/^#/, '')}
@@ -142,21 +142,21 @@ export default function IntegrationsTab({ settings, onChange, onSave, saved }: I
                             />
                         </div>
                     </div>
-                    <p className="text-xs text-gray-500 dark:text-gray-400 leading-relaxed">
-                        The EDR bot must be invited to your channel: <code className="bg-gray-100 dark:bg-gray-700 px-1 py-0.5 rounded text-xs">/invite @edr-platform</code>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
+                        The EDR bot must be invited to your channel: <code className="bg-slate-100 dark:bg-slate-700 px-1 py-0.5 rounded text-xs">/invite @edr-platform</code>
                     </p>
                 </div>
             </div>
 
             {/* ── Coming Soon ── */}
-            <div className="card border-dashed border-2 border-gray-200 dark:border-gray-700 bg-transparent shadow-none">
+            <div className="card border-dashed border-2 border-slate-200 dark:border-slate-700 bg-transparent shadow-none">
                 <div className="flex items-center gap-3">
-                    <div className="w-9 h-9 rounded-lg bg-gray-100 dark:bg-gray-700 flex items-center justify-center">
-                        <Zap className="w-5 h-5 text-gray-400" />
+                    <div className="w-9 h-9 rounded-lg bg-slate-100 dark:bg-slate-700 flex items-center justify-center">
+                        <Zap className="w-5 h-5 text-slate-400" />
                     </div>
                     <div>
-                        <h2 className="text-base font-semibold text-gray-500 dark:text-gray-400">More Integrations</h2>
-                        <p className="text-xs text-gray-400 dark:text-gray-500">
+                        <h2 className="text-base font-semibold text-slate-500 dark:text-slate-400">More Integrations</h2>
+                        <p className="text-xs text-slate-400 dark:text-slate-500">
                             Splunk, ServiceNow, PagerDuty, and Microsoft Teams — coming soon.
                         </p>
                     </div>

@@ -157,6 +157,20 @@ func (s *Server) RegisterRoutes(handlers *Handlers) {
 	alerts.POST("/:id/notes", handlers.AddAlertNote, handlers.RequirePermission("alerts", "write"))
 	alerts.DELETE("/:id", handlers.DeleteAlert, handlers.RequirePermission("alerts", "delete"))
 
+	// ── SIEM / external forwarding destinations (not in-app alert or event UIs) ──
+	siem := protected.Group("/siem")
+	siem.GET("/connectors", handlers.ListSiemConnectors, handlers.RequirePermission("settings", "read"))
+	siem.POST("/connectors", handlers.CreateSiemConnector, handlers.RequirePermission("settings", "write"))
+	siem.PATCH("/connectors/:id", handlers.PatchSiemConnector, handlers.RequirePermission("settings", "write"))
+	siem.DELETE("/connectors/:id", handlers.DeleteSiemConnector, handlers.RequirePermission("settings", "write"))
+
+	// ── Vulnerability findings (CVE/software posture per agent) ─────────
+	// Distinct from alerts (detections) and patch KB lists — triage workflow on imported/scanned rows.
+	vuln := protected.Group("/vuln")
+	vuln.GET("/findings", handlers.ListVulnerabilityFindings, handlers.RequirePermission("endpoints", "read"))
+	vuln.GET("/findings/:id", handlers.GetVulnerabilityFinding, handlers.RequirePermission("endpoints", "read"))
+	vuln.PATCH("/findings/:id", handlers.PatchVulnerabilityFindingStatus, handlers.RequirePermission("endpoints", "manage"))
+
 	// ── Event endpoints ──────────────────────────────────────────────────
 	// Events are part of the alert investigation workflow → alerts:read
 	events := protected.Group("/events")

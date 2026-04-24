@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import React, { useEffect, useState, useMemo, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import {
     AlertTriangle, Activity, Monitor,
     Wifi, WifiOff, ChevronRight, Target, Clock, Terminal, Zap, ShieldAlert,
@@ -17,6 +17,7 @@ import { SkeletonKPICards } from '../components';
 import StatCard from '../components/StatCard';
 import ThreatMeter from '../components/ThreatMeter';
 import LiveIndicator from '../components/LiveIndicator';
+import InsightHero from '../components/InsightHero';
 
 // ─── Constants ──────────────────────────────────────────────
 const STALE_THRESHOLD_MS = 1 * 60 * 1000;
@@ -269,13 +270,13 @@ function AlertDrawer({ alert, agentMap, onClose }: {
 
                 {/* Footer actions */}
                 <div className="border-t border-slate-200 dark:border-slate-700 p-4 flex gap-3 bg-slate-50 dark:bg-slate-800/80">
-                    <a
-                        href={`/alerts?id=${alert.id}`}
+                    <Link
+                        to={`/alerts?id=${alert.id}`}
                         className="btn btn-primary flex-1 justify-center text-sm"
                     >
                         <ExternalLink className="w-3.5 h-3.5" />
                         View in Alerts
-                    </a>
+                    </Link>
                     <button
                         onClick={onClose}
                         className="btn btn-secondary text-sm"
@@ -570,7 +571,9 @@ export default function Dashboard() {
     const { data: recentAlerts } = useQuery({
         queryKey: ['recentAlerts'],
         queryFn: () => alertsApi.list({ limit: 100 }),
-        refetchInterval: 30000,
+        // Fallback polling in case WebSocket stream is unavailable (proxy/ws misconfig).
+        // Keep this reasonably low so the dashboard still feels "near real-time".
+        refetchInterval: 5000,
     });
 
     // ── Sparkline data from timeline (7 points) ──────────────
@@ -617,14 +620,17 @@ export default function Dashboard() {
     const handleAlertClick = useCallback((alert: Alert) => setDrawerAlert(alert), []);
     const handleCloseDrawer = useCallback(() => setDrawerAlert(null), []);
 
+    // Set document title
+    useEffect(() => { document.title = 'Security Posture — EDR Platform'; }, []);
+
     if (statsLoading) {
         return (
-            <div className="space-y-6">
-                <div className="h-9 w-64 bg-slate-800 rounded animate-pulse" />
+            <div className="space-y-6 w-full min-w-0">
+                <div className="rounded-2xl border border-slate-200/80 dark:border-slate-700/60 bg-gradient-to-br from-slate-100 to-slate-50 dark:from-slate-800 dark:to-slate-900 h-36 sm:h-40 animate-pulse" aria-hidden />
                 <SkeletonKPICards count={4} />
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                    <div className="lg:col-span-2 h-96 bg-slate-800 rounded-xl animate-pulse" />
-                    <div className="lg:col-span-1 h-96 bg-slate-800 rounded-xl animate-pulse" />
+                    <div className="lg:col-span-2 h-96 bg-slate-200 dark:bg-slate-800 rounded-xl animate-pulse" />
+                    <div className="lg:col-span-1 h-96 bg-slate-200 dark:bg-slate-800 rounded-xl animate-pulse" />
                 </div>
             </div>
         );
@@ -633,29 +639,62 @@ export default function Dashboard() {
     const byOs = agentStats?.by_os_type || {};
 
     return (
-        <div className="space-y-6 pb-8">
-            {/* Page Title */}
-            <div className="flex items-center justify-between animate-slide-up-fade">
-                <div>
-                    <h1 className="text-2xl font-bold text-slate-900 dark:text-white tracking-tight">
-                        Security Posture
-                    </h1>
-                    <p className="text-sm text-slate-400 mt-1 flex items-center gap-2">
-                        Live posture view
-                        <LiveIndicator label="Live" color="emerald" />
-                    </p>
-                </div>
-            </div>
+        <div className="space-y-6 pb-8 w-full min-w-0">
+            <InsightHero
+                variant="light"
+                accent="cyan"
+                icon={BarChart3}
+                eyebrow="Dashboards"
+                title="Security Posture"
+                segments={[
+                    {
+                        heading: 'What this screen is',
+                        children: (
+                            <>
+                                Executive snapshot of <strong className="font-semibold text-slate-800 dark:text-slate-200">alert pressure</strong>,{' '}
+                                <strong className="font-semibold text-slate-800 dark:text-slate-200">fleet connectivity</strong>, and{' '}
+                                <strong className="font-semibold text-slate-800 dark:text-slate-200">detection confidence</strong> — fed by Sigma statistics and connection-manager agent
+                                APIs. Use it for at-a-glance posture before drilling into operational grids.
+                            </>
+                        ),
+                    },
+                    {
+                        heading: 'Live behaviour',
+                        children: (
+                            <>
+                                Recent alerts update via stream when available, with polling fallback. KPI cards and charts refresh on a short interval — suitable for NOC-style
+                                monitoring, not long-form investigation by itself.
+                            </>
+                        ),
+                    },
+                    {
+                        heading: 'Where to go deeper',
+                        children: (
+                            <>
+                                Full triage: <Link className="text-cyan-600 dark:text-cyan-400 font-semibold hover:underline" to="/alerts">Alerts</Link>
+                                {' · '}
+                                Fleet ops: <Link className="text-cyan-600 dark:text-cyan-400 font-semibold hover:underline" to="/management/devices">Devices</Link>
+                                {' · '}
+                                Alternative summary:{' '}
+                                <Link className="text-cyan-600 dark:text-cyan-400 font-semibold hover:underline" to="/dashboards/endpoint">
+                                    Endpoint Summary
+                                </Link>
+                                .
+                            </>
+                        ),
+                    },
+                ]}
+            />
 
             {/* ── Row 1: KPI Cards ── */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 animate-slide-up-fade">
                 <StatCard
-                    title="Total Alerts (24h)"
+                    title="Alerts (24h)"
                     value={alertStats?.last_24h || 0}
                     icon={AlertTriangle}
                     color="amber"
                     sparkline={sparklines.total}
-                    subtext="Volume over 24 hours"
+                    subtext={`${alertStats?.last_7d || 0} in 7 days · ${alertStats?.by_status?.open || 0} open`}
                     onClick={() => navigate('/alerts')}
                 />
                 <StatCard
@@ -672,8 +711,8 @@ export default function Dashboard() {
                     value={agentStats?.online || 0}
                     icon={Monitor}
                     color="emerald"
-                    subtext="Currently reporting OK"
-                    onClick={() => navigate('/endpoints')}
+                    subtext={`Avg health ${Math.round(agentStats?.avg_health || 0)}%`}
+                    onClick={() => navigate('/management/devices')}
                 />
                 <StatCard
                     title="Detection Engine"
@@ -727,7 +766,7 @@ export default function Dashboard() {
                         <EndpointsPulse
                             stats={agentStats || null}
                             agents={agentListData?.data || []}
-                            onClick={() => navigate('/endpoints')}
+                            onClick={() => navigate('/management/devices')}
                         />
                     </div>
                 </div>

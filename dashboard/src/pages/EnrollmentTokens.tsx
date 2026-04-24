@@ -64,7 +64,7 @@ function GenerateTokenModal({
                 )}
 
                 <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                         Description / Label
                     </label>
                     <input
@@ -75,14 +75,14 @@ function GenerateTokenModal({
                         className="input w-full"
                         autoFocus
                     />
-                    <p className="text-xs text-gray-500 mt-1">
+                    <p className="text-xs text-slate-500 mt-1">
                         A friendly name to identify this token's purpose.
                     </p>
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
                     <div>
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                        <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                             Expires In (hours)
                         </label>
                         <input
@@ -93,10 +93,10 @@ function GenerateTokenModal({
                             min="1"
                             className="input w-full"
                         />
-                        <p className="text-xs text-gray-500 mt-1">Leave empty for no expiry.</p>
+                        <p className="text-xs text-slate-500 mt-1">Leave empty for no expiry.</p>
                     </div>
                     <div>
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                        <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                             Max Uses
                         </label>
                         <input
@@ -107,7 +107,7 @@ function GenerateTokenModal({
                             min="1"
                             className="input w-full"
                         />
-                        <p className="text-xs text-gray-500 mt-1">Leave empty for unlimited.</p>
+                        <p className="text-xs text-slate-500 mt-1">Leave empty for unlimited.</p>
                     </div>
                 </div>
 
@@ -166,7 +166,7 @@ function TokenCreatedModal({
 
     return (
         <Modal isOpen={isOpen} onClose={onClose} title="Token Generated Successfully" size="md">
-            <div className="space-y-4">
+            <div className="space-y-4 animate-slide-up-fade">
                 <div className="p-4 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg">
                     <div className="flex items-center gap-2 mb-2">
                         <CheckCircle className="w-5 h-5 text-green-600" />
@@ -176,7 +176,7 @@ function TokenCreatedModal({
                         Copy this token now. You can always copy it later from the token list.
                     </p>
                     <div className="flex items-center gap-2">
-                        <code className="flex-1 p-2 bg-white dark:bg-gray-900 border border-green-300 dark:border-green-700 rounded font-mono text-xs break-all text-gray-900 dark:text-gray-100">
+                        <code className="flex-1 p-2 bg-white dark:bg-slate-900 border border-green-300 dark:border-green-700 rounded font-mono text-xs break-all text-slate-900 dark:text-slate-100">
                             {token.token}
                         </code>
                         <button
@@ -190,7 +190,7 @@ function TokenCreatedModal({
                 </div>
 
                 {token.description && (
-                    <p className="text-sm text-gray-600 dark:text-gray-400">
+                    <p className="text-sm text-slate-600 dark:text-slate-400">
                         <strong>Label:</strong> {token.description}
                     </p>
                 )}
@@ -286,10 +286,10 @@ export default function EnrollmentTokens() {
         return (
             <div className="card text-center py-12">
                 <AlertTriangle className="w-12 h-12 text-red-400 mx-auto mb-4" />
-                <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">
+                <h3 className="text-lg font-medium text-slate-900 dark:text-white mb-2">
                     Failed to Load Enrollment Tokens
                 </h3>
-                <p className="text-gray-500">Please try again later.</p>
+                <p className="text-slate-500">Please try again later.</p>
             </div>
         );
     }
@@ -303,10 +303,10 @@ export default function EnrollmentTokens() {
                 {/* Header */}
                 <div className="flex items-center justify-between shrink-0">
                     <div>
-                        <h1 className="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-gray-900 to-gray-600 dark:from-white dark:to-gray-300">
+                        <h2 className="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-slate-900 to-slate-600 dark:from-white dark:to-slate-300">
                             Enrollment Tokens
-                        </h1>
-                        <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Manage tokens for agent zero-touch provisioning</p>
+                        </h2>
+                        <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">Manage tokens for agent zero-touch provisioning</p>
                     </div>
                     {canManage && (
                         <button

@@ -194,6 +194,9 @@ type UserRepository interface {
 
 	// List retrieves users with optional filters.
 	List(ctx context.Context, filter UserFilter) ([]*models.User, error)
+
+	// Count returns the number of rows matching the same filters as List (ignores Limit/Offset).
+	Count(ctx context.Context, filter UserFilter) (int64, error)
 }
 
 // UserFilter defines filters for listing users.

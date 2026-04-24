@@ -228,7 +228,7 @@ export default function Stats() {
         <div>
             <div className="flex justify-between items-center mb-8">
                 <div className="flex flex-col">
-                    <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Reports & Statistics</h1>
+                    <h2 className="text-xl font-bold text-slate-900 dark:text-white">Reports & Statistics</h2>
                     <p className="text-sm font-medium text-slate-500 dark:text-slate-400 mt-1">
                         Historical trends and exports from the telemetry engine.
                     </p>
@@ -305,7 +305,7 @@ export default function Stats() {
                             <AlertTriangle className="w-5 h-5 text-red-600" />
                         </div>
                         <div>
-                            <p className="text-sm text-gray-500">Total Alerts</p>
+                            <p className="text-sm text-slate-500">Total Alerts</p>
                             <p className="text-2xl font-bold">{alertStats?.total_alerts || 0}</p>
                         </div>
                     </div>
@@ -317,7 +317,7 @@ export default function Stats() {
                             <Shield className="w-5 h-5 text-blue-600" />
                         </div>
                         <div>
-                            <p className="text-sm text-gray-500">Active Rules</p>
+                            <p className="text-sm text-slate-500">Active Rules</p>
                             <p className="text-2xl font-bold">{ruleStats?.enabled_rules || 0}</p>
                         </div>
                     </div>
@@ -329,7 +329,7 @@ export default function Stats() {
                             <Activity className="w-5 h-5 text-green-600" />
                         </div>
                         <div>
-                            <p className="text-sm text-gray-500">Events/Sec</p>
+                            <p className="text-sm text-slate-500">Events/Sec</p>
                             <p className="text-2xl font-bold">{perfStats?.events_per_second?.toFixed(1) || 0}</p>
                         </div>
                     </div>
@@ -341,7 +341,7 @@ export default function Stats() {
                             <TrendingUp className="w-5 h-5 text-purple-600" />
                         </div>
                         <div>
-                            <p className="text-sm text-gray-500">Avg Risk (normalized)</p>
+                            <p className="text-sm text-slate-500">Avg Risk (normalized)</p>
                             <p className="text-2xl font-bold">{((alertStats?.avg_confidence || 0) * 100).toFixed(1)}%</p>
                         </div>
                     </div>
@@ -353,7 +353,7 @@ export default function Stats() {
                             <Target className="w-5 h-5 text-cyan-600" />
                         </div>
                         <div>
-                            <p className="text-sm text-gray-500">Unique Rules Fired</p>
+                            <p className="text-sm text-slate-500">Unique Rules Fired</p>
                             <p className="text-2xl font-bold">{Object.keys(alertStats?.by_rule || {}).length || 0}</p>
 
                         </div>
@@ -367,7 +367,7 @@ export default function Stats() {
                             <Shield className="w-5 h-5 text-indigo-600" />
                         </div>
                         <div>
-                            <p className="text-sm text-gray-500">MITRE Tactics Seen</p>
+                            <p className="text-sm text-slate-500">MITRE Tactics Seen</p>
                             <p className="text-2xl font-bold">{Object.keys(alertStats?.by_tactic || {}).length || 0}</p>
                         </div>
                     </div>

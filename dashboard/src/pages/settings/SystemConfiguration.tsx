@@ -42,8 +42,8 @@ function loadFromLS<T>(key: string, fallback: T): T {
 }
 
 // ─── Shared Styles ──────────────────────────────────────────────────────────
-const inputClass = 'w-full px-3.5 py-2.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-lg text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500/30 transition-colors appearance-none';
-const labelClass = 'block text-[11px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1.5';
+const inputClass = 'w-full px-3.5 py-2.5 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-sm text-slate-900 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500/30 transition-colors appearance-none';
+const labelClass = 'block text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1.5';
 
 // ─── Panel Wrapper ──────────────────────────────────────────────────────────
 function Panel({ icon: Icon, iconBg, title, desc, children, onSave, saving, saved }: {
@@ -51,15 +51,15 @@ function Panel({ icon: Icon, iconBg, title, desc, children, onSave, saving, save
     children: React.ReactNode; onSave: () => void; saving?: boolean; saved?: boolean;
 }) {
     return (
-        <section className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden shadow-sm">
-            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+        <section className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl overflow-hidden shadow-sm">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-700">
                 <div className="flex items-center gap-3">
                     <div className={`w-9 h-9 rounded-lg ${iconBg} flex items-center justify-center`}>
                         <Icon size={17} className="text-inherit" />
                     </div>
                     <div>
-                        <h3 className="text-[15px] font-semibold text-gray-900 dark:text-white leading-tight">{title}</h3>
-                        <p className="text-[12px] text-gray-500 dark:text-gray-400 leading-tight mt-0.5">{desc}</p>
+                        <h3 className="text-[15px] font-semibold text-slate-900 dark:text-white leading-tight">{title}</h3>
+                        <p className="text-[12px] text-slate-500 dark:text-slate-400 leading-tight mt-0.5">{desc}</p>
                     </div>
                 </div>
                 <button
@@ -85,7 +85,7 @@ function Toggle({ checked, onChange, disabled }: { checked: boolean; onChange: (
         <button
             onClick={() => !disabled && onChange(!checked)}
             className={`relative w-11 h-6 rounded-full transition-colors duration-200 ${
-                checked ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-700 border border-gray-300 dark:border-gray-600'
+                checked ? 'bg-blue-600' : 'bg-slate-200 dark:bg-slate-700 border border-slate-300 dark:border-slate-600'
             } ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
         >
             <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow-sm transition-transform duration-200 ${checked ? 'left-[22px]' : 'left-0.5'}`} />
@@ -119,13 +119,19 @@ export default function SystemConfiguration() {
     const [feedback, setFeedback] = useState('');
 
     useEffect(() => {
+        document.title = 'Platform preferences · Settings';
+    }, []);
+
+    useEffect(() => {
         if (feedback) { const t = setTimeout(() => setFeedback(''), 3000); return () => clearTimeout(t); }
     }, [feedback]);
 
     const savePanel = (key: string, data: any) => {
         localStorage.setItem(`settings_${key}`, JSON.stringify(data));
         setSavedPanels(prev => ({ ...prev, [key]: true }));
-        setFeedback(`${key.charAt(0).toUpperCase() + key.slice(1)} settings saved to cluster configuration.`);
+        setFeedback(
+            `${key.charAt(0).toUpperCase() + key.slice(1)} preferences saved locally in this browser only — they are not synced to the platform API.`
+        );
         setTimeout(() => setSavedPanels(prev => ({ ...prev, [key]: false })), 2500);
     };
 
@@ -147,18 +153,25 @@ export default function SystemConfiguration() {
     const totalChannels = SEVERITIES.length * CHANNELS.length;
 
     return (
-        <div className="space-y-5 max-w-3xl">
+        <div className="space-y-6 w-full min-w-0">
             {feedback && (
                 <div className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-emerald-50 text-emerald-600 border border-emerald-200 dark:bg-emerald-500/10 dark:text-emerald-400 dark:border-emerald-500/20 text-sm">
                     <Check size={14} /> {feedback}
                 </div>
             )}
 
-            <div className="bg-blue-50 border border-blue-200 text-blue-800 dark:bg-blue-900/20 dark:border-blue-800/50 dark:text-blue-300 rounded-lg p-4 text-sm flex gap-3">
-                <AlertCircle className="w-5 h-5 shrink-0" />
+            <div className="bg-slate-50 border border-slate-200 text-slate-800 dark:bg-slate-900/40 dark:border-slate-700 dark:text-slate-300 rounded-xl p-4 text-sm flex gap-3">
+                <AlertCircle className="w-5 h-5 shrink-0 text-cyan-600 dark:text-cyan-400" />
                 <div>
-                    <strong className="font-semibold">Cluster Configuration</strong>
-                    <p className="mt-1 opacity-90">Settings applied here affect the entire EDR platform across all connected dashboard instances and API consumers. Use caution when modifying notification routing.</p>
+                    <strong className="font-semibold text-slate-900 dark:text-white">Dashboard preferences (this browser)</strong>
+                    <p className="mt-1 opacity-90 leading-relaxed">
+                        Appearance, timezone, date format, and the notification matrix below are stored in{' '}
+                        <code className="text-xs px-1 rounded bg-slate-200/80 dark:bg-slate-800 font-mono">localStorage</code>{' '}
+                        for this dashboard session only. Other operators and browsers do not see these values. Platform-wide policies,
+                        users, roles, and reliability data live under{' '}
+                        <strong className="font-medium">System</strong> and <strong className="font-medium">Management</strong> in the main navigation — not here.
+                        Webhook or Slack fields are placeholders until a server-side integration endpoint exists.
+                    </p>
                 </div>
             </div>
 
@@ -168,14 +181,14 @@ export default function SystemConfiguration() {
                 title="Appearance & Regional" desc="Theme preference and timezone settings"
                 onSave={() => savePanel('general', general)} saved={savedPanels['general']}
             >
-                <div className="space-y-5">
+                <div className="space-y-5 animate-slide-up-fade">
                     {/* Dark mode toggle */}
                     <div className="flex items-center justify-between">
                         <div className="flex items-center gap-3">
                             {general.darkMode ? <Moon size={16} className="text-indigo-400" /> : <Sun size={16} className="text-amber-500" />}
                             <div>
-                                <div className="text-sm font-medium text-gray-900 dark:text-white">Dark Mode</div>
-                                <div className="text-[12px] text-gray-500 dark:text-gray-400">
+                                <div className="text-sm font-medium text-slate-900 dark:text-white">Dark Mode</div>
+                                <div className="text-[12px] text-slate-500 dark:text-slate-400">
                                     {general.darkMode ? 'Dark theme is active' : 'Light theme is active'}
                                 </div>
                             </div>
@@ -212,14 +225,14 @@ export default function SystemConfiguration() {
                 <div className="overflow-x-auto">
                     <table className="w-full text-sm">
                         <thead>
-                            <tr className="border-b border-gray-200 dark:border-gray-700">
-                                <th className="text-left pb-3 text-[11px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider w-[140px]">Severity</th>
+                            <tr className="border-b border-slate-200 dark:border-slate-700">
+                                <th className="text-left pb-3 text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider w-[140px]">Severity</th>
                                 {CHANNELS.map(ch => {
                                     const Icon = CHANNEL_ICONS[ch];
                                     return (
                                         <th key={ch} className="text-center pb-3 min-w-[100px]">
                                             <div className="flex flex-col items-center gap-1">
-                                                <div className="flex items-center gap-1.5 text-[11px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                                                <div className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
                                                     <Icon size={13} /> {ch}
                                                 </div>
                                                 <button
@@ -241,13 +254,13 @@ export default function SystemConfiguration() {
                                 })}
                             </tr>
                         </thead>
-                        <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+                        <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
                             {SEVERITIES.map(sev => (
-                                <tr key={sev} className="hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors">
+                                <tr key={sev} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
                                     <td className="py-3.5">
                                         <div className="flex items-center gap-2">
                                             <span className={`w-2.5 h-2.5 rounded-full ${SEV_COLORS[sev]}`} />
-                                            <span className="font-medium text-gray-900 dark:text-white capitalize">{sev}</span>
+                                            <span className="font-medium text-slate-900 dark:text-white capitalize">{sev}</span>
                                         </div>
                                     </td>
                                     {CHANNELS.map(ch => (
@@ -278,8 +291,8 @@ export default function SystemConfiguration() {
                             onChange={e => setIntegrations(p => ({ ...p, webhookUrl: e.target.value }))}
                             className={inputClass} placeholder="https://your-webhook-endpoint.com/alerts"
                         />
-                        <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-1">
-                            EDR will send a POST request with a JSON body for each triggered alert.
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
+                            Intended for future outbound alerts: values are saved locally here until the platform exposes a managed integration API.
                         </p>
                     </div>
                     <div>
@@ -289,7 +302,7 @@ export default function SystemConfiguration() {
                             onChange={e => setIntegrations(p => ({ ...p, slackChannel: e.target.value }))}
                             className={inputClass} placeholder="security-alerts"
                         />
-                        <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-1">
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
                             The EDR bot must be invited to your channel: <code className="text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-500/10 px-1 rounded">/invite @edr-platform</code>
                         </p>
                     </div>

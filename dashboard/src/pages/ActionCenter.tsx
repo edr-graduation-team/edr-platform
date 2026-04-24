@@ -317,10 +317,10 @@ export default function ActionCenter() {
                 {/* Header Section */}
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 shrink-0">
                     <div>
-                        <h1 className="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-gray-900 to-gray-600 dark:from-white dark:to-gray-300">
+                        <h2 className="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-slate-900 to-slate-600 dark:from-white dark:to-slate-300">
                             Command Center
-                        </h1>
-                        <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                        </h2>
+                        <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
                             Fleet-wide command history. Start new commands from a device’s <strong>Response</strong> tab.
                         </p>
                     </div>

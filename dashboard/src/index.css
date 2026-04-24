@@ -117,6 +117,11 @@ body {
   @apply bg-slate-200 text-gray-900 dark:bg-gray-900 dark:text-gray-100;
 }
 
+/* Main shell content: uses wide monitors without tiny centered columns */
+.xc-app-workspace {
+  width: 100%;
+}
+
 /* Slide-in animations */
 @keyframes slideInRight {
   from { opacity: 0; transform: translateX(24px); }
@@ -700,13 +705,19 @@ code, pre, .font-mono {
    survive after the sidebar → top-nav migration.
    ============================================================ */
 
-/* Root and app shell should fill the viewport */
-html, body, #root {
+/* Root and app shell should fill the viewport (single scroll container lives in PlatformAppShell <main>) */
+html,
+body,
+#root {
   width: 100%;
-  min-height: 100vh;
+  height: 100%;
   margin: 0;
   padding: 0;
   max-width: 100%;
+}
+
+body {
+  overflow: hidden;
 }
 
 /* Reusable page content wrapper (if used directly in pages) */

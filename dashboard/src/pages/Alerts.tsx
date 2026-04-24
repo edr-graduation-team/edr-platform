@@ -95,7 +95,7 @@ function getRiskScoreStyle(score: number, riskLevel?: string): { bg: string; tex
 
 const RiskScoreBadge = React.memo(function RiskScoreBadge({ score, riskLevel }: { score?: number; riskLevel?: string }) {
     if (score === undefined || score === null) {
-        return <span className="text-xs text-gray-400 font-mono">—</span>;
+        return <span className="text-xs text-slate-400 font-mono">—</span>;
     }
     const style = getRiskScoreStyle(score, riskLevel);
     return (
@@ -132,12 +132,12 @@ function ProcessNode({ name, path, integrity, isElevated, sigStatus, isTarget = 
                 ? 'border-red-400 bg-red-50 dark:bg-red-950/40 dark:border-red-700'
                 : isSuspicious
                     ? 'border-orange-400 bg-orange-50 dark:bg-orange-950/40 dark:border-orange-700'
-                    : 'border-gray-200 bg-gray-50 dark:bg-gray-700/40 dark:border-gray-600'
+                    : 'border-slate-200 bg-slate-50 dark:bg-slate-700/40 dark:border-slate-600'
             }`}>
             <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2 min-w-0">
-                    <Cpu className={`w-3.5 h-3.5 shrink-0 ${isTarget ? 'text-red-500' : isSuspicious ? 'text-orange-500' : 'text-gray-400'}`} />
-                    <span className={`font-mono font-semibold truncate ${isTarget ? 'text-red-700 dark:text-red-300' : 'text-gray-800 dark:text-gray-200'}`}>
+                    <Cpu className={`w-3.5 h-3.5 shrink-0 ${isTarget ? 'text-red-500' : isSuspicious ? 'text-orange-500' : 'text-slate-400'}`} />
+                    <span className={`font-mono font-semibold truncate ${isTarget ? 'text-red-700 dark:text-red-300' : 'text-slate-800 dark:text-slate-200'}`}>
                         {name}
                     </span>
                     {isElevated && (
@@ -154,14 +154,14 @@ function ProcessNode({ name, path, integrity, isElevated, sigStatus, isTarget = 
                 {hasDetails && (
                     <button
                         onClick={() => setExpanded(!expanded)}
-                        className="text-gray-400 hover:text-gray-600 shrink-0"
+                        className="text-slate-400 hover:text-slate-600 shrink-0"
                     >
                         {expanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
                     </button>
                 )}
             </div>
             {expanded && hasDetails && (
-                <div className="mt-2 space-y-1 text-xs text-gray-500 dark:text-gray-400">
+                <div className="mt-2 space-y-1 text-xs text-slate-500 dark:text-slate-400">
                     {path && <p className="font-mono truncate" title={path}>{path}</p>}
                     {integrity && <p>Integrity: <span className="font-medium">{integrity}</span></p>}
                     {sigStatus && <p>Signature: <span className="font-medium">{sigStatus}</span></p>}
@@ -190,7 +190,7 @@ function LineageTree({ snapshot }: { snapshot: ContextSnapshot }) {
         <div className="space-y-3">
             {/* Suspicion level header */}
             <div className="flex items-center justify-between">
-                <span className="text-xs text-gray-500 uppercase tracking-wider">Process Lineage</span>
+                <span className="text-xs text-slate-500 uppercase tracking-wider">Process Lineage</span>
                 <span className={suspicionBadge[suspicionLevel] || 'badge badge-info'}>
                     {suspicionLevel.toUpperCase()} SUSPICION
                 </span>
@@ -203,8 +203,8 @@ function LineageTree({ snapshot }: { snapshot: ContextSnapshot }) {
                         <div key={idx} className="flex items-start gap-2">
                             {idx > 0 && (
                                 <div className="flex flex-col items-center ml-3 mr-1">
-                                    <div className="w-px h-3 bg-gray-300 dark:bg-gray-600" />
-                                    <div className="w-3 h-px bg-gray-300 dark:bg-gray-600" />
+                                    <div className="w-px h-3 bg-slate-300 dark:bg-slate-600" />
+                                    <div className="w-3 h-px bg-slate-300 dark:bg-slate-600" />
                                 </div>
                             )}
                             <div className={`flex-1 ${idx > 0 ? '' : ''}`}>
@@ -231,8 +231,8 @@ function LineageTree({ snapshot }: { snapshot: ContextSnapshot }) {
                                 path={snapshot.grandparent_path}
                                 isSuspicious={isSuspicious}
                             />
-                            <div className="ml-6 my-1 flex items-center gap-1 text-gray-400">
-                                <div className="w-px h-4 bg-gray-300 dark:bg-gray-600 ml-1" />
+                            <div className="ml-6 my-1 flex items-center gap-1 text-slate-400">
+                                <div className="w-px h-4 bg-slate-300 dark:bg-slate-600 ml-1" />
                                 <span className="text-xs">spawned</span>
                             </div>
                         </div>
@@ -244,8 +244,8 @@ function LineageTree({ snapshot }: { snapshot: ContextSnapshot }) {
                                 path={snapshot.parent_path}
                                 isSuspicious={isSuspicious}
                             />
-                            <div className="ml-6 my-1 flex items-center gap-1 text-gray-400">
-                                <div className="w-px h-4 bg-gray-300 dark:bg-gray-600 ml-1" />
+                            <div className="ml-6 my-1 flex items-center gap-1 text-slate-400">
+                                <div className="w-px h-4 bg-slate-300 dark:bg-slate-600 ml-1" />
                                 <span className="text-xs">spawned</span>
                             </div>
                         </div>
@@ -261,7 +261,7 @@ function LineageTree({ snapshot }: { snapshot: ContextSnapshot }) {
                         />
                     )}
                     {!snapshot.grandparent_name && !snapshot.parent_name && !snapshot.process_name && (
-                        <p className="text-sm text-gray-400 italic">No lineage data captured for this alert.</p>
+                        <p className="text-sm text-slate-400 italic">No lineage data captured for this alert.</p>
                     )}
                 </div>
             )}
@@ -291,7 +291,7 @@ function UEBASignalBadge({ signal }: { signal: string }) {
         );
     }
     return (
-        <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400">
+        <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-400">
             <Info className="w-3 h-3" />
             No UEBA Signal
         </span>
@@ -301,10 +301,10 @@ function UEBASignalBadge({ signal }: { signal: string }) {
 function UEBAPanel({ snapshot }: { snapshot: ContextSnapshot }) {
     const bd = snapshot.score_breakdown;
     return (
-        <div className="space-y-4">
+        <div className="space-y-4 animate-slide-up-fade">
             {/* UEBA Signal */}
             <div>
-                <span className="text-xs text-gray-500 uppercase tracking-wider block mb-2">Behavioral Signal</span>
+                <span className="text-xs text-slate-500 uppercase tracking-wider block mb-2">Behavioral Signal</span>
                 <div className="flex flex-wrap gap-2">
                     <UEBASignalBadge signal={bd.ueba_signal} />
                     {bd.ueba_signal === 'anomaly' && (
@@ -322,14 +322,14 @@ function UEBAPanel({ snapshot }: { snapshot: ContextSnapshot }) {
 
             {/* Temporal Burst */}
             <div>
-                <span className="text-xs text-gray-500 uppercase tracking-wider block mb-2">Temporal Burst</span>
+                <span className="text-xs text-slate-500 uppercase tracking-wider block mb-2">Temporal Burst</span>
                 <div className="flex items-center gap-3">
                     <div className="flex items-center gap-1.5">
-                        <Activity className={`w-4 h-4 ${snapshot.burst_count > 3 ? 'text-orange-500' : 'text-gray-400'}`} />
-                        <span className={`font-semibold text-sm ${snapshot.burst_count > 3 ? 'text-orange-600 dark:text-orange-400' : 'text-gray-700 dark:text-gray-300'}`}>
+                        <Activity className={`w-4 h-4 ${snapshot.burst_count > 3 ? 'text-orange-500' : 'text-slate-400'}`} />
+                        <span className={`font-semibold text-sm ${snapshot.burst_count > 3 ? 'text-orange-600 dark:text-orange-400' : 'text-slate-700 dark:text-slate-300'}`}>
                             {snapshot.burst_count} fire{snapshot.burst_count !== 1 ? 's' : ''}
                         </span>
-                        <span className="text-xs text-gray-500">in {Math.round(snapshot.burst_window_sec / 60)} min window</span>
+                        <span className="text-xs text-slate-500">in {Math.round(snapshot.burst_window_sec / 60)} min window</span>
                     </div>
                     {bd.burst_bonus > 0 && (
                         <span className="badge bg-orange-100 text-orange-700 dark:bg-orange-900 dark:text-orange-200">
@@ -341,7 +341,7 @@ function UEBAPanel({ snapshot }: { snapshot: ContextSnapshot }) {
 
             {/* Privilege Info */}
             <div>
-                <span className="text-xs text-gray-500 uppercase tracking-wider block mb-2">Privilege Context</span>
+                <span className="text-xs text-slate-500 uppercase tracking-wider block mb-2">Privilege Context</span>
                 <div className="flex flex-wrap gap-2 text-sm">
                     {snapshot.integrity_level && (
                         <span className={`badge ${snapshot.integrity_level === 'System' || snapshot.integrity_level === 'High'
@@ -366,7 +366,7 @@ function UEBAPanel({ snapshot }: { snapshot: ContextSnapshot }) {
                         </span>
                     )}
                     {!snapshot.integrity_level && !snapshot.is_elevated && !snapshot.user_name && !snapshot.user_sid && (
-                        <span className="text-xs text-gray-400 italic">No privilege data captured.</span>
+                        <span className="text-xs text-slate-400 italic">No privilege data captured.</span>
                     )}
                 </div>
             </div>
@@ -475,8 +475,8 @@ function ScoreBreakdownPanel({ breakdown, totalScore }: { breakdown: ScoreBreakd
     const interactionVal = breakdown.interaction_bonus || 0;
 
     return (
-        <div className="space-y-4">
-            <span className="text-xs text-gray-500 uppercase tracking-wider block">Score Breakdown</span>
+        <div className="space-y-4 animate-slide-up-fade">
+            <span className="text-xs text-slate-500 uppercase tracking-wider block">Score Breakdown</span>
 
             {/* Visual bar chart */}
             <div className="space-y-2">
@@ -488,9 +488,9 @@ function ScoreBreakdownPanel({ breakdown, totalScore }: { breakdown: ScoreBreakd
                         <div key={row.label} className="flex items-center gap-3">
                             <div className="flex items-center gap-1.5 w-32 shrink-0">
                                 <span className={row.color}>{row.icon}</span>
-                                <span className="text-xs text-gray-600 dark:text-gray-400">{row.label}</span>
+                                <span className="text-xs text-slate-600 dark:text-slate-400">{row.label}</span>
                             </div>
-                            <div className="flex-1 h-5 bg-gray-100 dark:bg-gray-700 rounded overflow-hidden">
+                            <div className="flex-1 h-5 bg-slate-100 dark:bg-slate-700 rounded overflow-hidden">
                                 <div
                                     className={`h-full rounded transition-all duration-500 ${isDiscount ? 'bg-green-400 dark:bg-green-600' : 'bg-blue-400 dark:bg-blue-500'}`}
                                     style={{ width: `${width}%` }}
@@ -505,9 +505,9 @@ function ScoreBreakdownPanel({ breakdown, totalScore }: { breakdown: ScoreBreakd
             </div>
 
             {/* Formula summary */}
-            <div className="border-t border-gray-200 dark:border-gray-700 pt-3">
+            <div className="border-t border-slate-200 dark:border-slate-700 pt-3">
                 <div className="flex items-center justify-between">
-                    <div className="text-xs text-gray-500 font-mono">
+                    <div className="text-xs text-slate-500 font-mono">
                         {breakdown.base_score} + {breakdown.lineage_bonus} + {breakdown.privilege_bonus} + {breakdown.burst_bonus}
                         {breakdown.ueba_bonus > 0 && ` + ${breakdown.ueba_bonus}`}
                         {interactionVal > 0 && ` + ${interactionVal}`}
@@ -562,7 +562,7 @@ function AlertDetailModal({
     const innerContent = (
         <>
             {/* Tabs */}
-            <div className="flex border-b border-gray-200 dark:border-gray-700 px-4 mb-0 overflow-x-auto">
+            <div className="flex border-b border-slate-200 dark:border-slate-700 px-4 mb-0 overflow-x-auto">
                 {tabs.map((tab) => (
                     <button
                         key={tab.id}
@@ -580,7 +580,7 @@ function AlertDetailModal({
 
             {/* Summary Tab */}
             {activeTab === 'summary' && (
-                <div className="space-y-4">
+                <div className="space-y-4 animate-slide-up-fade">
                     {/* Risk Score hero */}
                     {alert.risk_score !== undefined && (
                         <div className={`rounded-xl p-4 flex items-center gap-4 ${alert.risk_score >= 90
@@ -595,16 +595,16 @@ function AlertDetailModal({
                                 <RiskScoreBadge score={alert.risk_score} riskLevel={alert.risk_level} />
                             </div>
                             <div>
-                                <p className="text-sm font-semibold text-gray-800 dark:text-gray-100">
+                                <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">
                                     Risk Score: {alert.risk_score}/100 — {getRiskScoreStyle(alert.risk_score).label}
                                 </p>
                                 {alert.false_positive_risk !== undefined && (
-                                    <p className="text-xs text-gray-500">
+                                    <p className="text-xs text-slate-500">
                                         FP Risk: {(alert.false_positive_risk * 100).toFixed(0)}% probability this is a false positive
                                     </p>
                                 )}
                                 {typeof breakdown?.context_multiplier === 'number' && (
-                                    <p className="text-xs text-gray-500">
+                                    <p className="text-xs text-slate-500">
                                         Context multiplier: {breakdown.context_multiplier.toFixed(2)}
                                         {typeof breakdown.user_role_weight === 'number' &&
                                             typeof breakdown.device_criticality_weight === 'number' &&
@@ -614,7 +614,7 @@ function AlertDetailModal({
                                     </p>
                                 )}
                                 {typeof breakdown?.quality_factor === 'number' && (
-                                    <p className="text-xs text-gray-500">
+                                    <p className="text-xs text-slate-500">
                                         Context quality factor: {breakdown.quality_factor.toFixed(2)}
                                         {typeof breakdown.context_quality_score === 'number'
                                             ? ` (quality ${breakdown.context_quality_score.toFixed(0)}%)`
@@ -633,70 +633,70 @@ function AlertDetailModal({
                     {/* Core fields grid */}
                     <div className="grid grid-cols-2 gap-x-6 gap-y-3">
                         <div className="col-span-2">
-                            <label className="text-[10px] text-gray-400 uppercase tracking-wider font-bold">Rule</label>
-                            <p className="font-semibold text-gray-900 dark:text-white text-sm mt-0.5">{alert.rule_title}</p>
-                            {alert.rule_id && <p className="font-mono text-[10px] text-gray-400 mt-0.5 truncate" title={alert.rule_id}>{alert.rule_id}</p>}
+                            <label className="text-[10px] text-slate-400 uppercase tracking-wider font-bold">Rule</label>
+                            <p className="font-semibold text-slate-900 dark:text-white text-sm mt-0.5">{alert.rule_title}</p>
+                            {alert.rule_id && <p className="font-mono text-[10px] text-slate-400 mt-0.5 truncate" title={alert.rule_id}>{alert.rule_id}</p>}
                         </div>
                         <div>
-                            <label className="text-[10px] text-gray-400 uppercase tracking-wider font-bold">Category</label>
-                            <p className="text-gray-700 dark:text-gray-300 text-sm mt-0.5">{alert.category || '—'}</p>
+                            <label className="text-[10px] text-slate-400 uppercase tracking-wider font-bold">Category</label>
+                            <p className="text-slate-700 dark:text-slate-300 text-sm mt-0.5">{alert.category || '—'}</p>
                         </div>
                         <div>
-                            <label className="text-[10px] text-gray-400 uppercase tracking-wider font-bold">Severity</label>
+                            <label className="text-[10px] text-slate-400 uppercase tracking-wider font-bold">Severity</label>
                             <p className="mt-0.5"><span className={`badge text-[11px] font-bold ${severityColors[alert.severity]}`}>{alert.severity.toUpperCase()}</span></p>
                         </div>
                         <div>
-                            <label className="text-[10px] text-gray-400 uppercase tracking-wider font-bold">Status</label>
+                            <label className="text-[10px] text-slate-400 uppercase tracking-wider font-bold">Status</label>
                             <p className="mt-0.5"><span className={`badge text-[11px] ${statusColors[alert.status]}`}>{alert.status.replace(/_/g, ' ')}</span></p>
                         </div>
                         <div>
-                            <label className="text-[10px] text-gray-400 uppercase tracking-wider font-bold">Confidence</label>
-                            <p className="text-gray-700 dark:text-gray-300 text-sm mt-0.5 font-semibold">{alert.confidence !== undefined ? `${(alert.confidence * 100).toFixed(1)}%` : '—'}</p>
+                            <label className="text-[10px] text-slate-400 uppercase tracking-wider font-bold">Confidence</label>
+                            <p className="text-slate-700 dark:text-slate-300 text-sm mt-0.5 font-semibold">{alert.confidence !== undefined ? `${(alert.confidence * 100).toFixed(1)}%` : '—'}</p>
                         </div>
                         <div>
-                            <label className="text-[10px] text-gray-400 uppercase tracking-wider font-bold">Event Count</label>
-                            <p className="text-gray-700 dark:text-gray-300 text-sm mt-0.5 font-semibold">{alert.event_count}</p>
+                            <label className="text-[10px] text-slate-400 uppercase tracking-wider font-bold">Event Count</label>
+                            <p className="text-slate-700 dark:text-slate-300 text-sm mt-0.5 font-semibold">{alert.event_count}</p>
                         </div>
                         <div>
-                            <label className="text-[10px] text-gray-400 uppercase tracking-wider font-bold">Detected At</label>
-                            <p className="text-gray-700 dark:text-gray-300 text-sm mt-0.5">{new Date(alert.timestamp).toLocaleString()}</p>
+                            <label className="text-[10px] text-slate-400 uppercase tracking-wider font-bold">Detected At</label>
+                            <p className="text-slate-700 dark:text-slate-300 text-sm mt-0.5">{new Date(alert.timestamp).toLocaleString()}</p>
                         </div>
                         <div className="col-span-2">
-                            <label className="text-[10px] text-gray-400 uppercase tracking-wider font-bold">Agent ID</label>
-                            <p className="font-mono text-xs text-gray-600 dark:text-gray-300 mt-0.5 break-all">{alert.agent_id}</p>
+                            <label className="text-[10px] text-slate-400 uppercase tracking-wider font-bold">Agent ID</label>
+                            <p className="font-mono text-xs text-slate-600 dark:text-slate-300 mt-0.5 break-all">{alert.agent_id}</p>
                         </div>
                         {alert.assigned_to && (
                             <div>
-                                <label className="text-[10px] text-gray-400 uppercase tracking-wider font-bold">Assigned To</label>
-                                <p className="text-gray-700 dark:text-gray-300 text-sm mt-0.5">{alert.assigned_to}</p>
+                                <label className="text-[10px] text-slate-400 uppercase tracking-wider font-bold">Assigned To</label>
+                                <p className="text-slate-700 dark:text-slate-300 text-sm mt-0.5">{alert.assigned_to}</p>
                             </div>
                         )}
                         {alert.acknowledged_at && (
                             <div>
-                                <label className="text-[10px] text-gray-400 uppercase tracking-wider font-bold">Acknowledged At</label>
-                                <p className="text-gray-700 dark:text-gray-300 text-sm mt-0.5">{new Date(alert.acknowledged_at).toLocaleString()}</p>
+                                <label className="text-[10px] text-slate-400 uppercase tracking-wider font-bold">Acknowledged At</label>
+                                <p className="text-slate-700 dark:text-slate-300 text-sm mt-0.5">{new Date(alert.acknowledged_at).toLocaleString()}</p>
                             </div>
                         )}
                         {alert.resolved_at && (
                             <div>
-                                <label className="text-[10px] text-gray-400 uppercase tracking-wider font-bold">Resolved At</label>
-                                <p className="text-gray-700 dark:text-gray-300 text-sm mt-0.5">{new Date(alert.resolved_at).toLocaleString()}</p>
+                                <label className="text-[10px] text-slate-400 uppercase tracking-wider font-bold">Resolved At</label>
+                                <p className="text-slate-700 dark:text-slate-300 text-sm mt-0.5">{new Date(alert.resolved_at).toLocaleString()}</p>
                             </div>
                         )}
                         <div>
-                            <label className="text-[10px] text-gray-400 uppercase tracking-wider font-bold">Created</label>
-                            <p className="text-gray-700 dark:text-gray-300 text-sm mt-0.5">{new Date(alert.created_at).toLocaleString()}</p>
+                            <label className="text-[10px] text-slate-400 uppercase tracking-wider font-bold">Created</label>
+                            <p className="text-slate-700 dark:text-slate-300 text-sm mt-0.5">{new Date(alert.created_at).toLocaleString()}</p>
                         </div>
                         <div>
-                            <label className="text-[10px] text-gray-400 uppercase tracking-wider font-bold">Updated</label>
-                            <p className="text-gray-700 dark:text-gray-300 text-sm mt-0.5">{new Date(alert.updated_at).toLocaleString()}</p>
+                            <label className="text-[10px] text-slate-400 uppercase tracking-wider font-bold">Updated</label>
+                            <p className="text-slate-700 dark:text-slate-300 text-sm mt-0.5">{new Date(alert.updated_at).toLocaleString()}</p>
                         </div>
                     </div>
 
                     {/* Tags */}
                     {alert.tags && Object.keys(alert.tags).length > 0 && (
                         <div>
-                            <label className="text-[10px] text-gray-400 uppercase tracking-wider font-bold block mb-1.5">Tags</label>
+                            <label className="text-[10px] text-slate-400 uppercase tracking-wider font-bold block mb-1.5">Tags</label>
                             <div className="flex flex-wrap gap-1.5">
                                 {Object.entries(alert.tags).map(([k, v]) => (
                                     <span key={k} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300">
@@ -711,7 +711,7 @@ function AlertDetailModal({
                     {alert.notes && (
                         <div className="rounded-lg border border-amber-200 dark:border-amber-800/50 bg-amber-50 dark:bg-amber-900/10 p-3">
                             <label className="text-[10px] text-amber-600 dark:text-amber-400 uppercase tracking-wider font-bold block mb-1">Analyst Notes</label>
-                            <p className="text-sm text-gray-700 dark:text-gray-300">{alert.notes}</p>
+                            <p className="text-sm text-slate-700 dark:text-slate-300">{alert.notes}</p>
                         </div>
                     )}
                 </div>
@@ -722,8 +722,8 @@ function AlertDetailModal({
                 <div className="space-y-6">
                     {!hasContext ? (
                         <div className="text-center py-8">
-                            <Info className="w-10 h-10 text-gray-300 mx-auto mb-3" />
-                            <p className="text-sm text-gray-500">
+                            <Info className="w-10 h-10 text-slate-300 mx-auto mb-3" />
+                            <p className="text-sm text-slate-500">
                                 No context snapshot available for this alert.<br />
                                 <span className="text-xs">Context scoring requires Sprint 3+ backend deployment.</span>
                             </p>
@@ -739,18 +739,18 @@ function AlertDetailModal({
                             )}
 
                             {/* Process Lineage */}
-                            <div className="rounded-xl border border-gray-200 dark:border-gray-700 p-4">
+                            <div className="rounded-xl border border-slate-200 dark:border-slate-700 p-4">
                                 <LineageTree snapshot={snapshot!} />
                             </div>
 
                             {/* UEBA & Burst Signals */}
-                            <div className="rounded-xl border border-gray-200 dark:border-gray-700 p-4">
+                            <div className="rounded-xl border border-slate-200 dark:border-slate-700 p-4">
                                 <UEBAPanel snapshot={snapshot!} />
                             </div>
 
                             {/* Score Breakdown */}
                             {breakdown && (
-                                <div className="rounded-xl border border-gray-200 dark:border-gray-700 p-4">
+                                <div className="rounded-xl border border-slate-200 dark:border-slate-700 p-4">
                                     <ScoreBreakdownPanel
                                         breakdown={breakdown}
                                         totalScore={alert.risk_score ?? breakdown.final_score}
@@ -760,7 +760,7 @@ function AlertDetailModal({
 
                             {/* Missing context fields */}
                             {snapshot!.missing_context_fields && snapshot!.missing_context_fields.length > 0 && (
-                                <div className="text-xs text-gray-400 border border-slate-200 dark:border-slate-700 rounded-lg p-3">
+                                <div className="text-xs text-slate-400 border border-slate-200 dark:border-slate-700 rounded-lg p-3">
                                     <span className="font-bold text-slate-500">Missing context: </span>
                                     {snapshot!.missing_context_fields.join(', ')}
                                 </div>
@@ -768,7 +768,7 @@ function AlertDetailModal({
 
                             {/* Scored At */}
                             {snapshot?.scored_at && (
-                                <p className="text-xs text-gray-400 text-right">
+                                <p className="text-xs text-slate-400 text-right">
                                     Context scored at {new Date(snapshot.scored_at).toLocaleString()}
                                 </p>
                             )}
@@ -779,16 +779,16 @@ function AlertDetailModal({
 
             {/* Event Details Tab */}
             {activeTab === 'event' && (
-                <div className="space-y-4">
+                <div className="space-y-4 animate-slide-up-fade">
                     {/* Matched Fields */}
                     {alert.matched_fields && Object.keys(alert.matched_fields).length > 0 && (
                         <div>
-                            <label className="text-[10px] text-gray-400 uppercase tracking-wider font-bold block mb-2">Matched Detection Fields</label>
+                            <label className="text-[10px] text-slate-400 uppercase tracking-wider font-bold block mb-2">Matched Detection Fields</label>
                             <div className="space-y-1.5">
                                 {Object.entries(alert.matched_fields).map(([key, val]) => (
-                                    <div key={key} className="flex items-start gap-3 p-2 bg-gray-50 dark:bg-gray-800 rounded-lg text-sm">
+                                    <div key={key} className="flex items-start gap-3 p-2 bg-slate-50 dark:bg-slate-800 rounded-lg text-sm">
                                         <span className="font-mono text-indigo-600 dark:text-indigo-400 text-xs shrink-0 mt-0.5 w-32 truncate" title={key}>{key}</span>
-                                        <span className="font-mono text-gray-700 dark:text-gray-300 text-xs break-all">{json_safe(val)}</span>
+                                        <span className="font-mono text-slate-700 dark:text-slate-300 text-xs break-all">{json_safe(val)}</span>
                                     </div>
                                 ))}
                             </div>
@@ -797,7 +797,7 @@ function AlertDetailModal({
                     {/* Event IDs */}
                     {(alert as Alert & { event_ids?: string[] }).event_ids?.length! > 0 && (
                         <div>
-                            <label className="text-[10px] text-gray-400 uppercase tracking-wider font-bold block mb-2">Correlated Event IDs</label>
+                            <label className="text-[10px] text-slate-400 uppercase tracking-wider font-bold block mb-2">Correlated Event IDs</label>
                             <div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto">
                                 {(alert as Alert & { event_ids?: string[] }).event_ids!.map(id => (
                                     <span key={id} className="font-mono text-[10px] bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 px-2 py-0.5 rounded">{id}</span>
@@ -807,8 +807,8 @@ function AlertDetailModal({
                     )}
                     {/* Raw event data */}
                     <div>
-                        <label className="text-[10px] text-gray-400 uppercase tracking-wider font-bold block mb-2">Raw Event Payload</label>
-                        <pre className="p-3 bg-gray-100 dark:bg-gray-900 rounded-lg overflow-auto max-h-64 text-[11px] font-mono text-gray-700 dark:text-gray-300 whitespace-pre-wrap break-all">
+                        <label className="text-[10px] text-slate-400 uppercase tracking-wider font-bold block mb-2">Raw Event Payload</label>
+                        <pre className="p-3 bg-slate-100 dark:bg-slate-900 rounded-lg overflow-auto max-h-64 text-[11px] font-mono text-slate-700 dark:text-slate-300 whitespace-pre-wrap break-all">
                             {JSON.stringify(alert.event_data || {}, null, 2)}
                         </pre>
                     </div>
@@ -817,18 +817,18 @@ function AlertDetailModal({
 
             {/* Aggregation Tab */}
             {activeTab === 'aggregation' && (
-                <div className="space-y-5">
+                <div className="space-y-5 animate-slide-up-fade">
                     <div className="grid grid-cols-2 gap-4">
                         {(alert as Alert & { match_count?: number }).match_count !== undefined && (
                             <div className="rounded-xl border border-slate-200 dark:border-slate-700 p-4 text-center">
                                 <p className="text-3xl font-extrabold text-indigo-600 dark:text-indigo-400">{(alert as Alert & { match_count?: number }).match_count}</p>
-                                <p className="text-xs text-gray-500 mt-1 uppercase tracking-wider">Rule Matches</p>
+                                <p className="text-xs text-slate-500 mt-1 uppercase tracking-wider">Rule Matches</p>
                             </div>
                         )}
                         {(alert as Alert & { combined_confidence?: number }).combined_confidence !== undefined && (
                             <div className="rounded-xl border border-slate-200 dark:border-slate-700 p-4 text-center">
                                 <p className="text-3xl font-extrabold text-emerald-600 dark:text-emerald-400">{((alert as Alert & { combined_confidence?: number }).combined_confidence! * 100).toFixed(0)}%</p>
-                                <p className="text-xs text-gray-500 mt-1 uppercase tracking-wider">Combined Confidence</p>
+                                <p className="text-xs text-slate-500 mt-1 uppercase tracking-wider">Combined Confidence</p>
                             </div>
                         )}
                     </div>
@@ -845,7 +845,7 @@ function AlertDetailModal({
                     )}
                     {(alert as Alert & { related_rules?: string[] }).related_rules?.length! > 0 && (
                         <div>
-                            <label className="text-[10px] text-gray-400 uppercase tracking-wider font-bold block mb-2">Related Rules Detected</label>
+                            <label className="text-[10px] text-slate-400 uppercase tracking-wider font-bold block mb-2">Related Rules Detected</label>
                             <div className="space-y-1.5">
                                 {(alert as Alert & { related_rules?: string[] }).related_rules!.map((r, i) => (
                                     <div key={i} className="font-mono text-xs bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 px-3 py-1.5 rounded-lg">{r}</div>
@@ -858,28 +858,28 @@ function AlertDetailModal({
 
             {/* MITRE ATT&CK Tab */}
             {activeTab === 'mitre' && (
-                <div className="space-y-4">
+                <div className="space-y-4 animate-slide-up-fade">
                     <div>
-                        <label className="text-xs text-gray-500 uppercase tracking-wider">Tactics</label>
+                        <label className="text-xs text-slate-500 uppercase tracking-wider">Tactics</label>
                         <div className="flex flex-wrap gap-2 mt-2">
                             {(alert.mitre_tactics || []).length > 0 ? (
                                 alert.mitre_tactics?.map((tactic) => (
                                     <span key={tactic} className="badge badge-warning">{tactic}</span>
                                 ))
                             ) : (
-                                <span className="text-sm text-gray-400">No tactics identified</span>
+                                <span className="text-sm text-slate-400">No tactics identified</span>
                             )}
                         </div>
                     </div>
                     <div>
-                        <label className="text-xs text-gray-500 uppercase tracking-wider">Techniques</label>
+                        <label className="text-xs text-slate-500 uppercase tracking-wider">Techniques</label>
                         <div className="flex flex-wrap gap-2 mt-2">
                             {(alert.mitre_techniques || []).length > 0 ? (
                                 alert.mitre_techniques?.map((technique) => (
                                     <span key={technique} className="badge badge-info">{technique}</span>
                                 ))
                             ) : (
-                                <span className="text-sm text-gray-400">No techniques identified</span>
+                                <span className="text-sm text-slate-400">No techniques identified</span>
                             )}
                         </div>
                     </div>
@@ -888,8 +888,8 @@ function AlertDetailModal({
 
             {/* Actions Tab */}
             {activeTab === 'actions' && (
-                <div className="space-y-4">
-                    <p className="text-sm text-gray-600 dark:text-gray-400">
+                <div className="space-y-4 animate-slide-up-fade">
+                    <p className="text-sm text-slate-600 dark:text-slate-400">
                         Update the alert status to track investigation progress.
                     </p>
                     <div className="grid grid-cols-2 gap-3">
@@ -986,7 +986,7 @@ const BulkActionsToolbar = React.memo(function BulkActionsToolbar({
             <button onClick={() => onAction('false_positive')} className="btn btn-sm btn-secondary">
                 False Positive
             </button>
-            <button onClick={onClear} className="p-1 text-gray-500 hover:text-gray-700">
+            <button onClick={onClear} className="p-1 text-slate-500 hover:text-slate-700">
                 <X className="w-4 h-4" />
             </button>
         </div>
@@ -1123,9 +1123,9 @@ export default function Alerts() {
             sort: sortBy,
             order: sortOrder,
         }),
-        // DB is the source of truth. Keep lightweight fallback polling while
-        // WebSocket stream provides low-latency invalidation triggers.
-        refetchInterval: 30000,
+        // DB is the source of truth. Keep fallback polling so alerts still update
+        // even when the WebSocket stream is unavailable (proxy/ws misconfig).
+        refetchInterval: 5000,
     });
 
     const alerts = data?.alerts || [];
@@ -1241,8 +1241,8 @@ export default function Alerts() {
         return (
             <div className="card text-center py-12">
                 <AlertTriangle className="w-12 h-12 text-red-400 mx-auto mb-4" />
-                <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">Failed to Load Alerts</h3>
-                <p className="text-gray-500">Please try again later.</p>
+                <h3 className="text-lg font-medium text-slate-900 dark:text-white mb-2">Failed to Load Alerts</h3>
+                <p className="text-slate-500">Please try again later.</p>
             </div>
         );
     }
@@ -1256,7 +1256,7 @@ export default function Alerts() {
             <div className="relative flex-1 flex flex-col min-h-0 space-y-4 lg:space-y-6  w-full">
                 <div className="flex items-center justify-between shrink-0">
                     <div>
-                        <h1 className="text-3xl font-bold text-slate-900 dark:text-white tracking-tight">Alerts (Triage)</h1>
+                        <h2 className="text-xl font-bold text-slate-900 dark:text-white tracking-tight">Alerts (Triage)</h2>
                         <p className="text-sm text-slate-500 mt-1">
                             Analyst triage queue.
                         </p>
@@ -1290,9 +1290,9 @@ export default function Alerts() {
                             label="Date Range"
                         />
                         <div className="flex-1 min-w-[200px]">
-                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Search</label>
+                            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Search</label>
                             <div className="relative">
-                                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                                 <input
                                     type="text"
                                     placeholder="   Search by rule, agent..."

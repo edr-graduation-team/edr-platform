@@ -174,9 +174,9 @@ export default function Rules() {
                 {/* ── Header ── */}
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 shrink-0">
                     <div>
-                        <h1 className="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-slate-900 to-slate-600 dark:from-white dark:to-slate-300 tracking-tight">
+                        <h2 className="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-slate-900 to-slate-600 dark:from-white dark:to-slate-300 tracking-tight">
                             Detection Rules
-                        </h1>
+                        </h2>
                         <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
                             Manage Sigma &amp; behavioral detection signatures
                         </p>

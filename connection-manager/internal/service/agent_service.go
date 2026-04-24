@@ -3,6 +3,7 @@ package service
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -131,6 +132,15 @@ func NewAgentService(
 // agent unable to obtain its certificate.
 func (s *agentServiceImpl) Register(ctx context.Context, req *RegisterAgentRequest) (*RegisterAgentResponse, error) {
 	if req.HardwareID == "" {
+		if s.logger != nil {
+			s.logger.WithFields(logrus.Fields{
+				"missing_hardware_id": true,
+				"token_present":       strings.TrimSpace(req.InstallationToken) != "",
+				"hostname_present":    strings.TrimSpace(req.Hostname) != "",
+				"os_type_present":     strings.TrimSpace(req.OSType) != "",
+				"csr_present":         len(req.CSRData) > 0,
+			}).Warn("[ENROLL] Rejecting registration: missing required fields (hardware_id)")
+		}
 		// HardwareID is required to make enrollment idempotent per-device
 		// and to prevent double consumption of max_uses during retries.
 		return nil, ErrInvalidRequest

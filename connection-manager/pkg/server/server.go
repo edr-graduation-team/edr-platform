@@ -291,13 +291,31 @@ func (s *Server) RegisterAgent(ctx context.Context, req *edrv1.AgentRegistration
 		}, nil
 	}
 
+	// High-signal diagnostics for enrollment issues (no secrets logged).
+	if s.logger != nil {
+		tok := strings.TrimSpace(req.InstallationToken)
+		_, tokIsUUIDErr := uuid.Parse(tok)
+		s.logger.WithFields(logrus.Fields{
+			"token_len":        len(tok),
+			"token_is_uuid":    tokIsUUIDErr == nil,
+			"hardware_id_len":  len(strings.TrimSpace(req.HardwareId)),
+			"hostname_present": strings.TrimSpace(req.Hostname) != "",
+		}).Debug("[ENROLL] RegisterAgent received")
+	}
+
 	// Map gRPC request to service request
+	hwid := strings.TrimSpace(req.HardwareId)
+	// Compatibility: if the client uses a stale protobuf descriptor (manual patch),
+	// hardware_id may not marshal. In that case, accept the value via Tags.
+	if hwid == "" && req.Tags != nil {
+		hwid = strings.TrimSpace(req.Tags["hardware_id"])
+	}
 	svcReq := &service.RegisterAgentRequest{
 		InstallationToken: req.InstallationToken,
 		Hostname:          req.Hostname,
 		OSType:            req.OsType,
 		OSVersion:         req.OsVersion,
-		HardwareID:        req.HardwareId,
+		HardwareID:        hwid,
 		CPUCount:          int(req.CpuCount),
 		MemoryMB:          req.MemoryMb,
 		AgentVersion:      req.AgentVersion,

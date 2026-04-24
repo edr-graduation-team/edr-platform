@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -146,6 +147,12 @@ func (r *PostgresEnrollmentTokenRepository) HasConsumption(ctx context.Context, 
 		)`, tokenID, hardwareID,
 	).Scan(&exists)
 	if err != nil {
+		// Backward compatibility: if the migrations creating enrollment_token_consumptions
+		// were not applied yet, don't hard-fail enrollment. We simply treat it as
+		// "no prior consumption" (idempotency disabled until migrations are applied).
+		if strings.Contains(err.Error(), "enrollment_token_consumptions") && strings.Contains(err.Error(), "does not exist") {
+			return false, nil
+		}
 		return false, fmt.Errorf("failed to check token consumption: %w", err)
 	}
 	return exists, nil
@@ -158,6 +165,11 @@ func (r *PostgresEnrollmentTokenRepository) RecordConsumption(ctx context.Contex
 		ON CONFLICT (token_id, hardware_id) DO NOTHING`
 	result, err := r.pool.Exec(ctx, query, tokenID, hardwareID, agentID)
 	if err != nil {
+		// Backward compatibility: if the consumptions table doesn't exist yet,
+		// proceed as if this is a new consumption so max_uses still works.
+		if strings.Contains(err.Error(), "enrollment_token_consumptions") && strings.Contains(err.Error(), "does not exist") {
+			return true, nil
+		}
 		return false, fmt.Errorf("failed to record token consumption: %w", err)
 	}
 	return result.RowsAffected() > 0, nil

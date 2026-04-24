@@ -397,6 +397,8 @@ message AgentRegistrationRequest {
   string agent_version = 20;
   repeated string ip_addresses = 30;
   string mac_address = 31;
+  // Stable device fingerprint (e.g. Windows MachineGuid). Used for idempotent enrollment.
+  string hardware_id = 32;
   map<string, string> tags = 40;
 }
 

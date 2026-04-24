@@ -3,6 +3,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -163,7 +164,7 @@ func (s *agentServiceImpl) Register(ctx context.Context, req *RegisterAgentReque
 				consumed, cErr := s.enrollmentTokenRepo.HasConsumption(ctx, et.ID, req.HardwareID)
 				if cErr != nil {
 					s.logger.WithError(cErr).Warn("Failed to check token consumption")
-					return nil, ErrInternal
+					return nil, fmt.Errorf("token consumption check failed: %w", cErr)
 				}
 				if !consumed {
 					s.logger.Warnf("Enrollment token %s exhausted (max_uses reached)", et.ID)
@@ -174,7 +175,7 @@ func (s *agentServiceImpl) Register(ctx context.Context, req *RegisterAgentReque
 				consumed, cErr := s.enrollmentTokenRepo.HasConsumption(ctx, et.ID, req.HardwareID)
 				if cErr != nil {
 					s.logger.WithError(cErr).Warn("Failed to check token consumption")
-					return nil, ErrInternal
+					return nil, fmt.Errorf("token consumption check failed: %w", cErr)
 				}
 				if !consumed {
 					s.logger.Warnf("Enrollment token %s is inactive (revoked/deactivated)", et.ID)
@@ -247,7 +248,7 @@ func (s *agentServiceImpl) Register(ctx context.Context, req *RegisterAgentReque
 
 	if err := s.agentRepo.UpsertByHostname(ctx, agent); err != nil {
 		s.logger.WithError(err).Error("Failed to upsert agent")
-		return nil, ErrInternal
+		return nil, fmt.Errorf("failed to persist agent registration: %w", err)
 	}
 
 	// 5. Attempt certificate issuance (agent row now exists → FK satisfied).
@@ -287,7 +288,7 @@ func (s *agentServiceImpl) Register(ctx context.Context, req *RegisterAgentReque
 					"agent_id":     agentID,
 					"hardware_id_present": strings.TrimSpace(req.HardwareID) != "",
 				}).Error("Failed to record enrollment token consumption")
-				return nil, ErrInternal
+				return nil, fmt.Errorf("failed to record enrollment token consumption: %w", err)
 			}
 
 			if inserted {

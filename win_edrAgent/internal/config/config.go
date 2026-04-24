@@ -13,6 +13,13 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// DefaultGRPCServerCertName is the DNS identity in the Connection Manager's
+// TLS certificate (see connection-manager certgen). The agent often dials a
+// different hostname (e.g. edr.local from the hosts file, or a public IP) but
+// TLS verification must use this SNI, not the dial host, unless you deploy
+// a certificate with matching SANs for that hostname.
+const DefaultGRPCServerCertName = "edr-connection-manager"
+
 // Config represents the complete agent configuration.
 type Config struct {
 	Server     ServerConfig    `yaml:"server"`
@@ -198,7 +205,7 @@ func DefaultConfig() *Config {
 			ReconnectDelay:    1 * time.Second,
 			MaxReconnectDelay: 30 * time.Second,
 			HeartbeatInterval: 10 * time.Second,
-			TLSServerName:     "edr-connection-manager",
+			TLSServerName:     DefaultGRPCServerCertName,
 		},
 		Agent: AgentConfig{
 			ID:             uuid.New().String(),

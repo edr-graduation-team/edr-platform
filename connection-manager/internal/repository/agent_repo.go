@@ -32,6 +32,7 @@ func NewPostgresAgentRepository(pool *pgxpool.Pool) *PostgresAgentRepository {
 const agentSelectColumns = `
 	id, hostname, COALESCE(status, 'pending'),
 	COALESCE(os_type, ''), COALESCE(os_version, ''),
+	COALESCE(hardware_id, ''),
 	COALESCE(cpu_count, 0), COALESCE(memory_mb, 0),
 	COALESCE(agent_version, ''), installed_date,
 	COALESCE(last_seen, created_at),
@@ -49,12 +50,12 @@ const agentSelectColumns = `
 func (r *PostgresAgentRepository) Create(ctx context.Context, agent *models.Agent) error {
 	query := `
 		INSERT INTO agents (
-			id, hostname, status, os_type, os_version, cpu_count, memory_mb,
+			id, hostname, status, os_type, os_version, hardware_id, cpu_count, memory_mb,
 			agent_version, installed_date, last_seen, events_collected, events_delivered,
 			queue_depth, cpu_usage, memory_used_mb, health_score, tags, metadata,
 			created_at, updated_at
 		) VALUES (
-			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20
+			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21
 		)`
 
 	_, err := r.pool.Exec(ctx, query,
@@ -63,6 +64,7 @@ func (r *PostgresAgentRepository) Create(ctx context.Context, agent *models.Agen
 		agent.Status,
 		agent.OSType,
 		agent.OSVersion,
+		agent.HardwareID,
 		agent.CPUCount,
 		agent.MemoryMB,
 		agent.AgentVersion,
@@ -100,6 +102,7 @@ func (r *PostgresAgentRepository) GetByID(ctx context.Context, id uuid.UUID) (*m
 		&agent.Status,
 		&agent.OSType,
 		&agent.OSVersion,
+		&agent.HardwareID,
 		&agent.CPUCount,
 		&agent.MemoryMB,
 		&agent.AgentVersion,
@@ -145,6 +148,7 @@ func (r *PostgresAgentRepository) GetByHostname(ctx context.Context, hostname st
 		&agent.Status,
 		&agent.OSType,
 		&agent.OSVersion,
+		&agent.HardwareID,
 		&agent.CPUCount,
 		&agent.MemoryMB,
 		&agent.AgentVersion,
@@ -182,11 +186,12 @@ func (r *PostgresAgentRepository) Update(ctx context.Context, agent *models.Agen
 	query := `
 		UPDATE agents SET
 			hostname = $2, status = $3, os_type = $4, os_version = $5,
-			cpu_count = $6, memory_mb = $7, agent_version = $8,
-			last_seen = $9, events_collected = $10, events_delivered = $11,
-			queue_depth = $12, cpu_usage = $13, memory_used_mb = $14,
-			health_score = $15, current_cert_id = $16, cert_expires_at = $17,
-			tags = $18, metadata = $19, updated_at = $20
+			hardware_id = $6,
+			cpu_count = $7, memory_mb = $8, agent_version = $9,
+			last_seen = $10, events_collected = $11, events_delivered = $12,
+			queue_depth = $13, cpu_usage = $14, memory_used_mb = $15,
+			health_score = $16, current_cert_id = $17, cert_expires_at = $18,
+			tags = $19, metadata = $20, updated_at = $21
 		WHERE id = $1`
 
 	result, err := r.pool.Exec(ctx, query,
@@ -195,6 +200,7 @@ func (r *PostgresAgentRepository) Update(ctx context.Context, agent *models.Agen
 		agent.Status,
 		agent.OSType,
 		agent.OSVersion,
+		agent.HardwareID,
 		agent.CPUCount,
 		agent.MemoryMB,
 		agent.AgentVersion,
@@ -378,6 +384,7 @@ func (r *PostgresAgentRepository) List(ctx context.Context, filter AgentFilter) 
 			&agent.Status,
 			&agent.OSType,
 			&agent.OSVersion,
+			&agent.HardwareID,
 			&agent.CPUCount,
 			&agent.MemoryMB,
 			&agent.AgentVersion,
@@ -457,6 +464,7 @@ func (r *PostgresAgentRepository) GetAgentsNeedingCertRenewal(ctx context.Contex
 			&agent.Status,
 			&agent.OSType,
 			&agent.OSVersion,
+			&agent.HardwareID,
 			&agent.CPUCount,
 			&agent.MemoryMB,
 			&agent.AgentVersion,
@@ -577,20 +585,21 @@ func (r *PostgresAgentRepository) UpsertByHostname(ctx context.Context, agent *m
 	// 2. UPSERT the agent row — now safe to change the id (no FK references remain).
 	query := `
 		INSERT INTO agents (
-			id, hostname, status, os_type, os_version, cpu_count, memory_mb,
+			id, hostname, status, os_type, os_version, hardware_id, cpu_count, memory_mb,
 			agent_version, installed_date, last_seen, events_collected, events_delivered,
 			events_dropped, queue_depth, cpu_usage, memory_used_mb, health_score,
 			tags, metadata, created_at, updated_at
 		) VALUES (
-			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
 			0, 0, 0, 0, 0.0, 0, 0.0,
-			$11, $12, $13, $13
+			$12, $13, $14, $14
 		)
 		ON CONFLICT (hostname) DO UPDATE SET
 			id             = EXCLUDED.id,
 			status         = EXCLUDED.status,
 			os_type        = EXCLUDED.os_type,
 			os_version     = EXCLUDED.os_version,
+			hardware_id    = EXCLUDED.hardware_id,
 			cpu_count      = EXCLUDED.cpu_count,
 			memory_mb      = EXCLUDED.memory_mb,
 			agent_version  = EXCLUDED.agent_version,
@@ -616,14 +625,15 @@ func (r *PostgresAgentRepository) UpsertByHostname(ctx context.Context, agent *m
 		agent.Status,       // $3
 		agent.OSType,       // $4
 		agent.OSVersion,    // $5
-		agent.CPUCount,     // $6
-		agent.MemoryMB,     // $7
-		agent.AgentVersion, // $8
-		now,                // $9  installed_date
-		now,                // $10 last_seen
-		agent.Tags,         // $11
-		agent.Metadata,     // $12
-		now,                // $13 created_at / updated_at
+		agent.HardwareID,   // $6
+		agent.CPUCount,     // $7
+		agent.MemoryMB,     // $8
+		agent.AgentVersion, // $9
+		now,                // $10  installed_date
+		now,                // $11 last_seen
+		agent.Tags,         // $12
+		agent.Metadata,     // $13
+		now,                // $14 created_at / updated_at
 	)
 	if err != nil {
 		return fmt.Errorf("failed to upsert agent by hostname: %w", err)

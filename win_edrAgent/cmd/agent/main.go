@@ -478,6 +478,8 @@ func runUpdate(
 	fmt.Println(" EDR Agent — In-Place Upgrade (-update)")
 	fmt.Println("════════════════════════════════════════")
 
+	requireElevationForUpdate()
+
 	if !service.ServiceExists() {
 		fmt.Fprintf(os.Stderr, "\n[X] Error: EDR Agent is not installed on this system.\n")
 		fmt.Fprintf(os.Stderr, "    Please install first using: edr-agent.exe -install\n")

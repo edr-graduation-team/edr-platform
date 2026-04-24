@@ -52,6 +52,7 @@ type RegisterAgentRequest struct {
 	Hostname          string
 	OSType            string
 	OSVersion         string
+	HardwareID        string
 	CPUCount          int
 	MemoryMB          int64
 	AgentVersion      string
@@ -129,15 +130,46 @@ func NewAgentService(
 // the "Enrollment Catch-22" where a burned token + pending status left the
 // agent unable to obtain its certificate.
 func (s *agentServiceImpl) Register(ctx context.Context, req *RegisterAgentRequest) (*RegisterAgentResponse, error) {
+	if req.HardwareID == "" {
+		// HardwareID is required to make enrollment idempotent per-device
+		// and to prevent double consumption of max_uses during retries.
+		return nil, ErrInvalidRequest
+	}
+
 	// 1. Validate token: try dynamic enrollment tokens first, then fall back to legacy installation tokens.
 	var legacyToken *models.InstallationToken
 	var enrollmentToken *models.EnrollmentToken
 
 	if s.enrollmentTokenRepo != nil {
 		if et, err := s.enrollmentTokenRepo.GetByToken(ctx, req.InstallationToken); err == nil {
-			if !et.IsValid() {
-				s.logger.Warnf("Enrollment token %s is invalid (revoked/expired/max-uses)", et.ID)
+			// Validate in a way that supports idempotency: if the token is maxed-out
+			// but THIS hardware_id already consumed it, allow re-enrollment without
+			// consuming another seat (still reject true expiry).
+			if et.ExpiresAt != nil && time.Now().After(*et.ExpiresAt) {
 				return nil, ErrExpiredToken
+			}
+
+			if et.MaxUses != nil && et.UseCount >= *et.MaxUses {
+				consumed, cErr := s.enrollmentTokenRepo.HasConsumption(ctx, et.ID, req.HardwareID)
+				if cErr != nil {
+					s.logger.WithError(cErr).Warn("Failed to check token consumption")
+					return nil, ErrInternal
+				}
+				if !consumed {
+					s.logger.Warnf("Enrollment token %s exhausted (max_uses reached)", et.ID)
+					return nil, ErrExpiredToken
+				}
+			}
+			if !et.IsActive {
+				consumed, cErr := s.enrollmentTokenRepo.HasConsumption(ctx, et.ID, req.HardwareID)
+				if cErr != nil {
+					s.logger.WithError(cErr).Warn("Failed to check token consumption")
+					return nil, ErrInternal
+				}
+				if !consumed {
+					s.logger.Warnf("Enrollment token %s is inactive (revoked/deactivated)", et.ID)
+					return nil, ErrExpiredToken
+				}
 			}
 			enrollmentToken = et
 		}
@@ -185,6 +217,7 @@ func (s *agentServiceImpl) Register(ctx context.Context, req *RegisterAgentReque
 		Status:        models.AgentStatusPending,
 		OSType:        req.OSType,
 		OSVersion:     req.OSVersion,
+		HardwareID:    req.HardwareID,
 		CPUCount:      req.CPUCount,
 		MemoryMB:      req.MemoryMB,
 		AgentVersion:  req.AgentVersion,
@@ -235,25 +268,27 @@ func (s *agentServiceImpl) Register(ctx context.Context, req *RegisterAgentReque
 		// purpose and is permanently destroyed — both from the dashboard listing and
 		// from the database — so it can never be replayed to impersonate another agent.
 		if enrollmentToken != nil {
-			// Single-use (MaxUses nil or <=1): delete immediately so the token is gone forever.
-			// Multi-use: bump use_count first, then delete once the quota is exhausted.
-			isSingleUse := enrollmentToken.MaxUses == nil || *enrollmentToken.MaxUses <= 1
-			if isSingleUse {
-				if err := s.enrollmentTokenRepo.Delete(ctx, enrollmentToken.ID); err != nil {
-					s.logger.WithError(err).Error("Failed to delete single-use enrollment token")
-				} else {
-					s.logger.Infof("Single-use enrollment token %s deleted after successful registration", enrollmentToken.ID)
-				}
-			} else {
+			// Idempotent consumption: count distinct (token_id, hardware_id) pairs, so the
+			// same device can't consume multiple seats by retrying enrollment.
+			inserted, err := s.enrollmentTokenRepo.RecordConsumption(ctx, enrollmentToken.ID, req.HardwareID, agentID)
+			if err != nil {
+				s.logger.WithError(err).Error("Failed to record enrollment token consumption")
+			}
+
+			if inserted {
 				if err := s.enrollmentTokenRepo.IncrementUsage(ctx, enrollmentToken.ID); err != nil {
 					s.logger.WithError(err).Error("Failed to increment enrollment token usage")
 				}
+			}
+
+			// Deactivate once exhausted (do not delete; needed for idempotency checks).
+			if inserted {
 				if fresh, err := s.enrollmentTokenRepo.GetByID(ctx, enrollmentToken.ID); err == nil && fresh != nil {
 					if fresh.MaxUses != nil && fresh.UseCount >= *fresh.MaxUses {
-						if err := s.enrollmentTokenRepo.Delete(ctx, fresh.ID); err != nil {
-							s.logger.WithError(err).Error("Failed to delete exhausted enrollment token")
+						if err := s.enrollmentTokenRepo.Revoke(ctx, fresh.ID); err != nil {
+							s.logger.WithError(err).Error("Failed to deactivate exhausted enrollment token")
 						} else {
-							s.logger.Infof("Exhausted enrollment token %s deleted after final registration", fresh.ID)
+							s.logger.Infof("Enrollment token %s deactivated after final registration", fresh.ID)
 						}
 					}
 				}

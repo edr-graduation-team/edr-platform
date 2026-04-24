@@ -19,8 +19,8 @@ import (
 // CreateEnrollmentTokenRequest is the JSON body for token generation.
 type CreateEnrollmentTokenRequest struct {
 	Description string `json:"description"`
-	ExpiresInH  *int   `json:"expires_in_hours"` // nil = never expires
-	MaxUses     *int   `json:"max_uses"`         // nil = unlimited
+	ExpiresInH  *int   `json:"expires_in_hours"` // nil = default 24 hours
+	MaxUses     *int   `json:"max_uses"`         // nil = default 1
 }
 
 // EnrollmentTokenResponse is the JSON representation returned to the dashboard.
@@ -88,6 +88,22 @@ func (h *Handlers) GenerateEnrollmentToken(c echo.Context) error {
 	var req CreateEnrollmentTokenRequest
 	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+	}
+
+	// Defaults: 1 use + 24 hours unless specified.
+	if req.MaxUses == nil {
+		v := 1
+		req.MaxUses = &v
+	}
+	if req.ExpiresInH == nil {
+		v := 24
+		req.ExpiresInH = &v
+	}
+	if req.MaxUses != nil && *req.MaxUses < 1 {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "max_uses must be >= 1"})
+	}
+	if req.ExpiresInH != nil && *req.ExpiresInH < 1 {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "expires_in_hours must be >= 1"})
 	}
 
 	tokenStr, err := models.GenerateSecureToken()

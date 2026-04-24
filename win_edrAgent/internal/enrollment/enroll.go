@@ -149,12 +149,14 @@ func EnsureEnrolled(cfg *config.Config, logger *logging.Logger, configFilePath s
 	defer conn.Close()
 
 	client := pb.NewEventIngestionServiceClient(conn)
+	hardwareID, _ := GetHardwareID()
 	req := &pb.AgentRegistrationRequest{
 		InstallationToken: cfg.Certs.BootstrapToken,
 		AgentId:           cfg.Agent.ID,
 		Csr:               csrPEM,
 		Hostname:          cfg.Agent.Hostname,
 		OsType:            "windows",
+		HardwareId:        hardwareID,
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), registerTimeout)

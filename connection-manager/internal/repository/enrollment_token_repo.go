@@ -137,6 +137,32 @@ func (r *PostgresEnrollmentTokenRepository) Delete(ctx context.Context, id uuid.
 	return nil
 }
 
+func (r *PostgresEnrollmentTokenRepository) HasConsumption(ctx context.Context, tokenID uuid.UUID, hardwareID string) (bool, error) {
+	var exists bool
+	err := r.pool.QueryRow(ctx,
+		`SELECT EXISTS(
+			SELECT 1 FROM enrollment_token_consumptions
+			WHERE token_id = $1 AND hardware_id = $2
+		)`, tokenID, hardwareID,
+	).Scan(&exists)
+	if err != nil {
+		return false, fmt.Errorf("failed to check token consumption: %w", err)
+	}
+	return exists, nil
+}
+
+func (r *PostgresEnrollmentTokenRepository) RecordConsumption(ctx context.Context, tokenID uuid.UUID, hardwareID string, agentID uuid.UUID) (bool, error) {
+	query := `
+		INSERT INTO enrollment_token_consumptions (token_id, hardware_id, agent_id)
+		VALUES ($1, $2, $3)
+		ON CONFLICT (token_id, hardware_id) DO NOTHING`
+	result, err := r.pool.Exec(ctx, query, tokenID, hardwareID, agentID)
+	if err != nil {
+		return false, fmt.Errorf("failed to record token consumption: %w", err)
+	}
+	return result.RowsAffected() > 0, nil
+}
+
 // scanOne executes query with a single arg and scans one row into EnrollmentToken.
 func (r *PostgresEnrollmentTokenRepository) scanOne(ctx context.Context, query string, arg interface{}) (*models.EnrollmentToken, error) {
 	var (

@@ -30,6 +30,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"sort"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -153,30 +154,78 @@ func computeFingerprint(req BuildRequest, agentSrcDir string) string {
 	// go.sum/go.mod do NOT change for most code edits. If we only hash those,
 	// the build cache can serve stale binaries after source changes.
 	//
-	// We hash a small set of high-impact source files that affect enrollment,
-	// service behavior, and security policies. This keeps builds fast while
-	// making cache invalidation reliable.
-	importantFiles := []string{
-		filepath.Join(agentSrcDir, "cmd", "agent", "main.go"),
-		filepath.Join(agentSrcDir, "internal", "enrollment", "enroll.go"),
-		filepath.Join(agentSrcDir, "internal", "enrollment", "hardware_id_windows.go"),
-		filepath.Join(agentSrcDir, "internal", "service", "service.go"),
-		filepath.Join(agentSrcDir, "internal", "command", "handler.go"),
-		filepath.Join(agentSrcDir, "internal", "protection", "tamper.go"),
-		filepath.Join(agentSrcDir, "internal", "security", "acl_windows.go"),
-		filepath.Join(agentSrcDir, "internal", "agent", "agent_security_windows.go"),
-	}
-	for _, p := range importantFiles {
-		if data, err := os.ReadFile(p); err == nil {
-			sum := sha256.Sum256(data)
-			fmt.Fprintf(h, "src_file=%s sha256=%x\n", filepath.Base(p), sum)
-		} else {
-			// Include the error to avoid false cache hits when the filesystem layout differs.
-			fmt.Fprintf(h, "src_file=%s unreadable=%v\n", filepath.Base(p), err)
-		}
+	// We deterministically hash the agent source tree:
+	//   - all *.go files
+	//   - go.mod, go.sum (already included above, but included here for the tree hash)
+	//   - internal/enrollment/ca-chain.crt (go:embed input)
+	//
+	// Exclude heavy/irrelevant dirs (.git, dist, node_modules, etc.).
+	treeHash, _ := computeAgentSourceHash(agentSrcDir)
+	if treeHash != "" {
+		fmt.Fprintf(h, "agent_src_hash=%s\n", treeHash)
 	}
 
 	return hex.EncodeToString(h.Sum(nil))
+}
+
+func computeAgentSourceHash(agentSrcDir string) (string, error) {
+	agentSrcDir = filepath.Clean(agentSrcDir)
+	var files []string
+
+	// Deterministic file list.
+	err := filepath.WalkDir(agentSrcDir, func(path string, d os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		name := d.Name()
+		if d.IsDir() {
+			switch name {
+			case ".git", "bin", "dist", "node_modules", ".idea", ".vscode", ".cursor", "__pycache__":
+				return filepath.SkipDir
+			}
+			return nil
+		}
+
+		rel, relErr := filepath.Rel(agentSrcDir, path)
+		if relErr != nil {
+			return relErr
+		}
+		rel = filepath.ToSlash(rel)
+
+		// Include: *.go, go.mod, go.sum, and ca-chain.crt used for go:embed.
+		if strings.HasSuffix(rel, ".go") || rel == "go.mod" || rel == "go.sum" || rel == "internal/enrollment/ca-chain.crt" {
+			files = append(files, rel)
+		}
+		return nil
+	})
+	if err != nil {
+		return "", err
+	}
+	sort.Strings(files)
+
+	h := sha256.New()
+	for _, rel := range files {
+		abs := filepath.Join(agentSrcDir, filepath.FromSlash(rel))
+		b, rErr := os.ReadFile(abs)
+		if rErr != nil {
+			return "", rErr
+		}
+		// Hash path + content to avoid collisions across renames.
+		fmt.Fprintf(h, "path=%s\n", rel)
+		sum := sha256.Sum256(b)
+		fmt.Fprintf(h, "sha256=%x\n", sum)
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+func readGitCommit(agentSrcDir string) string {
+	cmd := exec.Command("git", "rev-parse", "--short", "HEAD")
+	cmd.Dir = agentSrcDir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
 }
 
 func main() {
@@ -220,6 +269,8 @@ func main() {
 		// ── Compute content-addressable fingerprint ─────────────────────
 		fingerprint := computeFingerprint(req, agentSrc)
 		log.Printf("[BUILD] Fingerprint: %s", fingerprint[:16]+"...")
+		srcCommit := readGitCommit(agentSrc)
+		srcHash, _ := computeAgentSourceHash(agentSrc)
 
 		// ── Check cache ─────────────────────────────────────────────────
 		if binaryData, hashStr, buildDuration, ok := cache.Get(fingerprint); ok {
@@ -230,6 +281,13 @@ func main() {
 			w.Header().Set("Content-Disposition", `attachment; filename="edr-agent.exe"`)
 			w.Header().Set("X-Agent-SHA256", hashStr)
 			w.Header().Set("X-Build-Duration", buildDuration)
+			w.Header().Set("X-Agent-Fingerprint", fingerprint)
+			if srcCommit != "" {
+				w.Header().Set("X-Agent-Source-Commit", srcCommit)
+			}
+			if srcHash != "" {
+				w.Header().Set("X-Agent-Source-Hash", srcHash)
+			}
 			w.Header().Set("X-Cache-Hit", "true")
 			w.WriteHeader(http.StatusOK)
 			w.Write(binaryData)
@@ -262,6 +320,9 @@ func main() {
 			"-w", "-s",
 			fmt.Sprintf("-X main.Version=%s", "dashboard-build"),
 			fmt.Sprintf("-X main.BuildTime=%s", buildTime),
+		}
+		if srcCommit != "" {
+			ldflags = append(ldflags, fmt.Sprintf("-X main.GitCommit=%s", srcCommit))
 		}
 
 		if req.Token != "" {
@@ -358,6 +419,13 @@ func main() {
 		w.Header().Set("Content-Disposition", `attachment; filename="edr-agent.exe"`)
 		w.Header().Set("X-Agent-SHA256", hashStr)
 		w.Header().Set("X-Build-Duration", durationStr)
+		w.Header().Set("X-Agent-Fingerprint", fingerprint)
+		if srcCommit != "" {
+			w.Header().Set("X-Agent-Source-Commit", srcCommit)
+		}
+		if srcHash != "" {
+			w.Header().Set("X-Agent-Source-Hash", srcHash)
+		}
 		w.Header().Set("X-Cache-Hit", "false")
 		w.WriteHeader(http.StatusOK)
 		w.Write(binaryData)

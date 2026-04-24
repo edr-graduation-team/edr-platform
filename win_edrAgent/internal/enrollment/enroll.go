@@ -149,7 +149,7 @@ func EnsureEnrolled(cfg *config.Config, logger *logging.Logger, configFilePath s
 	defer conn.Close()
 
 	client := pb.NewEventIngestionServiceClient(conn)
-	hardwareID, err := GetHardwareID()
+	hardwareID, src, err := GetHardwareIDWithSource()
 	if err != nil {
 		logger.Warnf("HardwareID unavailable; enrollment may be rejected: %v", err)
 	}
@@ -157,6 +157,7 @@ func EnsureEnrolled(cfg *config.Config, logger *logging.Logger, configFilePath s
 	if hardwareID == "" {
 		return fmt.Errorf("hardware_id is required for enrollment (could not determine a stable device id)")
 	}
+	logger.Infof("Enrollment hardware_id ready: source=%s len=%d", src, len(hardwareID))
 	req := &pb.AgentRegistrationRequest{
 		InstallationToken: cfg.Certs.BootstrapToken,
 		AgentId:           cfg.Agent.ID,

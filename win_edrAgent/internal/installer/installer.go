@@ -257,10 +257,38 @@ func InstallAndStart(exePath string) error {
 		if status.State == svc.Running {
 			return nil
 		}
+		if status.State == svc.Stopped {
+			// Provide actionable diagnostics while the installer still has access.
+			const logPath = `C:\ProgramData\EDR\logs\agent.log`
+			if tail, tErr := tailFileLines(logPath, 60); tErr == nil && strings.TrimSpace(tail) != "" {
+				return fmt.Errorf("service stopped unexpectedly during startup; recent agent log:\n%s", tail)
+			}
+			return fmt.Errorf("service stopped unexpectedly during startup — check %s for details", logPath)
+		}
 		time.Sleep(500 * time.Millisecond)
 	}
 
 	return fmt.Errorf("service did not reach Running state within 10s")
+}
+
+func tailFileLines(path string, n int) (string, error) {
+	if n <= 0 {
+		n = 50
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	s := strings.ReplaceAll(string(b), "\r\n", "\n")
+	lines := strings.Split(s, "\n")
+	// Drop trailing empty line from final newline.
+	if len(lines) > 0 && lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
+	}
+	if len(lines) <= n {
+		return strings.Join(lines, "\n"), nil
+	}
+	return strings.Join(lines[len(lines)-n:], "\n"), nil
 }
 
 // =============================================================================

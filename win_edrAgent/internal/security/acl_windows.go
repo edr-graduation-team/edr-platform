@@ -240,6 +240,51 @@ func setSystemOwnedExclusiveFile(path string) error {
 	return nil
 }
 
+// setSystemOwnedLogReadableDACL sets OWNER=SYSTEM and a DACL that grants:
+//   - SYSTEM:        Full control (inheriting)
+//   - Administrators: Read (inheriting)
+//
+// This supports operational use cases: elevated Administrators can read
+// plaintext logs via Get-Content, but cannot modify them.
+func setSystemOwnedLogReadableDACL(path string) error {
+	aces := []windows.EXPLICIT_ACCESS{
+		{
+			AccessPermissions: windows.GENERIC_ALL,
+			AccessMode:        windows.GRANT_ACCESS,
+			Inheritance:       windows.OBJECT_INHERIT_ACE | windows.CONTAINER_INHERIT_ACE,
+			Trustee: windows.TRUSTEE{
+				TrusteeForm:  windows.TRUSTEE_IS_SID,
+				TrusteeType:  windows.TRUSTEE_IS_WELL_KNOWN_GROUP,
+				TrusteeValue: windows.TrusteeValueFromSID(sidSystem),
+			},
+		},
+		{
+			AccessPermissions: windows.GENERIC_READ,
+			AccessMode:        windows.GRANT_ACCESS,
+			Inheritance:       windows.OBJECT_INHERIT_ACE | windows.CONTAINER_INHERIT_ACE,
+			Trustee: windows.TRUSTEE{
+				TrusteeForm:  windows.TRUSTEE_IS_SID,
+				TrusteeType:  windows.TRUSTEE_IS_WELL_KNOWN_GROUP,
+				TrusteeValue: windows.TrusteeValueFromSID(sidAdministrators),
+			},
+		},
+	}
+	newDACL, err := windows.ACLFromEntries(aces, nil)
+	if err != nil {
+		return fmt.Errorf("ACLFromEntries: %w", err)
+	}
+	pathPtr, err := windows.UTF16PtrFromString(path)
+	if err != nil {
+		return fmt.Errorf("UTF16PtrFromString: %w", err)
+	}
+	const secInfo = windows.OWNER_SECURITY_INFORMATION | windows.DACL_SECURITY_INFORMATION | windows.PROTECTED_DACL_SECURITY_INFORMATION
+	ret := setNamedSecurityInfoW(pathPtr, windows.SE_FILE_OBJECT, secInfo, sidSystem, nil, newDACL, nil)
+	if ret != 0 {
+		return fmt.Errorf("SetNamedSecurityInfo log: error %d", ret)
+	}
+	return nil
+}
+
 // HardenAgentDirectoriesExclusive sets OWNER=SYSTEM and a DACL that grants only
 // SYSTEM full control (inheriting to subfolders). Administrators cannot change
 // ACLs or modify contents until RestoreAgentDirectoriesACL runs during the
@@ -259,8 +304,16 @@ func HardenAgentDirectoriesExclusive(dirs []string, logger *logging.Logger) erro
 			}
 			continue
 		}
-		if err := setSystemOwnedExclusiveDACL(dir); err != nil {
-			wrapped := fmt.Errorf("security: exclusive ACL %s: %w", dir, err)
+		// Special-case logs: Admin readable (read-only), SYSTEM writable.
+		// All other dirs remain SYSTEM-only.
+		var aclErr error
+		if filepath.Base(dir) == "logs" {
+			aclErr = setSystemOwnedLogReadableDACL(dir)
+		} else {
+			aclErr = setSystemOwnedExclusiveDACL(dir)
+		}
+		if aclErr != nil {
+			wrapped := fmt.Errorf("security: exclusive ACL %s: %w", dir, aclErr)
 			if logger != nil {
 				logger.Warnf("[Security] %v", wrapped)
 			}
@@ -278,7 +331,11 @@ func HardenAgentDirectoriesExclusive(dirs []string, logger *logging.Logger) erro
 			}
 		}
 		if logger != nil {
-			logger.Infof("[Security] Directory locked (SYSTEM-only): %s", dir)
+			if filepath.Base(dir) == "logs" {
+				logger.Infof("[Security] Directory locked (SYSTEM + Admin read): %s", dir)
+			} else {
+				logger.Infof("[Security] Directory locked (SYSTEM-only): %s", dir)
+			}
 		}
 	}
 	return first

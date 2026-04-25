@@ -1049,6 +1049,14 @@ export function createAlertStream(
         wsUrl = `${proto}//${window.location.host}/api/v1/sigma/alerts/stream`;
     }
 
+    // Append JWT as a query parameter — the browser WebSocket API cannot send
+    // custom headers (no Authorization header support), so the server's
+    // CombinedAuthMiddleware accepts ?token= as a fallback for WS connections.
+    const jwt = localStorage.getItem('auth_token');
+    if (jwt) {
+        wsUrl += `?token=${encodeURIComponent(jwt)}`;
+    }
+
     let ws: WebSocket;
     let reconnectAttempts = 0;
     const maxReconnectAttempts = 5;
@@ -1091,25 +1099,31 @@ export function createAlertStream(
         };
 
         ws.onclose = (event) => {
-            console.log('WebSocket disconnected');
+            console.log('WebSocket disconnected', { code: event.code, reason: event.reason, wasClean: event.wasClean });
             clearInterval(pingInterval);
 
-            // 404 = endpoint not yet implemented on server — don't spam reconnects
-            // (close code 1006 = abnormal closure, which we get for 404 handshake failures)
-            const isNotFound = event.code === 1006 && reconnectAttempts === 0;
-            if (isNotFound) {
-                console.warn('WebSocket stream endpoint returned 404 — real-time alerts disabled (server not implemented yet)');
+            // Only give up permanently if there is no auth token — in that case
+            // reconnecting cannot succeed (auth is structurally impossible).
+            // Previously we treated any code-1006 first-attempt as "404 not implemented"
+            // but that was wrong: 1006 (abnormal closure) also fires for transient
+            // failures (container starting up, nginx not yet ready, auth rejection).
+            // With the ?token= fix in place we should always retry if we have a token.
+            const hasToken = !!localStorage.getItem('auth_token');
+            if (!hasToken) {
+                console.warn('WebSocket: no auth token found — real-time alerts disabled until login');
                 return;
             }
 
-            // Auto-reconnect with exponential backoff
+            // Auto-reconnect with exponential backoff (cap at ~32 s)
             if (reconnectAttempts < maxReconnectAttempts) {
-                const delay = Math.pow(2, reconnectAttempts) * 1000;
+                const delay = Math.min(Math.pow(2, reconnectAttempts) * 1000, 32000);
                 reconnectTimeout = setTimeout(() => {
                     reconnectAttempts++;
-                    console.log(`Reconnecting... attempt ${reconnectAttempts}`);
+                    console.log(`WebSocket reconnecting… attempt ${reconnectAttempts}/${maxReconnectAttempts}`);
                     connect();
                 }, delay);
+            } else {
+                console.warn('WebSocket: max reconnect attempts reached — real-time alerts paused');
             }
         };
     };

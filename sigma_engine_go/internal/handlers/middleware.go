@@ -283,6 +283,10 @@ func (ja *JWTAuth) ValidateJWT(tokenString string) (*jwt.Token, error) {
 // CombinedAuthMiddleware tries JWT validation first, then falls back to API key.
 // This allows both dashboard users (JWT) and service-to-service calls (API key)
 // to authenticate against the Sigma Engine.
+//
+// Token resolution order:
+//  1. Authorization: Bearer <token> header  (REST API, standard)
+//  2. ?token=<token> query parameter        (WebSocket — browser WS API cannot set headers)
 func CombinedAuthMiddleware(jwtAuth *JWTAuth, tokenAuth *TokenAuth) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -292,21 +296,25 @@ func CombinedAuthMiddleware(jwtAuth *JWTAuth, tokenAuth *TokenAuth) func(http.Ha
 				return
 			}
 
-			// Get token from Authorization header
+			// Resolve token: Authorization header first, then ?token= query param.
+			// The browser WebSocket API (new WebSocket(url)) cannot send custom headers,
+			// so the dashboard passes the JWT as a URL query parameter for the WS stream.
+			var token string
 			authHeader := r.Header.Get("Authorization")
-			if authHeader == "" {
+			if authHeader != "" {
+				parts := strings.SplitN(authHeader, " ", 2)
+				if len(parts) != 2 || strings.ToLower(parts[0]) != "bearer" {
+					http.Error(w, "Unauthorized: invalid format", http.StatusUnauthorized)
+					return
+				}
+				token = parts[1]
+			} else if q := r.URL.Query().Get("token"); q != "" {
+				// WebSocket fallback: accept token from query parameter.
+				token = q
+			} else {
 				http.Error(w, "Unauthorized: missing token", http.StatusUnauthorized)
 				return
 			}
-
-			// Extract bearer token
-			parts := strings.SplitN(authHeader, " ", 2)
-			if len(parts) != 2 || strings.ToLower(parts[0]) != "bearer" {
-				http.Error(w, "Unauthorized: invalid format", http.StatusUnauthorized)
-				return
-			}
-
-			token := parts[1]
 
 			// Strategy 1: Try RSA JWT validation (dashboard tokens)
 			if jwtAuth != nil {

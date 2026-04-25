@@ -1143,6 +1143,8 @@ export default function Alerts() {
     // Realtime path: stream is only a signal that new DB-persisted alerts exist.
     // We never use stream payload as source-of-truth rows in the table.
     useEffect(() => {
+        // Keep UI near-real-time (<1s) without hammering the API when multiple
+        // alerts arrive in a burst.
         const triggerDebouncedSync = () => {
             if (streamSyncTimerRef.current) {
                 clearTimeout(streamSyncTimerRef.current);
@@ -1157,7 +1159,7 @@ export default function Alerts() {
                 if (newCount > 0) {
                     showToast(`Received ${newCount} new alert${newCount > 1 ? 's' : ''}`, 'success');
                 }
-            }, 1000);
+            }, 150);
         };
 
         const stream = createAlertStream((alert) => {

@@ -104,8 +104,8 @@ func TestDefaultAlertWriterConfig(t *testing.T) {
 	cfg := DefaultAlertWriterConfig()
 
 	assert.Equal(t, 5*time.Minute, cfg.DeduplicationWindow)
-	assert.Equal(t, 100, cfg.BatchSize)
-	assert.Equal(t, 1*time.Second, cfg.FlushInterval)
+	assert.Equal(t, 25, cfg.BatchSize)
+	assert.Equal(t, 100*time.Millisecond, cfg.FlushInterval)
 	assert.Equal(t, 10000, cfg.MaxQueueSize)
 }
 

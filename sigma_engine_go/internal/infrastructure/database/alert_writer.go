@@ -24,8 +24,11 @@ type AlertWriterConfig struct {
 func DefaultAlertWriterConfig() AlertWriterConfig {
 	return AlertWriterConfig{
 		DeduplicationWindow: 5 * time.Minute,
-		BatchSize:           100,
-		FlushInterval:       1 * time.Second,
+		// Low-latency defaults so alerts show up near real-time in the dashboard.
+		// Throughput is still protected by batching; the writer flushes at most every 100ms
+		// unless BatchSize is hit first.
+		BatchSize:           25,
+		FlushInterval:       100 * time.Millisecond,
 		MaxQueueSize:        10000,
 	}
 }

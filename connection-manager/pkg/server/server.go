@@ -396,7 +396,7 @@ func (s *Server) SendCommandResult(ctx context.Context, res *edrv1.CommandResult
 	// Notify playbook engine so it can update step status + persist triage snapshots.
 	if s.playbookEngine != nil {
 		if cmdID, err := uuid.Parse(res.CommandId); err == nil {
-			if agentID, err := uuid.Parse(res.AgentId); err == nil {
+			if agentID, err := parseAgentUUIDFlexible(res.GetAgentId()); err == nil && agentID != uuid.Nil {
 				s.playbookEngine.OnCommandResult(ctx, agentID, cmdID, res.Status, res.Output)
 			}
 		}
@@ -407,35 +407,42 @@ func (s *Server) SendCommandResult(ctx context.Context, res *edrv1.CommandResult
 	//   - isolate_network   → set is_isolated=true
 	//   - restore_network   → set is_isolated=false
 	//   - stop_agent        → set status='suspended' (distinguishes from offline!)
-	if s.commandRepo != nil && strings.ToLower(res.Status) == "success" {
+	if s.commandRepo != nil && commandResultSideEffectsEligible(res.GetStatus()) {
 		if cmdID, err := uuid.Parse(res.CommandId); err == nil {
-			if cmd, err := s.commandRepo.GetByID(ctx, cmdID); err == nil {
+			cmd, err := s.commandRepo.GetByID(ctx, cmdID)
+			if err != nil {
+				s.logger.WithError(err).Warn("SendCommandResult: GetByID failed; skipping side-effects")
+			} else {
 				cmdType := strings.ToLower(string(cmd.CommandType))
-				agentID, _ := uuid.Parse(res.AgentId)
-				switch {
-				case cmdType == "isolate_network":
-					s.updateAgentIsolation(ctx, agentID, true)
-					s.logger.Infof("[Isolation] Agent %s is now ISOLATED", agentID)
-					// Trigger post-isolation playbook asynchronously
-					if s.playbookEngine != nil {
-						s.playbookEngine.OnIsolationSucceeded(agentID)
+				agentID := resolveAgentIDFromCommandResult(res, cmd)
+				if agentID == uuid.Nil {
+					s.logger.Warnf("SendCommandResult: missing agent_id for side-effects command_id=%s", res.CommandId)
+				} else {
+					switch {
+					case cmdType == "isolate_network":
+						s.updateAgentIsolation(ctx, agentID, true)
+						s.logger.Infof("[Isolation] Agent %s is now ISOLATED", agentID)
+						// Trigger post-isolation playbook asynchronously
+						if s.playbookEngine != nil {
+							s.playbookEngine.OnIsolationSucceeded(agentID)
+						}
+					case cmdType == "restore_network" || cmdType == "unisolate_network":
+						s.updateAgentIsolation(ctx, agentID, false)
+						s.logger.Infof("[Isolation] Agent %s isolation RESTORED", agentID)
+					case cmdType == "stop_agent" || cmdType == "stop_service":
+						// Mark suspended so frontend shows 'Start Agent' enabled.
+						// The stream-close defer checks current status and skips
+						// the 'offline' overwrite when already 'suspended'.
+						s.updateAgentStatus(ctx, agentID, models.AgentStatusSuspended)
+						s.logger.Infof("[Control] Agent %s marked SUSPENDED after stop_agent ACK", agentID)
+					case cmdType == "quarantine_file" || cmdType == "restore_quarantine_file" || cmdType == "delete_quarantine_file":
+						s.applyQuarantineInventoryOnSuccess(ctx, res, cmd, agentID)
+					case cmdType == "uninstall_agent":
+						// Final confirmation: agent has cleaned itself up and is about to exit.
+						// Latch the status so no further commands are ever dispatched.
+						s.updateAgentStatus(ctx, agentID, models.AgentStatusUninstalled)
+						s.logger.Infof("[Uninstall] Agent %s confirmed uninstall (command %s) — status=uninstalled", agentID, res.CommandId)
 					}
-				case cmdType == "restore_network" || cmdType == "unisolate_network":
-					s.updateAgentIsolation(ctx, agentID, false)
-					s.logger.Infof("[Isolation] Agent %s isolation RESTORED", agentID)
-				case cmdType == "stop_agent" || cmdType == "stop_service":
-					// Mark suspended so frontend shows 'Start Agent' enabled.
-					// The stream-close defer checks current status and skips
-					// the 'offline' overwrite when already 'suspended'.
-					s.updateAgentStatus(ctx, agentID, models.AgentStatusSuspended)
-					s.logger.Infof("[Control] Agent %s marked SUSPENDED after stop_agent ACK", agentID)
-				case cmdType == "quarantine_file" || cmdType == "restore_quarantine_file" || cmdType == "delete_quarantine_file":
-					s.applyQuarantineInventoryOnSuccess(ctx, res, cmd, agentID)
-				case cmdType == "uninstall_agent":
-					// Final confirmation: agent has cleaned itself up and is about to exit.
-					// Latch the status so no further commands are ever dispatched.
-					s.updateAgentStatus(ctx, agentID, models.AgentStatusUninstalled)
-					s.logger.Infof("[Uninstall] Agent %s confirmed uninstall (command %s) — status=uninstalled", agentID, res.CommandId)
 				}
 			}
 		}
@@ -445,12 +452,16 @@ func (s *Server) SendCommandResult(ctx context.Context, res *edrv1.CommandResult
 }
 
 func (s *Server) persistForensicBundleBestEffort(ctx context.Context, res *edrv1.CommandResult) {
+	if res == nil {
+		return
+	}
 	cmdID, err := uuid.Parse(res.CommandId)
 	if err != nil {
 		return
 	}
 	cmd, err := s.commandRepo.GetByID(ctx, cmdID)
 	if err != nil {
+		s.logger.WithError(err).Debug("[Forensics] GetByID failed; skip bundle persistence")
 		return
 	}
 	cmdType := strings.ToLower(string(cmd.CommandType))
@@ -471,34 +482,63 @@ func (s *Server) persistForensicBundleBestEffort(ctx context.Context, res *edrv1
 	}
 	// For triage types, use the command type as the log_type for storage
 	if cmdType != "collect_logs" && cmdType != "collect_forensics" {
+		agentID := resolveAgentIDFromCommandResult(res, cmd)
+		if agentID == uuid.Nil {
+			s.logger.Warn("[Forensics] cannot resolve agent_id; skip triage preview persistence")
+			return
+		}
 		// Store directly in forensic_collections under the triage command type
-		agentID, _ := uuid.Parse(res.AgentId)
 		issuedAt := cmd.IssuedAt
 		completedAt := cmd.CompletedAt
-		_ = s.forensicRepo.UpsertCollection(ctx, repository.ForensicCollectionSummary{
+		if err := s.forensicRepo.UpsertCollection(ctx, repository.ForensicCollectionSummary{
 			CommandID:   cmdID,
 			AgentID:     agentID,
 			CommandType: cmdType,
 			IssuedAt:    issuedAt,
 			CompletedAt: completedAt,
 			Summary:     map[string]any{"output_preview": truncate(res.Output, 256)},
-		})
+		}); err != nil {
+			s.logger.WithError(err).Warn("[Forensics] UpsertCollection failed (triage preview)")
+		}
 		return
 	}
 
 	// Output may either be raw string or JSON; only parse when it looks like JSON.
-	out := strings.TrimSpace(res.Output)
+	out := strings.TrimSpace(res.GetOutput())
+	if out == "" && cmd.Result != nil {
+		if v, ok := cmd.Result["output"]; ok {
+			out = strings.TrimSpace(fmt.Sprint(v))
+		}
+	}
+	// If the agent double-JSON-encoded the bundle (string value), unwrap once.
+	if len(out) >= 2 && out[0] == '"' {
+		var inner string
+		if err := json.Unmarshal([]byte(out), &inner); err == nil {
+			out = strings.TrimSpace(inner)
+		}
+	}
 	if out == "" || !(strings.HasPrefix(out, "{") && strings.HasSuffix(out, "}")) {
 		return
 	}
 
 	var bundle forensicBundle
-	if err := json.Unmarshal([]byte(out), &bundle); err != nil || bundle.Version != 1 {
+	if err := json.Unmarshal([]byte(out), &bundle); err != nil {
+		s.logger.WithError(err).WithField("snippet", truncate(out, 160)).Warn("[Forensics] bundle JSON unmarshal failed")
+		return
+	}
+	if bundle.Version != 1 {
+		s.logger.Warnf("[Forensics] bundle version=%d (expected 1); skip persistence", bundle.Version)
 		return
 	}
 
-	agentID, err := uuid.Parse(res.AgentId)
-	if err != nil {
+	agentID := resolveAgentIDFromCommandResult(res, cmd)
+	if agentID == uuid.Nil && bundle.AgentID != "" {
+		if id, err := parseAgentUUIDFlexible(bundle.AgentID); err == nil {
+			agentID = id
+		}
+	}
+	if agentID == uuid.Nil {
+		s.logger.Warn("[Forensics] cannot resolve agent_id for bundle storage")
 		return
 	}
 
@@ -510,7 +550,7 @@ func (s *Server) persistForensicBundleBestEffort(ctx context.Context, res *edrv1
 		sum = map[string]any{}
 	}
 
-	_ = s.forensicRepo.UpsertCollection(ctx, repository.ForensicCollectionSummary{
+	if err := s.forensicRepo.UpsertCollection(ctx, repository.ForensicCollectionSummary{
 		CommandID:   cmdID,
 		AgentID:     agentID,
 		CommandType: cmdType,
@@ -519,7 +559,12 @@ func (s *Server) persistForensicBundleBestEffort(ctx context.Context, res *edrv1
 		TimeRange:   bundle.TimeRange,
 		LogTypes:    bundle.LogTypes,
 		Summary:     sum,
-	})
+	}); err != nil {
+		s.logger.WithError(err).WithFields(logrus.Fields{
+			"command_id": cmdID, "agent_id": agentID,
+		}).Warn("[Forensics] UpsertCollection failed; events not stored")
+		return
+	}
 
 	// Replace events per log_type (simple MVP).
 	byType := map[string][]repository.ForensicEventRow{}
@@ -545,7 +590,11 @@ func (s *Server) persistForensicBundleBestEffort(ctx context.Context, res *edrv1
 		byType[r.LogType] = append(byType[r.LogType], r)
 	}
 	for logType, events := range byType {
-		_ = s.forensicRepo.ReplaceEvents(ctx, agentID, cmdID, logType, events)
+		if err := s.forensicRepo.ReplaceEvents(ctx, agentID, cmdID, logType, events); err != nil {
+			s.logger.WithError(err).WithFields(logrus.Fields{
+				"command_id": cmdID, "agent_id": agentID, "log_type": logType,
+			}).Warn("[Forensics] ReplaceEvents failed")
+		}
 	}
 }
 
@@ -582,4 +631,37 @@ func truncate(s string, maxLen int) string {
 		return s
 	}
 	return s[:maxLen] + "…"
+}
+
+// commandResultSideEffectsEligible reports whether the agent considers the command successful.
+// Labels vary by client/version (e.g. SUCCESS vs completed).
+func commandResultSideEffectsEligible(agentStatus string) bool {
+	switch strings.TrimSpace(strings.ToLower(agentStatus)) {
+	case "success", "completed", "ok", "succeeded", "done":
+		return true
+	default:
+		return false
+	}
+}
+
+// parseAgentUUIDFlexible accepts bare UUIDs and legacy "agent-<uuid>" forms used in some agent payloads.
+func parseAgentUUIDFlexible(s string) (uuid.UUID, error) {
+	s = strings.TrimSpace(s)
+	if strings.HasPrefix(strings.ToLower(s), "agent-") {
+		s = strings.TrimSpace(s[len("agent-"):])
+	}
+	return uuid.Parse(s)
+}
+
+// resolveAgentIDFromCommandResult prefers the command row (issuer) then the ACK payload (flexible parse).
+func resolveAgentIDFromCommandResult(res *edrv1.CommandResult, cmd *models.Command) uuid.UUID {
+	if cmd != nil && cmd.AgentID != uuid.Nil {
+		return cmd.AgentID
+	}
+	if res != nil {
+		if id, err := parseAgentUUIDFlexible(res.GetAgentId()); err == nil && id != uuid.Nil {
+			return id
+		}
+	}
+	return uuid.Nil
 }

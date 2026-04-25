@@ -42,7 +42,10 @@ ON CONFLICT (agent_id, quarantine_path) DO UPDATE SET
   sha256 = COALESCE(NULLIF(EXCLUDED.sha256,''), agent_quarantine_items.sha256),
   threat_name = COALESCE(NULLIF(EXCLUDED.threat_name,''), agent_quarantine_items.threat_name),
   source = CASE WHEN agent_quarantine_items.source = 'manual_c2' THEN agent_quarantine_items.source ELSE EXCLUDED.source END,
-  state = agent_quarantine_items.state,
+  state = CASE
+    WHEN agent_quarantine_items.state IN ('restored','deleted') THEN EXCLUDED.state
+    ELSE agent_quarantine_items.state
+  END,
   updated_at = NOW()
 `
 	_, err := r.db.Exec(ctx, q,

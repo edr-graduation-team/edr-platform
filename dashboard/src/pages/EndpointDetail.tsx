@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import {
     ArrowLeft, Activity, Terminal, Shield, HardDrive, Loader2,
@@ -184,6 +184,38 @@ function resultPreview(result: unknown): string {
     }
 }
 
+function commandHistoryOutputCell(c: CommandListItem, agentId: string): React.ReactNode {
+    if (c.command_type !== 'collect_logs' && c.command_type !== 'collect_forensics') {
+        return <span className="text-slate-600 dark:text-slate-300">{resultPreview(c.result)}</span>;
+    }
+    const st = String(c.status || '').toLowerCase();
+    const forensicsTo = `/management/devices/${encodeURIComponent(agentId)}?tab=forensics&command_id=${encodeURIComponent(c.id)}`;
+    const forensicsLink = (
+        <Link to={forensicsTo} className="text-cyan-700 dark:text-cyan-300 font-semibold hover:underline">
+            Forensic Logs
+        </Link>
+    );
+    if (st === 'failed' || st === 'timeout' || st === 'cancelled') {
+        return (
+            <div className="space-y-1">
+                <div className="text-slate-600 dark:text-slate-300">{resultPreview(c.result)}</div>
+                <div className="text-slate-500 text-xs">Successful collections are browsable under {forensicsLink}.</div>
+            </div>
+        );
+    }
+    const done = st === 'completed';
+    return (
+        <div className="text-slate-600 dark:text-slate-300 text-xs space-y-1">
+            <p>
+                {done
+                    ? <>Full log output is not shown here. Open the {forensicsLink} tab for this device to browse events.</>
+                    : <>When this command completes, browse collected logs on the {forensicsLink} tab.</>}
+            </p>
+            <p className="font-mono text-[11px] text-slate-500 dark:text-slate-400 break-all">{forensicsTo}</p>
+        </div>
+    );
+}
+
 export default function EndpointDetail() {
     const { agentId = '' } = useParams<{ agentId: string }>();
     const navigate = useNavigate();
@@ -277,10 +309,17 @@ export default function EndpointDetail() {
 
     const execMutation = useMutation({
         mutationFn: (req: CommandRequest) => agentsApi.executeCommand(agentId, req),
-        onSuccess: (data) => {
+        onSuccess: (data, variables) => {
             showToast(`Command queued (${data.command_id})`, 'success');
             queryClient.invalidateQueries({ queryKey: ['agent-commands', agentId] });
             queryClient.invalidateQueries({ queryKey: ['commands'] });
+            const t = variables.command_type;
+            if (t === 'quarantine_file' || t === 'restore_quarantine_file' || t === 'delete_quarantine_file') {
+                queryClient.invalidateQueries({ queryKey: ['agent-quarantine', agentId] });
+            }
+            if (t === 'collect_logs' || t === 'collect_forensics') {
+                queryClient.invalidateQueries({ queryKey: ['forensics', 'collections', agentId] });
+            }
         },
         onError: (e: Error) => showToast(e.message || 'Command failed', 'error'),
     });
@@ -798,6 +837,17 @@ function OverviewTab({
     );
 }
 
+/** First log channel for Forensics API (lowercase), derived from collection summary. */
+function primaryLogTypeFromCollectionField(logTypesField: string): string {
+    const s = (logTypesField || '').trim();
+    const lower = s.toLowerCase();
+    if (!s) return 'security';
+    if (lower.includes('sysmon')) return 'sysmon';
+    if (lower.includes('powershell')) return 'powershell';
+    const first = s.split(',')[0].trim().toLowerCase();
+    return first || 'security';
+}
+
 function ForensicsTab({ agentId }: { agentId: string }) {
     const [searchParams, setSearchParams] = useSearchParams();
     const { showToast } = useToast();
@@ -805,6 +855,7 @@ function ForensicsTab({ agentId }: { agentId: string }) {
     const preselectedCommandId = searchParams.get('command_id') || '';
     const [selectedCommandId, setSelectedCommandId] = useState<string>(preselectedCommandId);
     const [logType, setLogType] = useState<string>('security');
+    const lastLogTypeSyncCommandRef = useRef<string | null>(null);
     const [cursor, setCursor] = useState<number | undefined>(undefined);
     const [rows, setRows] = useState<ForensicEvent[]>([]);
     const [rawOpen, setRawOpen] = useState(false);
@@ -819,6 +870,10 @@ function ForensicsTab({ agentId }: { agentId: string }) {
     const collections: ForensicCollection[] = (collectionsQ.data as any)?.data || [];
 
     useEffect(() => {
+        lastLogTypeSyncCommandRef.current = null;
+    }, [agentId]);
+
+    useEffect(() => {
         if (!selectedCommandId) {
             const first = collections[0]?.command_id;
             if (first) setSelectedCommandId(first);
@@ -826,11 +881,13 @@ function ForensicsTab({ agentId }: { agentId: string }) {
     }, [collections, selectedCommandId]);
 
     useEffect(() => {
-        // Best-effort: if the selected collection was "sysmon", default filter to sysmon.
+        // When the user picks another collection (View / dropdown), align log type with that run’s channels.
+        if (!selectedCommandId) return;
+        if (lastLogTypeSyncCommandRef.current === selectedCommandId) return;
         const sel = collections.find((c) => c.command_id === selectedCommandId);
         if (!sel) return;
-        const t = (sel.log_types || '').toLowerCase();
-        if (t.includes('sysmon')) setLogType('sysmon');
+        lastLogTypeSyncCommandRef.current = selectedCommandId;
+        setLogType(primaryLogTypeFromCollectionField(sel.log_types || ''));
     }, [collections, selectedCommandId]);
 
     useEffect(() => {
@@ -1509,6 +1566,9 @@ function ResponseTab({
                 server_ip: upgradeForm.serverIP || undefined,
                 server_domain: upgradeForm.serverDomain || undefined,
                 server_port: upgradeForm.serverPort || undefined,
+                // Lets the CM mint URLs reachable from remote agents (browser origin).
+                public_api_base_url:
+                    typeof window !== 'undefined' ? window.location.origin : undefined,
                 token_id: upgradeForm.tokenId,
                 skip_config: false,
                 install_sysmon: upgradeForm.installSysmon,
@@ -1892,7 +1952,7 @@ function ResponseTab({
                                                 {c.error_message ? (
                                                     <span className="text-rose-600 dark:text-rose-400">{c.error_message}</span>
                                                 ) : (
-                                                    <span className="text-slate-600 dark:text-slate-300">{resultPreview(c.result)}</span>
+                                                    commandHistoryOutputCell(c, agentId)
                                                 )}
                                             </td>
                                         </tr>

@@ -646,7 +646,7 @@ export const agentsApi = {
     /** Quarantine inventory (server-side); optional `include_resolved` / `all=1` for full history. */
     listQuarantine: async (agentId: string, params?: { include_resolved?: boolean; all?: string }) => {
         const response = await connectionApi.get<{ items: QuarantineItem[]; meta?: unknown }>(
-            `/api/v1/agents/${agentId}/quarantine`,
+            `/api/v1/agents/${encodeURIComponent(agentId)}/quarantine`,
             { params }
         );
         return response.data;
@@ -657,7 +657,7 @@ export const agentsApi = {
         decision: 'acknowledge' | 'restore' | 'delete'
     ) => {
         const response = await connectionApi.post<{ status?: string; entry_id?: string }>(
-            `/api/v1/agents/${agentId}/quarantine/${entryId}/decision`,
+            `/api/v1/agents/${encodeURIComponent(agentId)}/quarantine/${encodeURIComponent(entryId)}/decision`,
             { decision }
         );
         return response.data;
@@ -992,6 +992,8 @@ export interface CreateAgentPackageRequest {
     server_ip?: string;
     server_domain?: string;
     server_port?: string;
+    /** Base URL (scheme://host[:port]) the agent can reach; defaults to browser origin in UI */
+    public_api_base_url?: string;
     token_id: string;
     skip_config: boolean;
     install_sysmon?: boolean;

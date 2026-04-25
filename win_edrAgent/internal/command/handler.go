@@ -19,6 +19,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 	"unsafe"
@@ -159,7 +160,10 @@ type Handler struct {
 	isolationCurrentIP string             // last resolved IP used in firewall rules
 	watchdogCancel     context.CancelFunc // cancels the isolation watchdog goroutine
 	blockPolicyCancel  context.CancelFunc // cancels the delayed block-policy goroutine
-	grpcHealth         GRPCHealthChecker  // injected: nil-safe health probe
+	// blockPolicyEpoch is bumped when unisolate cancels a pending block wave and
+	// when a new delayed-block goroutine starts; only accessed via sync/atomic.
+	blockPolicyEpoch uint64
+	grpcHealth       GRPCHealthChecker // injected: nil-safe health probe
 
 	// configUpdateFn is injected by agent.SetConfigUpdateHandler so the handler
 	// can apply a remote config push without importing the agent package.
@@ -779,13 +783,24 @@ func (h *Handler) isolateNetwork(ctx context.Context, params map[string]string) 
 
 	h.logger.Infof("[Isolate] ALLOW rules installed for %s:%s — block policy fires in 4s", resolvedIP, grpcPort)
 	go func() {
+		myEpoch := atomic.AddUint64(&h.blockPolicyEpoch, 1)
+		timer := time.NewTimer(4 * time.Second)
+		defer timer.Stop()
+
 		h.logger.Info("[Isolate] Waiting 4s for CommandResult ACK before applying block policy...")
 		select {
-		case <-time.After(4 * time.Second):
-			// Timer expired — apply block policy.
+		case <-timer.C:
+			// Timer expired — apply block policy unless superseded.
 		case <-blockCtx.Done():
-			// RESTORE arrived during grace period — abort block policy.
 			h.logger.Info("[Isolate] Block policy CANCELLED — unisolate arrived during grace period")
+			return
+		}
+
+		if atomic.LoadUint64(&h.blockPolicyEpoch) != myEpoch {
+			h.logger.Info("[Isolate] Block policy superseded (unisolate/re-isolate) — skipping hard block")
+			return
+		}
+		if blockCtx.Err() != nil {
 			return
 		}
 
@@ -904,10 +919,11 @@ func (h *Handler) unisolateNetwork(ctx context.Context, params map[string]string
 
 	h.logger.Info("[Restore] Restoring default firewall policy")
 
-	// ── 1a. Cancel the delayed block-policy goroutine FIRST ───────────────────
-	// If RESTORE arrives during the 4-second grace period, we must prevent
-	// the pending goroutine from re-applying blockinbound,blockoutbound.
+	// ── 1a. Invalidate + cancel the delayed block-policy goroutine FIRST ──────
+	// Bumping blockPolicyEpoch aborts any goroutine that already passed the grace
+	// timer but has not yet applied netsh (race with fast unisolate after isolate).
 	if h.blockPolicyCancel != nil {
+		atomic.AddUint64(&h.blockPolicyEpoch, 1)
 		h.blockPolicyCancel()
 		h.blockPolicyCancel = nil
 		h.logger.Info("[Restore] Block-policy goroutine cancelled ✓")
@@ -1696,13 +1712,19 @@ func (h *Handler) updateAgent(ctx context.Context, params map[string]string) (st
 	// plain http.DefaultClient would be rejected with 403.
 	stagePath := `C:\ProgramData\EDR\edr-agent.patch.exe`
 
+	// Remote agents cannot use localhost — rewrite using server_ip / server_domain.
+	normURL := normalizeAgentPackageDownloadURL(url, params)
+	if normURL != url {
+		h.logger.Infof("[C2] UPDATE_AGENT download URL normalized for remote host: %q → %q", url, normURL)
+		url = normURL
+	}
+
 	// Flexible scheme handling:
 	// - Some deployments expose the package endpoint over HTTP, others HTTPS.
 	// - We try both (in a safe order) so upgrades are resilient.
-	// TLS ServerName handling:
-	// - We rely on the request URL hostname (dynamic) unless an explicit override is passed.
 	urlsToTry := buildHTTPAndHTTPSCandidates(strings.TrimSpace(url))
-	httpClient, err := h.mtlsHTTPClient("")
+	tlsSNI := tlsSNIForAnyHTTPSIPPackageURL(urlsToTry)
+	httpClient, err := h.mtlsHTTPClient(tlsSNI)
 	if err != nil {
 		return "", fmt.Errorf("build mTLS client for update download: %w", err)
 	}
@@ -1759,25 +1781,121 @@ func (h *Handler) updateAgent(ctx context.Context, params map[string]string) (st
 	h.logger.Infof("[C2] UPDATE_AGENT download+verify OK: sha256=%s bytes staged=%s", got[:16]+"...", stagePath)
 
 	// Schedule a SYSTEM task to stop → swap → start.
+	// schtasks /TR must be ≤261 chars — the old one-liner exceeded that limit. Run a tiny
+	// bootstrap .cmd on disk and keep /TR short (same pattern as other installers).
 	taskName := fmt.Sprintf("EDR_Patch_%d", time.Now().UnixNano())
 	st := time.Now().Add(1 * time.Minute).Format("15:04")
 	dst := `C:\ProgramData\EDR\bin\edr-agent.exe`
-	// Keep a backup.
-	// Robustness: allow longer stop time, force-kill the process if needed, then swap.
-	tr := fmt.Sprintf(`cmd /c sc stop EDRAgent ^& timeout /t 6 /nobreak ^& taskkill /F /IM edr-agent.exe >nul 2>nul ^& timeout /t 2 /nobreak ^& del /f /q "%s.old" ^& ren "%s" "edr-agent.exe.old" ^& copy /y "%s" "%s" ^& del /f /q "%s" ^& sc start EDRAgent`,
-		dst, dst, stagePath, dst, stagePath,
-	)
+	patchScript := `C:\ProgramData\EDR\_edrapply.cmd`
+	if err := writeAgentPatchApplyScript(patchScript, dst, stagePath); err != nil {
+		return "", fmt.Errorf("write patch apply script: %w", err)
+	}
+	tr := "cmd /c " + patchScript
+	if len(tr) > 261 {
+		_ = os.Remove(patchScript)
+		return "", fmt.Errorf("internal error: schtasks /TR still too long (%d > 261)", len(tr))
+	}
 	create := exec.Command("schtasks", "/Create", "/TN", taskName, "/RU", "SYSTEM", "/SC", "ONCE", "/ST", st, "/F", "/TR", tr)
 	if out, err := create.CombinedOutput(); err != nil {
+		_ = os.Remove(patchScript)
 		return "", fmt.Errorf("schedule patch task create failed: %w: %s", err, strings.TrimSpace(string(out)))
 	}
 	run := exec.Command("schtasks", "/Run", "/TN", taskName)
 	if out, err := run.CombinedOutput(); err != nil {
+		_ = os.Remove(patchScript)
 		return "", fmt.Errorf("schedule patch task run failed: %w: %s", err, strings.TrimSpace(string(out)))
 	}
 	_ = exec.Command("schtasks", "/Delete", "/TN", taskName, "/F").Run()
 
+	h.logger.Infof("[C2] UPDATE_AGENT SYSTEM patch task scheduled (script=%s schtasks /TR len=%d)", patchScript, len(tr))
 	return fmt.Sprintf("Agent upgrade scheduled: version=%s sha256=%s (service will restart shortly)", version, got[:16]+"..."), nil
+}
+
+// writeAgentPatchApplyScript writes a short-lived .cmd that performs stop → swap →
+// start. Invoked via schtasks with a tiny /TR (Windows limits /TR to 261 chars).
+func writeAgentPatchApplyScript(scriptPath, dstExe, patchExe string) error {
+	var b strings.Builder
+	b.WriteString("@echo off\r\n")
+	b.WriteString("setlocal EnableExtensions\r\n")
+	b.WriteString("sc stop EDRAgent\r\n")
+	b.WriteString("timeout /t 6 /nobreak >nul\r\n")
+	b.WriteString("taskkill /F /IM edr-agent.exe >nul 2>&1\r\n")
+	b.WriteString("timeout /t 2 /nobreak >nul\r\n")
+	fmt.Fprintf(&b, "del /f /q \"%s.old\" 2>nul\r\n", dstExe)
+	fmt.Fprintf(&b, "ren \"%s\" edr-agent.exe.old\r\n", dstExe)
+	fmt.Fprintf(&b, "copy /y \"%s\" \"%s\"\r\n", patchExe, dstExe)
+	b.WriteString("if errorlevel 1 exit /b 1\r\n")
+	fmt.Fprintf(&b, "del /f /q \"%s\"\r\n", patchExe)
+	b.WriteString("sc start EDRAgent\r\n")
+	b.WriteString(`del /f /q "%~f0"` + "\r\n")
+	return os.WriteFile(scriptPath, []byte(b.String()), 0700)
+}
+
+func packageDownloadLoopbackHost(host string) bool {
+	h := strings.ToLower(strings.TrimSpace(strings.Trim(host, "[]")))
+	switch h {
+	case "localhost", "127.0.0.1", "::1":
+		return true
+	default:
+		return false
+	}
+}
+
+// normalizeAgentPackageDownloadURL replaces loopback hosts with server_ip or
+// server_domain from the command parameters so downloads work when the server
+// minted http://localhost/... but the agent runs on another machine.
+func normalizeAgentPackageDownloadURL(raw string, params map[string]string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	u, err := urlpkg.Parse(raw)
+	if err != nil || u == nil {
+		return raw
+	}
+	host := strings.Trim(strings.ToLower(u.Hostname()), "[]")
+	if packageDownloadLoopbackHost(host) {
+		repl := strings.TrimSpace(params["server_ip"])
+		if repl == "" {
+			repl = strings.TrimSpace(params["server_domain"])
+		}
+		if repl != "" {
+			if p := u.Port(); p != "" {
+				u.Host = net.JoinHostPort(repl, p)
+			} else {
+				if ip := net.ParseIP(repl); ip != nil && ip.To4() == nil {
+					u.Host = "[" + repl + "]"
+				} else {
+					u.Host = repl
+				}
+			}
+			return u.String()
+		}
+	}
+	return raw
+}
+
+func tlsServerNameForHTTPSPackageURL(u *urlpkg.URL) string {
+	if u == nil || !strings.EqualFold(u.Scheme, "https") {
+		return ""
+	}
+	if ip := net.ParseIP(u.Hostname()); ip != nil {
+		return config.DefaultGRPCServerCertName
+	}
+	return ""
+}
+
+func tlsSNIForAnyHTTPSIPPackageURL(candidates []string) string {
+	for _, s := range candidates {
+		u, err := urlpkg.Parse(strings.TrimSpace(s))
+		if err != nil || u == nil {
+			continue
+		}
+		if sni := tlsServerNameForHTTPSPackageURL(u); sni != "" {
+			return sni
+		}
+	}
+	return ""
 }
 
 func buildHTTPAndHTTPSCandidates(raw string) []string {

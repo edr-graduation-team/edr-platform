@@ -27,6 +27,7 @@ services:
       - "47051:50051"  # gRPC (agent ↔ server)
       - "30082:8082"    # REST API / health
     environment:
+      # Optional for remote agents: PUBLIC_API_BASE_URL=http://YOUR_LAN_IP:30082 (or https://edr.example.com)
       LOG_LEVEL: debug
       DATABASE_URL: "postgres://edr:edr@postgres:5432/edr?sslmode=disable"
       REDIS_ADDR: "redis:6379"

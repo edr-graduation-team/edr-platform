@@ -76,6 +76,11 @@ func main() {
 		serverDomain = flag.String("server-domain", "", "C2 server FQDN/hostname (used with -install)")
 		serverPort   = flag.String("server-port", "50051", "C2 gRPC port (used with -install, default 50051)")
 		token        = flag.String("token", "", "Enrollment token (install only — never used for uninstall)")
+		installSkipConnectivity = flag.Bool(
+			"install-skip-connectivity-check",
+			false,
+			"Skip TCP preflight during -install (use only when C2 is intentionally unreachable or after fixing firewall)",
+		)
 
 		// ── Runtime flags ──────────────────────────────────────────────────────
 		debugMode = flag.Bool("debug", false, "Enable DEBUG-level logging")
@@ -111,7 +116,7 @@ func main() {
 	// INSTALL PATH
 	// ══════════════════════════════════════════════════════════════════════════
 	if *doInstall {
-		runInstall(logger, *serverIP, *serverDomain, *serverPort, *token, *configPath)
+		runInstall(logger, *serverIP, *serverDomain, *serverPort, *token, *configPath, *installSkipConnectivity)
 		// runInstall calls os.Exit internally.
 	}
 
@@ -276,13 +281,14 @@ func printInstallHelp(missingParams []string) {
 //  2. Validate required parameters with detailed help.
 //  3. Create all EDR directories.
 //  4. Patch the Windows hosts file (idempotent, deduplicating).
-//  5. Verify server connectivity (DNS + TCP ping).
+//  5. Verify server connectivity (DNS + TCP ping), unless skipped by flag.
 //  6. Generate and save config.yaml.
 //  7. Register the Windows Service via the SCM.
 //  8. Start the service and poll until it reaches Running state.
 func runInstall(
 	logger *logging.Logger,
 	serverIP, serverDomain, serverPort, token, configPath string,
+	installSkipConnectivity bool,
 ) {
 	fmt.Println("════════════════════════════════════════")
 	fmt.Println(" EDR Agent — Zero-Touch Installation")
@@ -370,14 +376,28 @@ func runInstall(
 	}
 
 	// ── Step 4: Verify server connectivity ────────────────────────────────────
-	fmt.Printf("[4/7] Verifying server connectivity (%s:%s)...\n", serverIP, serverPort)
-	if err := installer.PingServer(serverIP, serverDomain, serverPort); err != nil {
-		fmt.Fprintf(os.Stderr, "\n⚠ Server connectivity check failed:\n%v\n\n", err)
-		fmt.Fprintf(os.Stderr, "The installation will continue, but the agent may fail to connect.\n")
-		fmt.Fprintf(os.Stderr, "Please verify the server is running and the network is configured correctly.\n\n")
-		logger.Warnf("Server connectivity check failed (non-fatal): %v", err)
+	if installSkipConnectivity {
+		fmt.Println("[4/7] Skipping server connectivity check (-install-skip-connectivity-check).")
+		logger.Warn("Install: TCP preflight skipped by operator flag")
 	} else {
-		fmt.Println("      → Server is reachable.")
+		fmt.Printf("[4/7] Verifying server connectivity (%s:%s)...\n", serverIP, serverPort)
+		if err := installer.PingServer(serverIP, serverDomain, serverPort); err != nil {
+			fmt.Fprintf(os.Stderr, "\n⚠ Server connectivity check failed:\n%v\n\n", err)
+			if installer.IsWindowsSocketAccessDenied(err) {
+				fmt.Fprintf(os.Stderr,
+					"[X] Windows blocked the outbound TCP test (WSAEACCES). This is usually local firewall / WFP,\n"+
+						"    including leftover EDR_* rules from network isolation — not proof the C2 is down.\n"+
+						"    Fix policy (see hints above), then re-run -install.\n"+
+						"    To bypass only the preflight: -install-skip-connectivity-check (use sparingly).\n\n")
+				logger.Errorf("Install aborted: C2 TCP preflight blocked by local policy: %v", err)
+				os.Exit(1)
+			}
+			fmt.Fprintf(os.Stderr, "The installation will continue, but the agent may fail to connect.\n")
+			fmt.Fprintf(os.Stderr, "Please verify the server is running and the network is configured correctly.\n\n")
+			logger.Warnf("Server connectivity check failed (non-fatal): %v", err)
+		} else {
+			fmt.Println("      → Server is reachable.")
+		}
 	}
 
 	// ── Step 5: Generate config ──────────────────────────────────────────────
@@ -539,7 +559,7 @@ func runUpdate(
 	}
 
 	fmt.Println("[2/3] Scheduling SYSTEM upgrade task (stop → swap → start)...")
-	if err := scheduleUpdateStage2AsSystem(stagedExe, overridesPath, configPath); err != nil {
+	if err := scheduleUpdateStage2AsSystem(stagedExe, configPath); err != nil {
 		fmt.Fprintf(os.Stderr, "Error scheduling upgrade: %v\n", err)
 		os.Exit(1)
 	}
@@ -556,6 +576,31 @@ func runUpdateStage2(
 	logger *logging.Logger,
 	serverIP, serverDomain, serverPort, token, configPath string,
 ) {
+	// schtasks /TR is capped at 261 characters, so stage2 is normally launched with only
+	// -update-stage2 -config; server/token/install_sysmon come from update_overrides.json.
+	const ovPath = `C:\ProgramData\EDR\update_overrides.json`
+	installSysmon := strings.TrimSpace(EmbeddedInstallSysmon)
+	if data, err := os.ReadFile(ovPath); err == nil && len(data) > 0 {
+		var ov updateOverrides
+		if json.Unmarshal(data, &ov) == nil {
+			if strings.TrimSpace(serverIP) == "" {
+				serverIP = strings.TrimSpace(ov.ServerIP)
+			}
+			if strings.TrimSpace(serverDomain) == "" {
+				serverDomain = strings.TrimSpace(ov.ServerDomain)
+			}
+			if strings.TrimSpace(serverPort) == "" {
+				serverPort = strings.TrimSpace(ov.ServerPort)
+			}
+			if strings.TrimSpace(token) == "" {
+				token = strings.TrimSpace(ov.Token)
+			}
+			if strings.TrimSpace(installSysmon) == "" {
+				installSysmon = strings.TrimSpace(ov.InstallSysmon)
+			}
+		}
+	}
+
 	// Stage2 is executed as SYSTEM (via schtasks) to bypass hardened ACLs.
 	_ = protection.RestoreServiceDACL(service.ServiceName)
 	_ = protection.RestoreServiceRegistryKey(service.ServiceName)
@@ -591,7 +636,7 @@ func runUpdateStage2(
 		// but modern go vet + the agent-builder image catches the typo.
 		cfg.Certs.BootstrapToken = strings.TrimSpace(token)
 	}
-	if strings.EqualFold(strings.TrimSpace(EmbeddedInstallSysmon), "true") {
+	if strings.EqualFold(strings.TrimSpace(installSysmon), "true") {
 		cfg.Sysmon.InstallOnFirstRun = true
 	}
 	_ = cfg.SaveToRegistry()
@@ -619,27 +664,14 @@ func runUpdateStage2(
 	os.Exit(0)
 }
 
-func scheduleUpdateStage2AsSystem(stagedExe, overridesPath, configPath string) error {
+func scheduleUpdateStage2AsSystem(stagedExe, configPath string) error {
 	taskName := fmt.Sprintf("EDR_Update_%d", os.Getpid())
 	st := time.Now().Add(1 * time.Minute).Format("15:04")
 
+	// Keep /TR short: runUpdateStage2 merges C:\ProgramData\EDR\update_overrides.json.
 	tr := fmt.Sprintf("\"%s\" -update-stage2 -config \"%s\"", stagedExe, configPath)
-	if data, err := os.ReadFile(overridesPath); err == nil && len(data) > 0 {
-		var ov updateOverrides
-		if json.Unmarshal(data, &ov) == nil {
-			if strings.TrimSpace(ov.ServerIP) != "" {
-				tr += fmt.Sprintf(" -server-ip \"%s\"", ov.ServerIP)
-			}
-			if strings.TrimSpace(ov.ServerDomain) != "" {
-				tr += fmt.Sprintf(" -server-domain \"%s\"", ov.ServerDomain)
-			}
-			if strings.TrimSpace(ov.ServerPort) != "" {
-				tr += fmt.Sprintf(" -server-port \"%s\"", ov.ServerPort)
-			}
-			if strings.TrimSpace(ov.Token) != "" {
-				tr += fmt.Sprintf(" -token \"%s\"", ov.Token)
-			}
-		}
+	if len(tr) > 261 {
+		return fmt.Errorf("schtasks /TR too long (%d > 261) — shorten staged exe or config path", len(tr))
 	}
 
 	create := exec.Command("schtasks", "/Create", "/TN", taskName, "/RU", "SYSTEM", "/SC", "ONCE", "/ST", st, "/F", "/TR", tr)

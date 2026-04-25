@@ -147,7 +147,7 @@ func (e *Executor) QuarantineFile(ctx context.Context, filePath, reason string) 
 	}
 
 	e.logger.Infof("File quarantined: %s -> %s", filePath, quarantinePath)
-	return fmt.Sprintf("File quarantined: %s", quarantinePath), nil
+	return fmt.Sprintf("File quarantined: %s -> %s", filePath, quarantinePath), nil
 }
 
 // IsolateNetwork disables all network adapters.

@@ -30,6 +30,11 @@ type CreateAgentPackageRequest struct {
 	ServerIP      string `json:"server_ip"`
 	ServerDomain  string `json:"server_domain"`
 	ServerPort    string `json:"server_port"`
+	// PublicAPIBaseURL optional base (scheme://host[:port]) used when minting the
+	// download link — e.g. the dashboard's window.location.origin. When empty and
+	// the inbound Host is loopback, server_ip/server_domain from this request
+	// replace localhost so remote agents can reach the API.
+	PublicAPIBaseURL string `json:"public_api_base_url"`
 	// TokenID is ONLY used to locate a legitimate CA-trust anchor during build;
 	// it is NOT injected into the produced binary for an upgrade. An already-enrolled
 	// agent has its own mTLS identity and does not need a new enrollment token.
@@ -171,7 +176,7 @@ func (h *Handlers) CreateAgentPackage(c echo.Context) error {
 		return errorResponse(c, http.StatusInternalServerError, "DB_ERROR", "Failed to save package metadata")
 	}
 
-	baseURL := strings.TrimRight(c.Scheme()+"://"+c.Request().Host, "/")
+	baseURL := resolveAgentPackageDownloadBase(c, req)
 	url := fmt.Sprintf("%s/api/v1/agent/packages/%s/download?token=%s", baseURL, packageID.String(), downloadToken)
 
 	return c.JSON(http.StatusOK, CreateAgentPackageResponse{

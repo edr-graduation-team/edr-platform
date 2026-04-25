@@ -156,14 +156,16 @@ func (s *Server) setupRoutes() {
 	// Rules
 	s.ruleHandler.RegisterRoutes(api)
 
-	// Alerts
+	// WebSocket — MUST be registered before AlertHandler to prevent the
+	// /sigma/alerts/{alert_id} wildcard from capturing the literal path
+	// segment "stream" (gorilla/mux evaluates routes in registration order).
+	s.wsServer.RegisterRoutes(api)
+
+	// Alerts (registered after WebSocket so {alert_id} wildcard doesn't shadow /stream)
 	s.alertHandler.RegisterRoutes(api)
 
 	// Stats
 	s.statsHandler.RegisterRoutes(api)
-
-	// WebSocket
-	s.wsServer.RegisterRoutes(api)
 }
 
 // SetPerformanceMetrics injects a real-time metrics provider into the stats handler.

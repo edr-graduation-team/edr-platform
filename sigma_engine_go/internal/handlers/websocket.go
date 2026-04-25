@@ -76,7 +76,9 @@ func NewWebSocketServer() *WebSocketServer {
 
 // RegisterRoutes registers WebSocket routes.
 func (s *WebSocketServer) RegisterRoutes(r *mux.Router) {
-	r.HandleFunc("/sigma/alerts/stream", s.HandleConnection)
+	// Exact path + GET method — must be registered BEFORE any wildcard routes
+	// (e.g. /sigma/alerts/{alert_id}) so gorilla/mux doesn't shadow this endpoint.
+	r.HandleFunc("/sigma/alerts/stream", s.HandleConnection).Methods("GET")
 }
 
 // Start begins the WebSocket server loop.

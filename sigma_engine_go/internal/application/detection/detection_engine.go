@@ -357,6 +357,10 @@ func (e *SigmaDetectionEngine) evaluateRuleForAggregation(
 
 	// Step 5: Return RuleMatch
 	matchedSelections := getMatchedSelectionNames(selectionResults)
+
+	// Enrich output with decoded payloads (e.g., PowerShell -EncodedCommand).
+	enrichMatchedFieldsWithDecodedPayload(event, matchedFields)
+
 	return &domain.RuleMatch{
 		Rule:              rule,
 		Confidence:        confidence,
@@ -430,6 +434,10 @@ func (e *SigmaDetectionEngine) evaluateRule(
 		return nil
 	}
 	matchedSelections := getMatchedSelectionNames(selectionResults)
+
+	// Enrich output with decoded payloads (e.g., PowerShell -EncodedCommand) so the
+	// SOC sees the real script/command even when only base64 is logged.
+	enrichMatchedFieldsWithDecodedPayload(event, matchedFields)
 
 	return &domain.DetectionResult{
 		Rule:              rule,

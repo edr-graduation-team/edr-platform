@@ -44,6 +44,45 @@ function formatDuration(ms: number) {
     return `${(ms / 60000).toFixed(1)}m`;
 }
 
+function commandCenterResultOutput(item: CommandListItem): React.ReactNode {
+    const t = item.command_type;
+    if (t !== 'collect_logs' && t !== 'collect_forensics') {
+        return (
+            <pre className="bg-slate-900 p-3 rounded-md text-slate-100 whitespace-pre-wrap break-words overflow-y-auto max-h-[28rem] text-xs">
+                {typeof item.result === 'object' ? JSON.stringify(item.result, null, 2) : String(item.result)}
+            </pre>
+        );
+    }
+    const st = String(item.status || '').toLowerCase();
+    const forensicsTo = `/management/devices/${encodeURIComponent(item.agent_id)}?tab=forensics&command_id=${encodeURIComponent(item.id)}`;
+    const forensicsLink = (
+        <Link to={forensicsTo} className="text-cyan-300 font-semibold hover:underline">
+            Forensic Logs
+        </Link>
+    );
+    if (st === 'failed' || st === 'timeout' || st === 'cancelled') {
+        return (
+            <div className="space-y-2 text-xs">
+                <pre className="bg-slate-900 p-3 rounded-md text-slate-100 whitespace-pre-wrap break-words overflow-y-auto max-h-[14rem]">
+                    {typeof item.result === 'object' ? JSON.stringify(item.result, null, 2) : String(item.result)}
+                </pre>
+                <p className="text-slate-400">Successful runs are browsable under {forensicsLink}.</p>
+            </div>
+        );
+    }
+    const done = st === 'completed';
+    return (
+        <div className="text-slate-200 text-xs space-y-2">
+            <p>
+                {done
+                    ? <>Full log output is not shown here. Open {forensicsLink} on the device to browse events.</>
+                    : <>When this command completes, browse logs on the {forensicsLink} tab.</>}
+            </p>
+            <p className="font-mono text-[11px] text-slate-500 break-all">{forensicsTo}</p>
+        </div>
+    );
+}
+
 // KPI Card Component
 const KPICard = React.memo(function KPICard({ title: label, value, icon: Icon, color, subtitle }: {
     title: string; value: number; icon: React.ElementType; color: string; subtitle?: string;
@@ -207,9 +246,7 @@ const CommandRow = React.memo(function CommandRow({ command: item }: { command: 
                             <div className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider mb-1 flex items-center gap-1">
                                 <Terminal className="w-3.5 h-3.5" /> Result Output
                             </div>
-                            <pre className="bg-slate-900 p-3 rounded-md text-slate-100 whitespace-pre-wrap break-words overflow-y-auto max-h-[28rem] text-xs">
-                                {typeof item.result === 'object' ? JSON.stringify(item.result, null, 2) : String(item.result)}
-                            </pre>
+                            {commandCenterResultOutput(item)}
                         </div>
                     )}
 

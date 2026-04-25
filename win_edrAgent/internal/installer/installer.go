@@ -10,11 +10,13 @@ package installer
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"net"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/google/uuid"
@@ -316,6 +318,57 @@ func EnsureDirectories() error {
 	return nil
 }
 
+// wsaeacces is Windows WSAEACCES (10013): "An attempt was made to access a socket
+// in a way forbidden by its access permissions." Usually local WFP/firewall policy
+// (including leftover EDR network-isolation rules), not a down C2 server.
+const wsaeacces = syscall.Errno(10013)
+
+// IsWindowsSocketAccessDenied reports whether err is (or wraps) WSAEACCES / the
+// common English WinSock message for local policy blocking the connect().
+func IsWindowsSocketAccessDenied(err error) bool {
+	if err == nil {
+		return false
+	}
+	for e := err; e != nil; e = errors.Unwrap(e) {
+		var op *net.OpError
+		if errors.As(e, &op) && op.Err != nil {
+			if errno, ok := op.Err.(syscall.Errno); ok && errno == wsaeacces {
+				return true
+			}
+		}
+		if strings.Contains(strings.ToLower(e.Error()), "forbidden by its access permissions") {
+			return true
+		}
+	}
+	return false
+}
+
+func windowsSocketAccessDeniedHints(c2Addr string) string {
+	return strings.TrimSpace(`
+This error almost always means Windows Firewall / WFP (or leftover EDR isolation rules)
+is blocking outbound TCP from this process — not that the C2 port is closed.
+
+Try (elevated PowerShell or CMD), then re-run -install:
+
+  netsh advfirewall firewall delete rule name=EDR_C2_GRPC_OUT
+  netsh advfirewall firewall delete rule name=EDR_C2_GRPC_IN
+  netsh advfirewall firewall delete rule name=EDR_C2_HTTP_OUT
+  netsh advfirewall firewall delete rule name=EDR_C2_HTTP_IN
+  netsh advfirewall firewall delete rule name=EDR_C2_ALLOW_OUT
+  netsh advfirewall firewall delete rule name=EDR_C2_ALLOW_IN
+  netsh advfirewall firewall delete rule name=EDR_DNS_ALLOW
+  netsh advfirewall firewall delete rule name=EDR_LOOPBACK_ALLOW
+  netsh advfirewall set allprofiles firewallpolicy blockinbound,allowoutbound
+
+Optional diagnostics:
+  netsh advfirewall firewall show rule name=all | findstr /I EDR_
+  netsh interface ipv4 show excludedportrange protocol=tcp
+
+If the C2 is intentionally unreachable until later, you may use:
+  -install-skip-connectivity-check   (not recommended until policy is understood)
+`) + "\n\nTarget: " + c2Addr
+}
+
 // =============================================================================
 // PingServer
 // =============================================================================
@@ -371,14 +424,18 @@ func PingServer(serverIP, serverDomain, serverPort string) error {
 	addr := net.JoinHostPort(target, serverPort)
 	conn, err := net.DialTimeout("tcp", addr, 5*time.Second)
 	if err != nil {
-		return fmt.Errorf(
-			"TCP connection to %s failed: %w\n"+
+		msg := fmt.Sprintf(
+			"TCP connection to %s failed: %v\n"+
 				"  Possible causes:\n"+
 				"  - The C2 server is not running or not listening on port %s\n"+
 				"  - A firewall is blocking the connection\n"+
 				"  - The server IP address is incorrect",
 			addr, err, serverPort,
 		)
+		if IsWindowsSocketAccessDenied(err) {
+			return errors.New(msg + "\n\n" + windowsSocketAccessDeniedHints(addr))
+		}
+		return errors.New(msg)
 	}
 	conn.Close()
 

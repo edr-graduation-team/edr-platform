@@ -249,12 +249,8 @@ func (h *Handler) processTreeSnapshot(ctx context.Context, _ map[string]string) 
 			size := uint32(windows.MAX_PATH)
 			if windows.QueryFullProcessImageName(hProc, 0, &pathBuf[0], &size) == nil {
 				info.Path = windows.UTF16ToString(pathBuf[:size])
-				// Hash the binary
-				if h2, e2 := hashFile(info.Path); e2 == nil {
-					info.SHA256 = h2
-				}
-				// Check Authenticode signature
-				info.Signed = checkAuthenticode(info.Path)
+				// Optimization for triage speed: skip hashing and Authenticode checks
+				// for all running processes to prevent Context Deadline Exceeded
 			}
 			windows.CloseHandle(hProc)
 		}

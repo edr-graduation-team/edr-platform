@@ -78,6 +78,20 @@ func stringifyCommandType(t pb.CommandType) string {
 		return "COMMAND_TYPE_DELETE_QUARANTINE_FILE"
 	case 21:
 		return "COMMAND_TYPE_UNINSTALL_AGENT"
+	case 22:
+		return "COMMAND_TYPE_POST_ISOLATION_TRIAGE"
+	case 23:
+		return "COMMAND_TYPE_PROCESS_TREE_SNAPSHOT"
+	case 24:
+		return "COMMAND_TYPE_PERSISTENCE_SCAN"
+	case 25:
+		return "COMMAND_TYPE_LSASS_ACCESS_AUDIT"
+	case 26:
+		return "COMMAND_TYPE_FILESYSTEM_TIMELINE"
+	case 27:
+		return "COMMAND_TYPE_NETWORK_LAST_SEEN"
+	case 28:
+		return "COMMAND_TYPE_AGENT_INTEGRITY_CHECK"
 	default:
 		return fmt.Sprintf("COMMAND_UNKNOWN_%d", int32(t))
 	}

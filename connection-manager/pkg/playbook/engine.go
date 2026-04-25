@@ -214,6 +214,7 @@ func (e *Engine) runPlaybook(agentID uuid.UUID, playbookName string) {
 					}
 					return m
 				}(),
+				Priority:       5,
 				Status:         models.CommandStatusSent,
 				IssuedAt:       time.Now(),
 				ExpiresAt:      time.Now().Add(stepTimeout + 30*time.Second),

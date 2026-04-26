@@ -414,6 +414,21 @@ func (s *AutomationService) ListRules(ctx context.Context) ([]*models.Automation
 	return s.automationRepo.List(ctx)
 }
 
+// CreateRule creates a new automation rule
+func (s *AutomationService) CreateRule(ctx context.Context, rule *models.AutomationRule) error {
+	return s.automationRepo.Create(ctx, rule)
+}
+
+// GetRuleByID retrieves an automation rule by ID
+func (s *AutomationService) GetRuleByID(ctx context.Context, ruleID uuid.UUID) (*models.AutomationRule, error) {
+	return s.automationRepo.GetByID(ctx, ruleID)
+}
+
+// UpdateRule updates an automation rule
+func (s *AutomationService) UpdateRule(ctx context.Context, rule *models.AutomationRule) error {
+	return s.automationRepo.Update(ctx, rule)
+}
+
 // GetAlertByID retrieves an alert by ID
 func (s *AutomationService) GetAlertByID(ctx context.Context, alertID uuid.UUID) (*models.Alert, error) {
 	return s.alertRepo.GetByID(ctx, alertID)

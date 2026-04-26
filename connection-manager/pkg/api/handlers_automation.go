@@ -210,6 +210,63 @@ func (h *AutomationHandlers) ListAutomationRules(c echo.Context) error {
 	})
 }
 
+// CreateAutomationRule creates a new automation rule
+func (h *AutomationHandlers) CreateAutomationRule(c echo.Context) error {
+	var rule models.AutomationRule
+	if err := c.Bind(&rule); err != nil {
+		return errorResponse(c, http.StatusBadRequest, "INVALID_REQUEST", "Invalid request body")
+	}
+
+	if err := h.automationService.CreateRule(c.Request().Context(), &rule); err != nil {
+		return errorResponse(c, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to create rule")
+	}
+
+	return c.JSON(http.StatusCreated, map[string]interface{}{
+		"message": "Automation rule created successfully",
+		"data":    rule,
+		"meta": ResponseMeta{
+			RequestID: c.Response().Header().Get(echo.HeaderXRequestID),
+			Timestamp: time.Now().UTC().Format(time.RFC3339),
+		},
+	})
+}
+
+// ToggleAutomationRule toggles the enabled state of an automation rule
+func (h *AutomationHandlers) ToggleAutomationRule(c echo.Context) error {
+	ruleID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		return errorResponse(c, http.StatusBadRequest, "INVALID_ID", "Invalid rule ID")
+	}
+
+	var req struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := c.Bind(&req); err != nil {
+		return errorResponse(c, http.StatusBadRequest, "INVALID_REQUEST", "Invalid request body")
+	}
+
+	ctx := c.Request().Context()
+	rule, err := h.automationService.GetRuleByID(ctx, ruleID)
+	if err != nil {
+		return errorResponse(c, http.StatusNotFound, "NOT_FOUND", "Rule not found")
+	}
+
+	rule.Enabled = req.Enabled
+
+	if err := h.automationService.UpdateRule(ctx, rule); err != nil {
+		return errorResponse(c, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to update rule")
+	}
+
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"message": "Rule state updated successfully",
+		"data":    rule,
+		"meta": ResponseMeta{
+			RequestID: c.Response().Header().Get(echo.HeaderXRequestID),
+			Timestamp: time.Now().UTC().Format(time.RFC3339),
+		},
+	})
+}
+
 // ExecutePlaybookForAlert executes a playbook for a specific alert
 func (h *AutomationHandlers) ExecutePlaybookForAlert(c echo.Context) error {
 	alertID, err := uuid.Parse(c.Param("id"))

@@ -136,6 +136,12 @@ type GRPCHealthChecker interface {
 	IsConnected() bool
 }
 
+// QuarantineRestorer is an interface for allowlisting restored files.
+// Implemented by responder.Engine.
+type QuarantineRestorer interface {
+	AllowRestoredPath(path string)
+}
+
 // Handler processes incoming commands.
 type Handler struct {
 	logger        *logging.Logger
@@ -178,6 +184,9 @@ type Handler struct {
 
 	// sigStore is the local malware hash database (optional).
 	sigStore *signatures.Store
+
+	// quarantineRestorer allows allowlisting files so they are not immediately re-quarantined.
+	quarantineRestorer QuarantineRestorer
 
 	// uninstallHook is the agent-level callback that performs the server-
 	// authorised uninstall (release protections, schedule SYSTEM cleanup,
@@ -243,6 +252,13 @@ func (h *Handler) SetSignatureStore(s *signatures.Store) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.sigStore = s
+}
+
+// SetQuarantineRestorer wires the responder engine to allowlist restored files.
+func (h *Handler) SetQuarantineRestorer(qr QuarantineRestorer) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.quarantineRestorer = qr
 }
 
 // SetUninstallHook registers the agent-level callback that performs the

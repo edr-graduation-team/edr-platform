@@ -1,4 +1,4 @@
-{"sha256":"131f95c51d819193fa8756565124eccfe9295e889e175cb0397db471cbbd7a458","name":"EICAR-Test-File","family":"test","severity":"low","source":"builtin_eicar"}
+{"sha256":"275a021bbfb6489e54d471899f7db9d1663fc695ec2fe2a2c4538aabf651fd0f","name":"EICAR-Test-File","family":"test","severity":"low","source":"builtin_eicar"}
 {"sha256":"eaf8b81e5f3613747f572bd4c08ae175de32c6b6549c6ce819ad79db1e8ba0b6","name":"MalwareBazaar Recent","family":"malware","severity":"high","source":"malwarebazaar"}
 {"sha256":"248a21666cb74702b7fb30a7f99409ba833354d41f56a6ebe5057ef01b769128","name":"MalwareBazaar Recent","family":"malware","severity":"high","source":"malwarebazaar"}
 {"sha256":"4358d6592d05dfb4c311d9826e8fda4945c2abb0f2195b6e7d801b50d9f07fc9","name":"MalwareBazaar Recent","family":"malware","severity":"high","source":"malwarebazaar"}

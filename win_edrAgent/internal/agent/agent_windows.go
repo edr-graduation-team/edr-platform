@@ -45,6 +45,7 @@ func startPlatformCollectors(ctx context.Context, a *Agent) {
 			}
 			eng := responder.NewEngine(logger, st, `C:\ProgramData\EDR\quarantine`, maxB, true)
 			fileAuto = eng
+			a.commandHandler.SetQuarantineRestorer(eng)
 			if cfg.Response.USBWatcher {
 				go collectors.StartUSBVolumeWatcher(ctx, eng, logger)
 			}

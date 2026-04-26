@@ -27,6 +27,11 @@ type Engine struct {
 
 	usbMu       sync.RWMutex
 	usbPrefixes []string // e.g. "d:\"
+
+	// restoredPaths tracks files restored by admin command so they are not
+	// re-quarantined. This is a permanent exemption for the lifetime of the agent.
+	restoredMu    sync.Mutex
+	restoredPaths map[string]bool
 }
 
 // NewEngine constructs a responder. store may be nil (disables matching).
@@ -43,7 +48,21 @@ func NewEngine(logger *logging.Logger, store *signatures.Store, quarantineDir st
 		quarantineDir: quarantineDir,
 		maxScan:       maxScanBytes,
 		enabled:       enabled,
+		restoredPaths: make(map[string]bool),
 	}
+}
+
+// AllowRestoredPath marks a path as admin-restored so the
+// auto-quarantine engine skips it. Call this immediately before restoring
+// a quarantined file via the dashboard RESTORE_QUARANTINE_FILE command.
+func (e *Engine) AllowRestoredPath(path string) {
+	if e == nil || path == "" {
+		return
+	}
+	e.restoredMu.Lock()
+	e.restoredPaths[strings.ToLower(path)] = true
+	e.restoredMu.Unlock()
+	e.logger.Infof("[Responder] Admin-restored path permanently exempted (until restart): %s", path)
 }
 
 // RegisterRemovableRoot adds a drive root (e.g. "E:" or "E:\") scanned for USB-sourced files.
@@ -86,8 +105,29 @@ func (e *Engine) EvaluateAndAct(_ context.Context, filePath string, opcode uint8
 		return nil, false
 	}
 
+	// Skip files that were explicitly restored by an admin command.
+	e.restoredMu.Lock()
+	isRestored := e.restoredPaths[lower]
+	e.restoredMu.Unlock()
+
+	if isRestored {
+		e.logger.Infof("[Responder] Skipping re-quarantine of admin-restored file: %s", filePath)
+		return nil, false
+	}
 	if _, err := os.Stat(filePath); err != nil {
 		return nil, false
+	}
+
+	// ETW fires FileIo/Create (opcode 64) before the process finishes writing
+	// the file content — the file exists but may still be 0 bytes at callback
+	// time. A short settle delay lets the writer flush before we hash.
+	// Write events (opcode 68) already have content on disk — no delay needed.
+	if opcode == 64 {
+		time.Sleep(150 * time.Millisecond)
+		// Re-check file still exists after settle (Defender may have removed it).
+		if _, err := os.Stat(filePath); err != nil {
+			return nil, false
+		}
 	}
 
 	hashHex, _, err := scanner.FileSHA256Limited(filePath, e.maxScan)

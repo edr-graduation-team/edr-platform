@@ -193,6 +193,9 @@ export interface Alert {
     resolved_at?: string;
     created_at: string;
     updated_at: string;
+    // Analyst-friendly enrichment (computed by server)
+    human_summary?: string;
+    source_hostname?: string;
 }
 
 export interface Rule {

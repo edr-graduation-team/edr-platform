@@ -26,7 +26,7 @@ type Handlers struct {
 	rateLimiter         *cache.RateLimiter
 	agentSvc            service.AgentService                 // optional: nil when DB unavailable
 	authSvc             service.AuthService                  // optional: nil when DB unavailable
-	caCertPath          string                               // path to the CA certificate for zero-touch provisioning
+	caCertPath          string                               // path to CA certificate for zero-touch provisioning
 	enrollmentTokenRepo repository.EnrollmentTokenRepository // optional: nil when DB unavailable
 	registry            *handlers.AgentRegistry              // real-time agent command routing
 	commandRepo         repository.CommandRepository         // C2 command persistence
@@ -45,6 +45,7 @@ type Handlers struct {
 	incidentRepo        repository.IncidentRepository        // post-isolation playbook + triage tracking
 	vulnRepo            repository.VulnerabilityRepository     // CVE / software vulnerability findings per agent
 	siemRepo            repository.SiemConnectorRepository     // SIEM / webhook export destinations
+	AutomationHandlers   *AutomationHandlers                 // automation handlers for intelligent response
 }
 
 // NewHandlers creates a new handlers instance.
@@ -57,6 +58,7 @@ func NewHandlers(
 	authSvc service.AuthService,
 	caCertPath string,
 	enrollmentTokenRepo repository.EnrollmentTokenRepository,
+	automationHandlers *AutomationHandlers,
 ) *Handlers {
 	return &Handlers{
 		logger:              logger,
@@ -67,6 +69,7 @@ func NewHandlers(
 		authSvc:             authSvc,
 		caCertPath:          caCertPath,
 		enrollmentTokenRepo: enrollmentTokenRepo,
+		AutomationHandlers:   automationHandlers,
 	}
 }
 
@@ -384,3 +387,5 @@ func errorResponse(c echo.Context, status int, code, message string) error {
 func successResponse(c echo.Context, status int, data interface{}) error {
 	return c.JSON(status, data)
 }
+
+// Sync

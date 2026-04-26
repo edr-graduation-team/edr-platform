@@ -156,6 +156,12 @@ func (s *Server) RegisterRoutes(handlers *Handlers) {
 	alerts.POST("/:id/resolve", handlers.ResolveAlert, handlers.RequirePermission("alerts", "write"))
 	alerts.POST("/:id/notes", handlers.AddAlertNote, handlers.RequirePermission("alerts", "write"))
 	alerts.DELETE("/:id", handlers.DeleteAlert, handlers.RequirePermission("alerts", "delete"))
+	// Automation endpoints for alerts
+	if handlers.AutomationHandlers != nil {
+		alerts.POST("/:id/execute-playbook", handlers.AutomationHandlers.ExecutePlaybookForAlert, handlers.RequirePermission("alerts", "write"))
+		alerts.GET("/:id/suggestions", handlers.AutomationHandlers.GetPlaybookSuggestions, handlers.RequirePermission("alerts", "read"))
+		alerts.GET("/:id/executions", handlers.AutomationHandlers.GetPlaybookExecutions, handlers.RequirePermission("alerts", "read"))
+	}
 
 	// ── SIEM / external forwarding destinations (not in-app alert or event UIs) ──
 	siem := protected.Group("/siem")
@@ -239,6 +245,20 @@ func (s *Server) RegisterRoutes(handlers *Handlers) {
 	// Create package requires auth; download is tokenized + short-lived and is public.
 	protected.POST("/agent/packages", handlers.CreateAgentPackage, handlers.RequirePermission("agents", "write"))
 	v1.GET("/agent/packages/:id/download", handlers.DownloadAgentPackage)
+
+	// ── Automation endpoints ─────────────────────────────────────────────
+	if handlers.AutomationHandlers != nil {
+		automation := protected.Group("/automation")
+		// Response Playbooks
+		automation.GET("/playbooks", handlers.AutomationHandlers.ListPlaybooks, handlers.RequirePermission("playbooks", "read"))
+		automation.POST("/playbooks", handlers.AutomationHandlers.CreatePlaybook, handlers.RequirePermission("playbooks", "write"))
+		automation.GET("/playbooks/:id", handlers.AutomationHandlers.GetPlaybook, handlers.RequirePermission("playbooks", "read"))
+		// Automation Rules
+		automation.GET("/rules", handlers.AutomationHandlers.ListAutomationRules, handlers.RequirePermission("automation", "read"))
+		// Metrics and Optimizations
+		automation.GET("/metrics", handlers.AutomationHandlers.GetAutomationMetrics, handlers.RequirePermission("automation", "read"))
+		automation.POST("/optimize", handlers.AutomationHandlers.GetAutomationOptimizations, handlers.RequirePermission("automation", "write"))
+	}
 }
 
 // healthCheck returns server health status.

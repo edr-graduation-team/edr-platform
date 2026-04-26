@@ -69,6 +69,7 @@ type Alert struct {
 	Tags            map[string]string `json:"tags,omitempty" db:"tags"`
 	Metadata        map[string]any    `json:"metadata,omitempty" db:"metadata"`
 	Notes           string            `json:"notes,omitempty" db:"notes"`
+	Confidence      float64           `json:"confidence" db:"confidence"` // 0.0 to 1.0 confidence level
 
 	// Context-Aware Risk Scoring (Phase 1) — populated from alerts.risk_score / context_snapshot / score_breakdown.
 	// These fields are written by the sigma_engine's RiskScorer and read by the connection-manager API.
@@ -208,6 +209,7 @@ type Command struct {
 	ID             uuid.UUID      `json:"id" db:"id"`
 	AgentID        uuid.UUID      `json:"agent_id" db:"agent_id"`
 	CommandType    CommandType    `json:"command_type" db:"command_type"`
+	OnFailure     string         `json:"on_failure,omitempty" db:"on_failure"`
 	Parameters     map[string]any `json:"parameters,omitempty" db:"parameters"`
 	Priority       int            `json:"priority" db:"priority"`
 	Status         CommandStatus  `json:"status" db:"status"`
@@ -266,4 +268,124 @@ type QuarantineItem struct {
 	State           QuarantineItemState `json:"state" db:"state"`
 	CreatedAt       time.Time           `json:"created_at" db:"created_at"`
 	UpdatedAt       time.Time           `json:"updated_at" db:"updated_at"`
+}
+
+// ============================================================================
+// AUTOMATION MODELS
+// ============================================================================
+
+// ResponsePlaybook represents a predefined set of actions for incident response.
+type ResponsePlaybook struct {
+	ID              uuid.UUID         `json:"id" db:"id"`
+	Name            string            `json:"name" db:"name"`
+	Description     string            `json:"description,omitempty" db:"description"`
+	Category        string            `json:"category" db:"category"`
+	SeverityFilter  []string          `json:"severity_filter,omitempty" db:"severity_filter"`
+	RulePattern     string            `json:"rule_pattern,omitempty" db:"rule_pattern"`
+	Commands        json.RawMessage   `json:"commands" db:"commands"`
+	MITRETechiques  []string          `json:"mitre_techniques,omitempty" db:"mitre_techniques"`
+	Enabled         bool              `json:"enabled" db:"enabled"`
+	CreatedBy       uuid.UUID         `json:"created_by" db:"created_by"`
+	CreatedAt       time.Time         `json:"created_at" db:"created_at"`
+	UpdatedAt       time.Time         `json:"updated_at" db:"updated_at"`
+}
+
+// PlaybookCommand represents a single command within a playbook.
+type PlaybookCommand struct {
+	Type         string                 `json:"type"`
+	Parameters   map[string]interface{} `json:"parameters,omitempty"`
+	Timeout      int                    `json:"timeout"`
+	Description  string                 `json:"description"`
+	OnFailure    string                 `json:"on_failure"` // "stop" or "continue"
+}
+
+// PlaybookFilter represents filter criteria for querying playbooks
+type PlaybookFilter struct {
+	Category   *string
+	Severity   *string
+	Enabled    *bool
+	Search     string
+	Limit      int
+	Offset     int
+}
+
+// AutomationRule represents an automation rule for triggering playbooks.
+type AutomationRule struct {
+	ID                 uuid.UUID         `json:"id" db:"id"`
+	Name               string            `json:"name" db:"name"`
+	Description        string            `json:"description,omitempty" db:"description"`
+	TriggerConditions  json.RawMessage   `json:"trigger_conditions" db:"trigger_conditions"`
+	PlaybookID         uuid.UUID         `json:"playbook_id" db:"playbook_id"`
+	Priority           int               `json:"priority" db:"priority"`
+	AutoExecute        bool              `json:"auto_execute" db:"auto_execute"`
+	CooldownMinutes    int               `json:"cooldown_minutes" db:"cooldown_minutes"`
+	Enabled            bool              `json:"enabled" db:"enabled"`
+	SuccessRate        float64           `json:"success_rate" db:"success_rate"`
+	LastExecution      *time.Time        `json:"last_execution,omitempty" db:"last_execution"`
+	CreatedBy          uuid.UUID         `json:"created_by" db:"created_by"`
+	CreatedAt          time.Time         `json:"created_at" db:"created_at"`
+	UpdatedAt          time.Time         `json:"updated_at" db:"updated_at"`
+	MatchesCurrentAlert bool             `json:"matches_current_alert,omitempty"` // Runtime field
+}
+
+// PlaybookExecution represents an execution instance of a playbook.
+type PlaybookExecution struct {
+	ID                uuid.UUID      `json:"id" db:"id"`
+	AlertID           uuid.UUID      `json:"alert_id" db:"alert_id"`
+	PlaybookID        uuid.UUID      `json:"playbook_id" db:"playbook_id"`
+	RuleID            *uuid.UUID     `json:"rule_id,omitempty" db:"rule_id"`
+	AgentID           uuid.UUID      `json:"agent_id" db:"agent_id"`
+	Status            string         `json:"status" db:"status"`
+	StartedAt         time.Time      `json:"started_at" db:"started_at"`
+	CompletedAt       *time.Time     `json:"completed_at,omitempty" db:"completed_at"`
+	CommandsExecuted  int            `json:"commands_executed" db:"commands_executed"`
+	CommandsTotal     int            `json:"commands_total" db:"commands_total"`
+	Result            json.RawMessage `json:"result,omitempty" db:"result"`
+	ErrorMessage      string         `json:"error_message,omitempty" db:"error_message"`
+	CreatedBy         *uuid.UUID     `json:"created_by,omitempty" db:"created_by"`
+	ExecutionTimeMs   int            `json:"execution_time_ms,omitempty" db:"execution_time_ms"`
+}
+
+// PlaybookSuggestion represents a suggested playbook for an alert.
+type PlaybookSuggestion struct {
+	ID         uuid.UUID  `json:"id" db:"id"`
+	AlertID    uuid.UUID  `json:"alert_id" db:"alert_id"`
+	PlaybookID uuid.UUID  `json:"playbook_id" db:"playbook_id"`
+	Confidence float64    `json:"confidence" db:"confidence"`
+	Reason     string     `json:"reason" db:"reason"`
+	MITREMatch []string   `json:"mitre_match,omitempty" db:"mitre_match"`
+	CreatedAt  time.Time  `json:"created_at" db:"created_at"`
+}
+
+// AutomationMetrics represents metrics for automation rules.
+type AutomationMetrics struct {
+	ID                   uuid.UUID `json:"id" db:"id"`
+	RuleID               uuid.UUID `json:"rule_id" db:"rule_id"`
+	Date                 time.Time `json:"date" db:"date"`
+	ExecutionsCount      int       `json:"executions_count" db:"executions_count"`
+	SuccessfulExecutions int       `json:"successful_executions" db:"successful_executions"`
+	FailedExecutions     int       `json:"failed_executions" db:"failed_executions"`
+	AvgExecutionTimeMs   int       `json:"avg_execution_time_ms" db:"avg_execution_time_ms"`
+	CreatedAt            time.Time `json:"created_at" db:"created_at"`
+}
+
+// AutomationMetricsSummary represents overall automation metrics.
+type AutomationMetricsSummary struct {
+	TotalExecutions      int     `json:"total_executions"`
+	SuccessfulExecutions  int     `json:"successful_executions"`
+	FailedExecutions      int     `json:"failed_executions"`
+	SuccessRate          float64 `json:"success_rate"`
+	AvgExecutionTime     int     `json:"avg_execution_time_ms"`
+	TopPerformingRules   []RulePerformance `json:"top_performing_rules"`
+	LowPerformingRules   []RulePerformance `json:"low_performing_rules"`
+}
+
+// RulePerformance represents performance metrics for a specific rule.
+type RulePerformance struct {
+	RuleID       uuid.UUID `json:"rule_id"`
+	RuleName     string    `json:"rule_name"`
+	SuccessRate  float64   `json:"success_rate"`
+	Executions   int       `json:"executions"`
+	AvgExecTime  int       `json:"avg_exec_time_ms"`
+	LastExecuted time.Time `json:"last_executed"`
 }

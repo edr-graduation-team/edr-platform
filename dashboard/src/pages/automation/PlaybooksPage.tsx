@@ -3,7 +3,7 @@ import { useLocation } from 'react-router-dom';
 import { AlertContextPanel } from '../../components/automation/AlertContextPanel';
 import { UserAssistant } from '../../components/automation/UserAssistant';
 import { Play, Shield, Clock, TrendingUp, AlertTriangle, Plus, Terminal, X, CheckCircle, Target } from 'lucide-react';
-import { automationApi } from '../../api/client';
+import { automationApi, agentsApi } from '../../api/client';
 
 // Map API ResponsePlaybook to the component's Playbook interface
 interface Playbook {
@@ -30,6 +30,7 @@ interface AlertContext {
     title: string;
     description?: string;
     riskScore?: number;
+    event_data?: any;
   };
   timestamp: string;
 }
@@ -83,7 +84,7 @@ export function PlaybooksPage() {
   const [playbooks, setPlaybooks] = useState<Playbook[]>([]);
   const [suggestions, setSuggestions] = useState<Playbook[]>([]);
   const [loading, setLoading] = useState(true);
-  
+
   // Modal State
   const [selectedPlaybook, setSelectedPlaybook] = useState<Playbook | null>(null);
   const [agentIdInput, setAgentIdInput] = useState('');
@@ -95,6 +96,8 @@ export function PlaybooksPage() {
   const [isSavingPlaybook, setIsSavingPlaybook] = useState(false);
   const [activeCommandIndex, setActiveCommandIndex] = useState<number>(-1);
   const [executionComplete, setExecutionComplete] = useState(false);
+  const [executionError, setExecutionError] = useState<string | null>(null);
+  const [processNameInput, setProcessNameInput] = useState<string>('');
 
   useEffect(() => {
     const state = location.state as any;
@@ -117,7 +120,7 @@ export function PlaybooksPage() {
     try {
       setLoading(true);
       const res = await automationApi.listPlaybooks();
-      
+
       let mappedPlaybooks: Playbook[] = (res.playbooks || []).map((p) => ({
         id: p.id,
         name: p.name,
@@ -144,7 +147,7 @@ export function PlaybooksPage() {
         const filteredSuggestions = mappedPlaybooks.filter(playbook => {
           const severity = alertContext.alertDetails.severity;
           const ruleName = alertContext.alertDetails.ruleName.toLowerCase();
-          
+
           if (severity === 'critical' && playbook.category === 'containment') return true;
           if (ruleName.includes('malware') && playbook.category === 'investigation') return true;
           if (ruleName.includes('usb') && playbook.name.toLowerCase().includes('usb')) return true;
@@ -171,9 +174,24 @@ export function PlaybooksPage() {
     if (alertContext?.alertDetails?.agentId) {
       setAgentIdInput(alertContext.alertDetails.agentId);
     }
+    
+    // Auto-fill process name from alert context if available
+    let defaultProcess = 'suspicious_encrypter.exe';
+    if (alertContext?.alertDetails?.event_data) {
+      const ed = alertContext.alertDetails.event_data;
+      if (ed.Image) {
+        const parts = String(ed.Image).split('\\');
+        defaultProcess = parts[parts.length - 1];
+      } else if (ed.OriginalFileName) {
+        defaultProcess = String(ed.OriginalFileName);
+      } else if (ed.ProcessName) {
+        defaultProcess = String(ed.ProcessName);
+      }
+    }
+    setProcessNameInput(defaultProcess);
   };
 
-  const confirmExecution = () => {
+  const confirmExecution = async () => {
     if (!agentIdInput || !selectedPlaybook) {
       alert("Please provide a valid Target Agent ID");
       return;
@@ -181,26 +199,72 @@ export function PlaybooksPage() {
     setIsExecuting(true);
     setActiveCommandIndex(0);
     setExecutionComplete(false);
+    setExecutionError(null);
 
-    let logIndex = 0;
     const commands = selectedPlaybook.commands;
-    
-    const interval = setInterval(() => {
-      if (logIndex < commands.length) {
-        setActiveCommandIndex(logIndex);
-        logIndex++;
-      } else {
-        clearInterval(interval);
-        setActiveCommandIndex(commands.length);
-        setExecutionComplete(true);
-        setTimeout(() => {
-          setIsExecuting(false);
-          setSelectedPlaybook(null);
-          setActiveCommandIndex(-1);
-          setExecutionComplete(false);
-        }, 2500);
+
+    for (let logIndex = 0; logIndex < commands.length; logIndex++) {
+      setActiveCommandIndex(logIndex);
+      const cmd = commands[logIndex];
+      let mappedType = cmd.type;
+      let params: Record<string, string> = {};
+
+      // Translate UI-friendly or legacy playbook types to actual backend Agent CommandTypes
+      switch (cmd.type) {
+        case 'network_isolate': mappedType = 'isolate_network'; break;
+        case 'process_terminate': 
+            mappedType = 'terminate_process'; 
+            params = { process_name: processNameInput || 'suspicious_encrypter.exe' };
+            break;
+        case 'forensic_dump': 
+            mappedType = 'collect_forensics'; 
+            params = { log_types: 'Memory,System', time_range: '24h' };
+            break;
+        case 'device_unmount':
+          mappedType = 'run_cmd';
+          params = { cmd: 'powershell -Command "Get-Volume | Where-Object DriveType -eq Removable | Dismount-Volume"' };
+          break;
+        case 'log_pull':
+          mappedType = 'collect_logs';
+          params = { log_types: 'System,Security' };
+          break;
+        case 'yara_scan':
+          mappedType = 'scan_file';
+          params = { file_path: 'C:\\Windows\\Temp' }; // Demo target
+          break;
+        case 'registry_query':
+          mappedType = 'run_cmd';
+          params = { cmd: 'reg query HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Run' };
+          break;
       }
-    }, 1200);
+
+      try {
+        await agentsApi.executeCommand(agentIdInput, {
+          command_type: mappedType as any,
+          parameters: params,
+          timeout: cmd.timeout || 300
+        });
+
+        // Add a slight artificial delay for UI feel so the user sees the progress step if it was super fast
+        await new Promise(resolve => setTimeout(resolve, 800));
+      } catch (err: any) {
+        console.error("Command execution failed:", err);
+        const errMsg = err.response?.data?.message || err.message || "Unknown error";
+        setExecutionError(`Failed at step ${logIndex + 1} (${cmd.type}): ${errMsg}. The agent may be offline or unreachable.`);
+        setIsExecuting(false);
+        return; // Halt execution of remaining steps
+      }
+    }
+
+    // If we made it here, all commands executed successfully
+    setActiveCommandIndex(commands.length);
+    setExecutionComplete(true);
+    setTimeout(() => {
+      setIsExecuting(false);
+      setSelectedPlaybook(null);
+      setActiveCommandIndex(-1);
+      setExecutionComplete(false);
+    }, 3000);
   };
 
   const confirmCreatePlaybook = async () => {
@@ -216,14 +280,14 @@ export function PlaybooksPage() {
         category: 'investigation',
         commands: [{ type: 'network_isolate', description: 'Isolate machine', timeout: 300 }]
       };
-      
+
       await automationApi.createPlaybook(payload);
-      
+
       setIsCreatingPlaybook(false);
       setNewPlaybookName('');
       setNewPlaybookDesc('');
       alert(`Playbook "${newPlaybookName}" created successfully!`);
-      
+
       // Refresh list
       fetchPlaybooks();
     } catch (err) {
@@ -270,19 +334,19 @@ export function PlaybooksPage() {
           </div>
         </div>
         <div className="flex items-center gap-4">
-            {alertContext && (
+          {alertContext && (
             <div className="flex items-center gap-2 text-sm text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/20 px-3 py-1.5 rounded-full border border-emerald-200 dark:border-emerald-800/50 font-medium">
-                <AlertTriangle className="w-4 h-4" />
-                <span>Active Alert Context</span>
+              <AlertTriangle className="w-4 h-4" />
+              <span>Active Alert Context</span>
             </div>
-            )}
-            <button 
-              onClick={() => setIsCreatingPlaybook(true)}
-              className="btn btn-primary flex items-center gap-2"
-            >
-                <Plus className="w-4 h-4" />
-                Create Playbook
-            </button>
+          )}
+          <button
+            onClick={() => setIsCreatingPlaybook(true)}
+            className="btn btn-primary flex items-center gap-2"
+          >
+            <Plus className="w-4 h-4" />
+            Create Playbook
+          </button>
         </div>
       </div>
 
@@ -368,7 +432,7 @@ export function PlaybooksPage() {
                     <p className="text-sm text-slate-600 dark:text-slate-400 mb-4 max-w-3xl">
                       {playbook.description}
                     </p>
-                    
+
                     {/* Metadata Badges */}
                     <div className="flex flex-wrap items-center gap-4 text-xs mb-5">
                       <div className="flex items-center gap-1.5 text-slate-500">
@@ -378,12 +442,12 @@ export function PlaybooksPage() {
                         </span>
                       </div>
                       {playbook.mitreTechniques && playbook.mitreTechniques.length > 0 && (
-                          <div className="flex items-center gap-1.5 text-slate-500">
-                            <Shield className="w-4 h-4" />
-                            <span className="font-semibold text-slate-700 dark:text-slate-300">
-                              {playbook.mitreTechniques.join(', ')}
-                            </span>
-                          </div>
+                        <div className="flex items-center gap-1.5 text-slate-500">
+                          <Shield className="w-4 h-4" />
+                          <span className="font-semibold text-slate-700 dark:text-slate-300">
+                            {playbook.mitreTechniques.join(', ')}
+                          </span>
+                        </div>
                       )}
                       <div className="flex items-center gap-1.5 text-slate-500">
                         <Clock className="w-4 h-4" />
@@ -403,11 +467,11 @@ export function PlaybooksPage() {
                       <Play className="w-4 h-4" />
                       Execute
                     </button>
-                    <button 
+                    <button
                       onClick={() => setViewPlaybook(playbook)}
                       className="px-6 py-2.5 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-600 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700 font-medium w-full transition-colors"
                     >
-                        View Details
+                      View Details
                     </button>
                   </div>
                 </div>
@@ -429,14 +493,14 @@ export function PlaybooksPage() {
                 </h2>
                 <p className="text-sm text-slate-500 mt-1">Configure parameters for manual deployment.</p>
               </div>
-              <button 
+              <button
                 onClick={() => setSelectedPlaybook(null)}
                 className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-800 transition-colors"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
-            
+
             <div className="p-6 space-y-6">
               {/* Playbook Summary */}
               <div className="bg-indigo-50 dark:bg-indigo-900/10 border border-indigo-100 dark:border-indigo-800/50 rounded-xl p-4">
@@ -456,8 +520,8 @@ export function PlaybooksPage() {
                     Target Agent ID <span className="text-rose-500">*</span>
                   </label>
                   <div className="relative">
-                    <input 
-                      type="text" 
+                    <input
+                      type="text"
                       value={agentIdInput}
                       onChange={(e) => setAgentIdInput(e.target.value)}
                       placeholder="e.g., agent-1234-abcd"
@@ -471,6 +535,28 @@ export function PlaybooksPage() {
                       Auto-filled from active alert context
                     </p>
                   )}
+                  
+                  {selectedPlaybook.commands.some(c => c.type === 'process_terminate') && (
+                    <div className="mt-6">
+                      <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">
+                        Target Process Name <span className="text-slate-400 font-normal ml-1">(for termination)</span>
+                      </label>
+                      <div className="relative">
+                        <input
+                          type="text"
+                          value={processNameInput}
+                          onChange={(e) => setProcessNameInput(e.target.value)}
+                          placeholder="e.g., vssadmin.exe"
+                          className="w-full bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-lg px-4 py-3 text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-shadow pl-10"
+                        />
+                        <Terminal className="w-5 h-5 text-slate-400 absolute left-3 top-3.5" />
+                      </div>
+                      <p className="text-xs text-slate-500 mt-2 flex items-center gap-1.5">
+                        <Shield className="w-3.5 h-3.5" />
+                        This parameter is automatically extracted from the alert details if available.
+                      </p>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -481,24 +567,25 @@ export function PlaybooksPage() {
                 </label>
                 <div className="bg-slate-50 dark:bg-slate-950 rounded-xl border border-slate-200 dark:border-slate-800 p-4 space-y-3">
                   {selectedPlaybook.commands.map((cmd, idx) => {
-                    const isCompleted = isExecuting && idx < activeCommandIndex;
-                    const isActive = isExecuting && idx === activeCommandIndex;
+                    const isCompleted = (isExecuting || executionError) && idx < activeCommandIndex;
+                    const isActive = isExecuting && idx === activeCommandIndex && !executionError;
+                    const isFailed = executionError && idx === activeCommandIndex;
 
                     return (
                       <div key={idx} className={`flex items-start gap-3 p-2 rounded-lg transition-colors ${isActive ? 'bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-100 dark:border-indigo-800/50' : ''}`}>
-                        <div className={`flex items-center justify-center w-6 h-6 rounded-full text-xs font-bold shrink-0 mt-0.5 ${
-                          isCompleted ? 'bg-emerald-100 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-400' :
-                          isActive ? 'bg-indigo-600 text-white shadow-md animate-pulse' :
-                          'bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-400'
-                        }`}>
-                          {isCompleted ? <CheckCircle className="w-4 h-4" /> : (idx + 1)}
+                        <div className={`flex items-center justify-center w-6 h-6 rounded-full text-xs font-bold shrink-0 mt-0.5 ${isFailed ? 'bg-rose-100 text-rose-600 dark:bg-rose-900/30 dark:text-rose-400 border border-rose-200 dark:border-rose-800' :
+                            isCompleted ? 'bg-emerald-100 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-400' :
+                              isActive ? 'bg-indigo-600 text-white shadow-md animate-pulse' :
+                                'bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-400'
+                          }`}>
+                          {isFailed ? <X className="w-4 h-4" /> : isCompleted ? <CheckCircle className="w-4 h-4" /> : (idx + 1)}
                         </div>
                         <div className="flex-1">
-                          <div className={`text-sm font-bold ${isCompleted ? 'text-emerald-700 dark:text-emerald-400' : isActive ? 'text-indigo-700 dark:text-indigo-300' : 'text-slate-800 dark:text-slate-200'}`}>
+                          <div className={`text-sm font-bold ${isFailed ? 'text-rose-700 dark:text-rose-400' : isCompleted ? 'text-emerald-700 dark:text-emerald-400' : isActive ? 'text-indigo-700 dark:text-indigo-300' : 'text-slate-800 dark:text-slate-200'}`}>
                             {cmd.type}
                           </div>
-                          <div className={`text-xs mt-0.5 ${isActive ? 'text-indigo-600/80 dark:text-indigo-400/80' : 'text-slate-500'}`}>
-                            {isActive ? 'Executing command...' : cmd.description}
+                          <div className={`text-xs mt-0.5 ${isFailed ? 'text-rose-600/80 dark:text-rose-400/80 font-medium' : isActive ? 'text-indigo-600/80 dark:text-indigo-400/80' : 'text-slate-500'}`}>
+                            {isFailed ? 'Execution Failed' : isActive ? 'Executing command...' : cmd.description}
                           </div>
                         </div>
                         {isActive && (
@@ -509,10 +596,19 @@ export function PlaybooksPage() {
                       </div>
                     );
                   })}
-                  {executionComplete && (
+                  {executionComplete && !executionError && (
                     <div className="mt-4 p-3 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800/50 rounded-lg flex items-center justify-center gap-2 text-emerald-700 dark:text-emerald-400 font-bold text-sm animate-in fade-in slide-in-from-bottom-2">
                       <CheckCircle className="w-5 h-5" />
                       Playbook Execution Successful
+                    </div>
+                  )}
+                  {executionError && (
+                    <div className="mt-4 p-4 bg-rose-50 dark:bg-rose-900/20 border border-rose-200 dark:border-rose-800/50 rounded-lg flex flex-col gap-2 text-rose-700 dark:text-rose-400 text-sm animate-in fade-in slide-in-from-bottom-2">
+                      <div className="flex items-center gap-2 font-bold">
+                        <AlertTriangle className="w-5 h-5" />
+                        Execution Aborted
+                      </div>
+                      <div className="pl-7 opacity-90">{executionError}</div>
                     </div>
                   )}
                 </div>
@@ -520,14 +616,14 @@ export function PlaybooksPage() {
             </div>
 
             <div className="flex items-center justify-end gap-3 p-6 border-t border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/30">
-              <button 
+              <button
                 onClick={() => setSelectedPlaybook(null)}
                 className="px-5 py-2.5 font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-800 rounded-lg transition-colors"
                 disabled={isExecuting}
               >
                 Cancel
               </button>
-              <button 
+              <button
                 onClick={confirmExecution}
                 disabled={isExecuting}
                 className="px-6 py-2.5 font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-md transition-all flex items-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed"
@@ -560,21 +656,21 @@ export function PlaybooksPage() {
                 </h2>
                 <p className="text-sm text-slate-500 mt-1">Design an autonomous command sequence.</p>
               </div>
-              <button 
+              <button
                 onClick={() => setIsCreatingPlaybook(false)}
                 className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-800 transition-colors"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
-            
+
             <div className="p-6 space-y-5">
               <div>
                 <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">
                   Playbook Name <span className="text-rose-500">*</span>
                 </label>
-                <input 
-                  type="text" 
+                <input
+                  type="text"
                   value={newPlaybookName}
                   onChange={(e) => setNewPlaybookName(e.target.value)}
                   placeholder="e.g., Critical Database Isolation"
@@ -586,7 +682,7 @@ export function PlaybooksPage() {
                 <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">
                   Description <span className="text-rose-500">*</span>
                 </label>
-                <textarea 
+                <textarea
                   value={newPlaybookDesc}
                   onChange={(e) => setNewPlaybookDesc(e.target.value)}
                   placeholder="Describe the purpose of this playbook..."
@@ -607,14 +703,14 @@ export function PlaybooksPage() {
             </div>
 
             <div className="flex items-center justify-end gap-3 p-6 border-t border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/30">
-              <button 
+              <button
                 onClick={() => setIsCreatingPlaybook(false)}
                 className="px-5 py-2.5 font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-800 rounded-lg transition-colors"
                 disabled={isSavingPlaybook}
               >
                 Cancel
               </button>
-              <button 
+              <button
                 onClick={confirmCreatePlaybook}
                 disabled={isSavingPlaybook}
                 className="px-6 py-2.5 font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-md transition-all flex items-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed"
@@ -637,14 +733,14 @@ export function PlaybooksPage() {
                   Playbook Details
                 </h2>
               </div>
-              <button 
+              <button
                 onClick={() => setViewPlaybook(null)}
                 className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-800 transition-colors"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
-            
+
             <div className="p-6 space-y-6">
               <div>
                 <h3 className="text-lg font-bold text-slate-900 dark:text-white">{viewPlaybook.name}</h3>
@@ -677,9 +773,9 @@ export function PlaybooksPage() {
                 </div>
               </div>
             </div>
-            
+
             <div className="p-6 border-t border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/30 flex justify-end">
-              <button 
+              <button
                 onClick={() => setViewPlaybook(null)}
                 className="px-6 py-2.5 font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-800 rounded-lg transition-colors"
               >

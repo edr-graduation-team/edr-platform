@@ -255,6 +255,8 @@ func (s *Server) RegisterRoutes(handlers *Handlers) {
 		automation.GET("/playbooks/:id", handlers.AutomationHandlers.GetPlaybook, handlers.RequirePermission("playbooks", "read"))
 		// Automation Rules
 		automation.GET("/rules", handlers.AutomationHandlers.ListAutomationRules, handlers.RequirePermission("automation", "read"))
+		automation.POST("/rules", handlers.AutomationHandlers.CreateAutomationRule, handlers.RequirePermission("automation", "write"))
+		automation.PATCH("/rules/:id/toggle", handlers.AutomationHandlers.ToggleAutomationRule, handlers.RequirePermission("automation", "write"))
 		// Metrics and Optimizations
 		automation.GET("/metrics", handlers.AutomationHandlers.GetAutomationMetrics, handlers.RequirePermission("automation", "read"))
 		automation.POST("/optimize", handlers.AutomationHandlers.GetAutomationOptimizations, handlers.RequirePermission("automation", "write"))

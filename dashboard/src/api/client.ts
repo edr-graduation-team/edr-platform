@@ -737,6 +737,14 @@ export const automationApi = {
         const response = await connectionApi.get<{ data: AutomationRule[], total: number }>('/api/v1/automation/rules');
         return { rules: response.data.data, total: response.data.total };
     },
+    createRule: async (data: Partial<AutomationRule>) => {
+        const response = await connectionApi.post<{ data: AutomationRule }>('/api/v1/automation/rules', data);
+        return response.data;
+    },
+    toggleRule: async (id: string, enabled: boolean) => {
+        const response = await connectionApi.patch<{ data: AutomationRule }>(`/api/v1/automation/rules/${id}/toggle`, { enabled });
+        return response.data;
+    },
 };
 
 // ============================================================================

@@ -319,7 +319,10 @@ func (h *Handlers) GetAgentEvents(c echo.Context) error {
 	return c.JSON(http.StatusOK, EventListResponse{
 		Data:       out,
 		Pagination: PaginationResponse{Total: total, Limit: limit, Offset: offset},
-		Meta:       responseMeta(c),
+		Meta: ResponseMeta{
+			RequestID: c.Response().Header().Get(echo.HeaderXRequestID),
+			Timestamp: time.Now().UTC().Format(time.RFC3339),
+		},
 	})
 }
 
@@ -747,7 +750,10 @@ func (h *Handlers) AddProcessException(c echo.Context) error {
 		"status":       "sent",
 		"agent_id":     agentID.String(),
 		"process_name": procName,
-		"meta":         responseMeta(c),
+		"meta": ResponseMeta{
+			RequestID: c.Response().Header().Get(echo.HeaderXRequestID),
+			Timestamp: time.Now().UTC().Format(time.RFC3339),
+		},
 	})
 }
 

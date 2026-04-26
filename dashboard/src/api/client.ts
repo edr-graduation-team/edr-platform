@@ -691,6 +691,55 @@ export interface QuarantineItem {
 }
 
 // ============================================================================
+// Connection Manager Automation APIs
+// ============================================================================
+
+export interface ResponsePlaybook {
+    id: string;
+    name: string;
+    description: string;
+    category: string;
+    severity_filter: string[];
+    rule_pattern: string;
+    commands: any[];
+    mitre_techniques: string[];
+    enabled: boolean;
+    created_at?: string;
+    updated_at?: string;
+}
+
+export interface AutomationRule {
+    id: string;
+    name: string;
+    description: string;
+    trigger_conditions: any;
+    playbook_id: string;
+    priority: number;
+    auto_execute: boolean;
+    cooldown_minutes: number;
+    enabled: boolean;
+    success_rate: number;
+    last_execution?: string;
+    created_at?: string;
+    updated_at?: string;
+}
+
+export const automationApi = {
+    listPlaybooks: async () => {
+        const response = await connectionApi.get<{ data: ResponsePlaybook[], total: number }>('/api/v1/automation/playbooks');
+        return { playbooks: response.data.data, total: response.data.total };
+    },
+    createPlaybook: async (data: { name: string, description: string, category: string, commands: any[] }) => {
+        const response = await connectionApi.post<{ data: ResponsePlaybook }>('/api/v1/automation/playbooks', data);
+        return response.data;
+    },
+    listRules: async () => {
+        const response = await connectionApi.get<{ data: AutomationRule[], total: number }>('/api/v1/automation/rules');
+        return { rules: response.data.data, total: response.data.total };
+    },
+};
+
+// ============================================================================
 // Connection Manager Reliability APIs
 // ============================================================================
 

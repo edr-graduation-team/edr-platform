@@ -321,3 +321,102 @@ type AuditLogFilter struct {
 	Limit        int
 	Offset       int
 }
+
+// AlertRepository and AlertFilter interfaces are defined in alert_repo.go
+
+// ResponsePlaybookRepository defines the interface for response playbook data access.
+type ResponsePlaybookRepository interface {
+	// Create creates a new response playbook.
+	Create(ctx context.Context, playbook *models.ResponsePlaybook) error
+
+	// GetByID retrieves a playbook by its ID.
+	GetByID(ctx context.Context, id uuid.UUID) (*models.ResponsePlaybook, error)
+
+	// Update updates an existing playbook.
+	Update(ctx context.Context, playbook *models.ResponsePlaybook) error
+
+	// Delete soft-deletes a playbook.
+	Delete(ctx context.Context, id uuid.UUID) error
+
+	// List retrieves playbooks with optional filters.
+	List(ctx context.Context, filter PlaybookFilter) ([]*models.ResponsePlaybook, error)
+
+	// Count returns the number of playbooks matching the filter.
+	Count(ctx context.Context, filter PlaybookFilter) (int64, error)
+}
+
+// PlaybookFilter defines filters for listing playbooks.
+type PlaybookFilter struct {
+	Category *string
+	Enabled  *string
+	Search   *string
+	Limit    int
+	Offset   int
+}
+
+// AutomationRuleRepository defines the interface for automation rule data access.
+type AutomationRuleRepository interface {
+	// Create creates a new automation rule.
+	Create(ctx context.Context, rule *models.AutomationRule) error
+
+	// GetByID retrieves a rule by its ID.
+	GetByID(ctx context.Context, id uuid.UUID) (*models.AutomationRule, error)
+
+	// Update updates an existing rule.
+	Update(ctx context.Context, rule *models.AutomationRule) error
+
+	// Delete soft-deletes a rule.
+	Delete(ctx context.Context, id uuid.UUID) error
+
+	// List retrieves automation rules.
+	List(ctx context.Context) ([]*models.AutomationRule, error)
+
+	// GetMatchingRules retrieves rules that match an alert.
+	GetMatchingRules(ctx context.Context, alert *models.Alert) ([]*models.AutomationRule, error)
+}
+
+// PlaybookExecutionRepository defines the interface for playbook execution data access.
+type PlaybookExecutionRepository interface {
+	// Create creates a new playbook execution record.
+	Create(ctx context.Context, execution *models.PlaybookExecution) error
+
+	// GetByID retrieves an execution by its ID.
+	GetByID(ctx context.Context, id uuid.UUID) (*models.PlaybookExecution, error)
+
+	// Update updates an existing execution.
+	Update(ctx context.Context, execution *models.PlaybookExecution) error
+
+	// List retrieves executions with optional filters.
+	List(ctx context.Context, filter ExecutionFilter) ([]*models.PlaybookExecution, error)
+
+	// GetByAlertID retrieves executions for a specific alert.
+	GetByAlertID(ctx context.Context, alertID uuid.UUID) ([]*models.PlaybookExecution, error)
+
+	// CreateSuggestion creates a new playbook suggestion.
+	CreateSuggestion(ctx context.Context, suggestion *models.PlaybookSuggestion) error
+
+	// GetSuggestions retrieves suggestions for a specific alert.
+	GetSuggestions(ctx context.Context, alertID uuid.UUID) ([]models.PlaybookSuggestion, error)
+}
+
+// ExecutionFilter defines filters for listing executions.
+type ExecutionFilter struct {
+	AlertID    *uuid.UUID
+	PlaybookID *uuid.UUID
+	Status     *string
+	AgentID    *uuid.UUID
+	Limit      int
+	Offset     int
+}
+
+// AutomationMetricsRepository defines the interface for automation metrics data access.
+type AutomationMetricsRepository interface {
+	// GetRuleMetrics retrieves metrics for a specific rule.
+	GetRuleMetrics(ctx context.Context, ruleID uuid.UUID, since time.Time) (*models.AutomationMetrics, error)
+
+	// RecordRuleExecution records a rule execution for metrics.
+	RecordRuleExecution(ctx context.Context, ruleID uuid.UUID, success bool, executionTime time.Duration) error
+
+	// GetMetrics retrieves overall automation metrics.
+	GetMetrics(ctx context.Context, timeRange string) (*models.AutomationMetricsSummary, error)
+}

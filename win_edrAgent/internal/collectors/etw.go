@@ -258,8 +258,70 @@ func goFileIoEvent(evt *C.ParsedFileIoEvent) {
 		return
 	}
 
+	// ETW kernel events report paths in device namespace:
+	// \Device\HarddiskVolume3\Users\foo\file.txt → C:\Users\foo\file.txt
+	filePath = kernelPathToWin32(filePath)
+
 	go collector.handleFileIo(pid, opcode, filePath)
 }
+
+// kernelPathToWin32 converts a kernel device path to a Win32 drive-letter path.
+// ETW FileIo events use NT device paths; os.Stat/os.Rename require Win32 paths.
+var (
+	devMapOnce sync.Once
+	devMapMu   sync.RWMutex
+	devMap     map[string]string // lowercase \device\harddiskvolumen → "C:"
+)
+
+func buildDevMap() {
+	m := make(map[string]string, 26)
+	var buf [512]uint16
+	for c := 'A'; c <= 'Z'; c++ {
+		drive := string(c) + ":"
+		drivePtr, err := windows.UTF16PtrFromString(drive)
+		if err != nil {
+			continue
+		}
+		n, err := windows.QueryDosDevice(drivePtr, &buf[0], uint32(len(buf)))
+		if err != nil || n == 0 {
+			continue
+		}
+		dev := windows.UTF16ToString(buf[:n])
+		if dev != "" {
+			m[strings.ToLower(dev)] = drive
+		}
+	}
+	devMapMu.Lock()
+	devMap = m
+	devMapMu.Unlock()
+}
+
+func kernelPathToWin32(p string) string {
+	low := strings.ToLower(p)
+	// Already a Win32 path (e.g. "C:\...")
+	if len(p) >= 3 && p[1] == ':' {
+		return p
+	}
+	// NT prefix \??\ (e.g. \??\C:\Users\...)
+	if strings.HasPrefix(low, `\??\`) && len(p) > 4 {
+		return p[4:]
+	}
+	// Kernel device path \Device\HarddiskVolumeN\...
+	if !strings.HasPrefix(low, `\device\`) {
+		return p
+	}
+	devMapOnce.Do(buildDevMap)
+	devMapMu.RLock()
+	m := devMap
+	devMapMu.RUnlock()
+	for dev, drive := range m {
+		if strings.HasPrefix(low, dev) {
+			return drive + p[len(dev):]
+		}
+	}
+	return p
+}
+
 
 func wcharToGo(p *C.WCHAR, max int) string {
 	if p == nil {

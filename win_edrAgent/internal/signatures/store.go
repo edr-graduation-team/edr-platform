@@ -18,7 +18,7 @@ import (
 const bucketName = "malware_hashes"
 
 // EICARTestFileSHA256 is the SHA-256 of the standard EICAR test string (for offline validation).
-const EICARTestFileSHA256 = "131f95c51d819193fa8756565124eccfe9295e889e175cb0397db471cbbd7a458"
+const EICARTestFileSHA256 = "275a021bbfb6489e54d471899f7db9d1663fc695ec2fe2a2c4538aabf651fd0f"
 
 // Record is stored as JSON in the malware_hashes bucket.
 type Record struct {

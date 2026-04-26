@@ -56,6 +56,13 @@ func (h *Handler) restoreQuarantineFile(ctx context.Context, params map[string]s
 	if _, err := os.Stat(orig); err == nil {
 		return "", fmt.Errorf("refusing to overwrite existing file at %s", orig)
 	}
+
+	h.mu.Lock()
+	if h.quarantineRestorer != nil {
+		h.quarantineRestorer.AllowRestoredPath(orig)
+	}
+	h.mu.Unlock()
+
 	if err := os.Rename(qp, orig); err != nil {
 		if err := copyFile(qp, orig); err != nil {
 			return "", fmt.Errorf("restore copy failed: %w", err)

@@ -3,6 +3,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -96,6 +97,10 @@ type AlertResponse struct {
 	CombinedConfidence *float64 `json:"combined_confidence,omitempty"`
 	SeverityPromoted   *bool    `json:"severity_promoted,omitempty"`
 	OriginalSeverity   string   `json:"original_severity,omitempty"`
+
+	// ── Analyst-friendly enrichment (computed, not stored) ──────────────────
+	HumanSummary   string `json:"human_summary,omitempty"`
+	SourceHostname string `json:"source_hostname,omitempty"`
 }
 
 // AlertsListResponse is the API response for listing alerts.
@@ -326,7 +331,7 @@ func toAlertResponse(alert *database.Alert) *AlertResponse {
 }
 
 func toAlertResponseWithRiskLevels(alert *database.Alert, riskLevels scoring.RiskLevelsConfig) *AlertResponse {
-	return &AlertResponse{
+	resp := &AlertResponse{
 		ID:                alert.ID,
 		Timestamp:         alert.Timestamp,
 		AgentID:           alert.AgentID,
@@ -347,7 +352,7 @@ func toAlertResponseWithRiskLevels(alert *database.Alert, riskLevels scoring.Ris
 		FalsePositiveRisk: alert.FalsePositiveRisk,
 		CreatedAt:         alert.CreatedAt,
 		UpdatedAt:         alert.UpdatedAt,
-		// Context-Aware Risk Scoring — previously missing, causing empty Context tab
+		// Context-Aware Risk Scoring
 		RiskScore:          alert.RiskScore,
 		RiskLevel:          scoring.RiskLevelFromScore(alert.RiskScore, riskLevels),
 		ContextSnapshot:    alert.ContextSnapshot,
@@ -359,6 +364,135 @@ func toAlertResponseWithRiskLevels(alert *database.Alert, riskLevels scoring.Ris
 		SeverityPromoted:   alert.SeverityPromoted,
 		OriginalSeverity:   alert.OriginalSeverity,
 	}
+
+	// Analyst-friendly enrichment
+	resp.HumanSummary = generateHumanSummary(alert)
+	resp.SourceHostname = extractSourceHostname(alert)
+
+	return resp
+}
+
+// generateHumanSummary creates a plain-English description of what the alert means.
+func generateHumanSummary(alert *database.Alert) string {
+	processName := ""
+	cmdLine := ""
+	userName := ""
+	targetFile := ""
+
+	// Extract from context data
+	if cd := alert.ContextData; cd != nil {
+		if data, ok := cd["data"].(map[string]interface{}); ok {
+			if v, ok := data["process_name"].(string); ok {
+				processName = v
+			}
+			if v, ok := data["command_line"].(string); ok {
+				cmdLine = v
+			}
+			if v, ok := data["user_name"].(string); ok {
+				userName = v
+			}
+			if v, ok := data["name"].(string); ok && targetFile == "" {
+				targetFile = v
+			}
+		}
+		if v, ok := cd["user_name"].(string); ok && userName == "" {
+			userName = v
+		}
+	}
+
+	// Extract from matched fields
+	if mf := alert.MatchedFields; mf != nil {
+		if v, ok := mf["TargetFilename"].(string); ok {
+			// Get just the filename from a full path
+			parts := strings.Split(strings.ReplaceAll(v, "/", "\\"), "\\")
+			if len(parts) > 0 {
+				targetFile = parts[len(parts)-1]
+			}
+		}
+	}
+
+	// Build category-specific summary
+	switch alert.Category {
+	case "process_creation":
+		action := describeProcessAction(cmdLine, processName)
+		if userName != "" {
+			return fmt.Sprintf("%s (user: %s)", action, userName)
+		}
+		return action
+
+	case "file_event":
+		if targetFile != "" && processName != "" {
+			return fmt.Sprintf("%s created or modified suspicious file \"%s\"", processName, targetFile)
+		}
+		if targetFile != "" {
+			return fmt.Sprintf("Suspicious file activity detected: \"%s\"", targetFile)
+		}
+		return "Suspicious file system activity detected"
+
+	default:
+		if processName != "" {
+			return fmt.Sprintf("%s triggered detection rule: %s", processName, alert.RuleTitle)
+		}
+		return fmt.Sprintf("Detection rule triggered: %s", alert.RuleTitle)
+	}
+}
+
+// describeProcessAction creates a human-readable description of a process action.
+func describeProcessAction(cmdLine, processName string) string {
+	cmdLower := strings.ToLower(cmdLine)
+
+	// Specific known patterns
+	if strings.Contains(cmdLower, "downloadstring") || strings.Contains(cmdLower, "downloadfile") {
+		return fmt.Sprintf("%s attempted to download and execute a remote script", processName)
+	}
+	if strings.Contains(cmdLower, "-encodedcommand") || strings.Contains(cmdLower, "-enc ") {
+		return fmt.Sprintf("%s executed a Base64-encoded command (possible obfuscation)", processName)
+	}
+	if strings.Contains(cmdLower, "sekurlsa") || strings.Contains(cmdLower, "mimikatz") {
+		return fmt.Sprintf("%s attempted credential dumping (Mimikatz-like activity)", processName)
+	}
+	if strings.Contains(cmdLower, "procdump") && strings.Contains(cmdLower, "lsass") {
+		return fmt.Sprintf("%s attempted to dump LSASS process memory for credential theft", processName)
+	}
+	if strings.Contains(cmdLower, "shutdown") || strings.Contains(cmdLower, "restart") {
+		return fmt.Sprintf("%s initiated system shutdown/restart", processName)
+	}
+	if strings.Contains(cmdLower, "whoami") {
+		return fmt.Sprintf("%s performed user/privilege discovery (whoami)", processName)
+	}
+	if strings.Contains(cmdLower, "net user") || strings.Contains(cmdLower, "net localgroup") {
+		return fmt.Sprintf("%s performed user/group enumeration", processName)
+	}
+	if strings.Contains(cmdLower, "ipconfig") || strings.Contains(cmdLower, "ifconfig") {
+		return fmt.Sprintf("%s performed network configuration discovery", processName)
+	}
+	if strings.Contains(cmdLower, "certutil") {
+		return fmt.Sprintf("%s used certutil (LOLBin — possible download or decode)", processName)
+	}
+	if strings.Contains(cmdLower, "rundll32") {
+		return fmt.Sprintf("%s used rundll32 to execute code (possible defense evasion)", processName)
+	}
+	if strings.Contains(cmdLower, "-nop") && strings.Contains(cmdLower, "-w hidden") {
+		return fmt.Sprintf("%s launched hidden PowerShell session (stealth execution)", processName)
+	}
+
+	// Generic fallback
+	if processName != "" {
+		return fmt.Sprintf("%s executed a suspicious command", processName)
+	}
+	return "Suspicious process execution detected"
+}
+
+// extractSourceHostname resolves the hostname from context_data.source.hostname.
+func extractSourceHostname(alert *database.Alert) string {
+	if cd := alert.ContextData; cd != nil {
+		if src, ok := cd["source"].(map[string]interface{}); ok {
+			if h, ok := src["hostname"].(string); ok && h != "" {
+				return h
+			}
+		}
+	}
+	return ""
 }
 
 func (h *AlertHandler) toAlertResponse(alert *database.Alert) *AlertResponse {

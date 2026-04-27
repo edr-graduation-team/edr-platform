@@ -3,6 +3,7 @@ package api
 import (
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
@@ -33,7 +34,10 @@ func (h *Handlers) ListForensicCollections(c echo.Context) error {
 	}
 	return c.JSON(http.StatusOK, ForensicCollectionsResponse{
 		Data: out,
-		Meta: responseMeta(c),
+		Meta: ResponseMeta{
+			RequestID: c.Response().Header().Get(echo.HeaderXRequestID),
+			Timestamp: time.Now().UTC().Format(time.RFC3339),
+		},
 	})
 }
 
@@ -78,7 +82,10 @@ func (h *Handlers) ListForensicEvents(c echo.Context) error {
 	return c.JSON(http.StatusOK, ForensicEventsResponse{
 		Data: out,
 		NextCursor: next,
-		Meta: responseMeta(c),
+		Meta: ResponseMeta{
+			RequestID: c.Response().Header().Get(echo.HeaderXRequestID),
+			Timestamp: time.Now().UTC().Format(time.RFC3339),
+		},
 	})
 }
 

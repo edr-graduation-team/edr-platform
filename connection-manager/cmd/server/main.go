@@ -192,6 +192,10 @@ func main() {
 	var quarantineRepo repository.QuarantineRepository
 	var auditRepo repository.AuditLogRepository // hoisted for audit log API
 	var alertRepo repository.AlertRepository    // hoisted for alert stats API
+	var playbookRepo repository.ResponsePlaybookRepository
+	var automationRuleRepo repository.AutomationRuleRepository
+	var executionRepo repository.PlaybookExecutionRepository
+	var automationMetricsRepo repository.AutomationMetricsRepository
 	var dbPool *database.PostgresPool            // scoped outside if-block for fallback access
 
 	dbPoolInst, dbErr := database.NewPostgresPool(ctx, &database.PostgresConfig{
@@ -235,6 +239,10 @@ func main() {
 		forensicRepo = repository.NewPostgresForensicRepository(pool)
 		alertRepo = repository.NewPostgresAlertRepository(pool)
 		quarantineRepo = repository.NewPostgresQuarantineRepository(pool)
+		playbookRepo = repository.NewPostgresResponsePlaybookRepository(pool)
+		automationRuleRepo = repository.NewPostgresAutomationRuleRepository(pool)
+		executionRepo = repository.NewPostgresPlaybookExecutionRepository(pool)
+		automationMetricsRepo = repository.NewPostgresAutomationMetricsRepository(pool)
 
 		// CA paths for signing agent certificates (ca.key next to ca.crt)
 		caCertPath := cfg.Server.CACertPath
@@ -363,7 +371,18 @@ func main() {
 	restAPIServer := api.NewServer(&apiCfg, logger, edrMetrics)
 	// Prometheus metrics on same server (lifecycle managed with REST API).
 	restAPIServer.Echo().GET(cfg.Monitoring.MetricsPath, echo.WrapHandler(promhttp.Handler()))
-	apiHandlers := api.NewHandlers(logger, jwtManager, redisClient, rateLimiter, agentSvc, authSvc, cfg.Server.CACertPath, enrollmentTokenRepo)
+
+	var automationHandlers *api.AutomationHandlers
+	if dbPool != nil {
+		metricsService := service.NewMetricsService(logger, automationMetricsRepo)
+		commandService := service.NewCommandService(logger, commandRepo, executionRepo, automationMetricsRepo)
+		mlOptimizer := service.NewMLOptimizer(logger, automationMetricsRepo, automationRuleRepo)
+		notificationService := service.NewNotificationService(logger)
+		automationService := service.NewAutomationService(logger, alertRepo, playbookRepo, automationRuleRepo, executionRepo, commandService, notificationService, metricsService, mlOptimizer)
+		automationHandlers = api.NewAutomationHandlers(logger, automationService, metricsService)
+	}
+
+	apiHandlers := api.NewHandlers(logger, jwtManager, redisClient, rateLimiter, agentSvc, authSvc, cfg.Server.CACertPath, enrollmentTokenRepo, automationHandlers)
 	// Wire fallback store stats into REST API reliability endpoint.
 	// Safe even if nil (endpoint returns enabled=false + reason).
 	apiHandlers.SetFallbackStore(fallbackStore)

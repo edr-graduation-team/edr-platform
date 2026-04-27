@@ -162,37 +162,27 @@ func (w *AlertWriter) writeLoop(ctx context.Context) {
 	}
 }
 
-// writeWithDedup writes an alert with deduplication.
+// writeWithDedup writes an alert with deduplication using an atomic upsert.
+// The old SELECT + conditional INSERT pattern had a read-modify-write race
+// under concurrent workers. UpsertWithDedup uses FOR UPDATE SKIP LOCKED inside
+// a transaction to prevent duplicate inserts while collapsing round trips.
 func (w *AlertWriter) writeWithDedup(ctx context.Context, domainAlert *domain.Alert) error {
-	// Convert domain alert to database alert
 	dbAlert := w.convertToDBAlert(domainAlert)
 
-	// Check for recent similar alert (deduplication)
-	since := time.Now().Add(-w.config.DeduplicationWindow)
-	existing, err := w.repo.FindRecent(ctx, dbAlert.AgentID, dbAlert.RuleID, since)
+	result, isNew, err := w.repo.UpsertWithDedup(ctx, dbAlert, w.config.DeduplicationWindow)
 	if err != nil {
 		return err
 	}
 
-	if existing != nil {
-		// Deduplicate: increment event count
-		eventIDs := []string{dbAlert.EventIDs[0]} // Add new event
-		if err := w.repo.IncrementEventCount(ctx, existing.ID, eventIDs); err != nil {
-			return err
-		}
+	if !isNew {
 		atomic.AddUint64(&w.metrics.AlertsDeduplicated, 1)
 		return nil
 	}
 
-	// Create new alert
-	created, err := w.repo.Create(ctx, dbAlert)
-	if err != nil {
-		return err
+	if w.onAlertPersisted != nil && result != nil {
+		w.onAlertPersisted(result)
 	}
-	if w.onAlertPersisted != nil && created != nil {
-		w.onAlertPersisted(created)
-	}
-	return err
+	return nil
 }
 
 // SetOnAlertPersisted registers an optional callback invoked for newly created

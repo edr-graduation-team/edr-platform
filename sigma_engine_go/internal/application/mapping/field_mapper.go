@@ -217,6 +217,13 @@ func (fm *FieldMapper) initializeAgentMappings() {
 
 		// Service fields
 		"ServiceName": "data.service_name",
+
+		// Event metadata — CRITICAL: EventID is emitted as a string by the
+		// Windows ETW/Sysmon collector ("event_id": "4688"). Without this
+		// mapping every EventID-gated Sigma rule silently fails to fire.
+		"EventID":       "data.event_id",
+		"Channel":       "data.channel",
+		"Provider_Name": "data.provider_name",
 	}
 
 	for sigma, agentPath := range agentMap {
@@ -296,6 +303,10 @@ func (fm *FieldMapper) initializeAgentMappings() {
 	// Pipe fallbacks
 	fm.sigmaToAgentFallback["PipeName"] = []string{"data.PipeName", "data.pipe_name"}
 	fm.sigmaToAgentFallback["pipename"] = []string{"data.PipeName", "data.pipe_name"}
+
+	// EventID fallbacks — agent may emit as "EventID", "event_id", "EventCode", or "winlog.event_id"
+	fm.sigmaToAgentFallback["EventID"] = []string{"data.event_id", "data.EventID", "data.EventCode", "data.winlog_event_id"}
+	fm.sigmaToAgentFallback["eventid"] = []string{"data.event_id", "data.EventID", "data.EventCode", "data.winlog_event_id"}
 
 	// Network fallbacks (new collector emits both Sigma and agent-style names)
 	fm.sigmaToAgentFallback["DestinationIp"] = []string{"data.DestinationIp", "data.destination_ip"}

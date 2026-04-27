@@ -72,6 +72,131 @@ func (r *PostgresAlertRepository) Create(ctx context.Context, alert *Alert) (*Al
 	return alert, nil
 }
 
+// UpsertWithDedup atomically inserts a new alert or increments the event_count
+// of an existing open/investigating alert within the deduplication window.
+//
+// This replaces the old FindRecent + conditional Create/IncrementEventCount
+// pattern which had a read-modify-write race under concurrent writers.
+//
+// Returns (alert, true, nil)  → new alert inserted.
+// Returns (alert, false, nil) → existing alert incremented (deduplicated).
+func (r *PostgresAlertRepository) UpsertWithDedup(ctx context.Context, alert *Alert, dedupWindow time.Duration) (*Alert, bool, error) {
+	matchedFieldsJSON, _ := json.Marshal(alert.MatchedFields)
+	contextDataJSON, _ := json.Marshal(alert.ContextData)
+	contextSnapshotJSON, _ := json.Marshal(alert.ContextSnapshot)
+	scoreBreakdownJSON, _ := json.Marshal(alert.ScoreBreakdown)
+	if contextSnapshotJSON == nil {
+		contextSnapshotJSON = []byte(`{}`)
+	}
+	if scoreBreakdownJSON == nil {
+		scoreBreakdownJSON = []byte(`{}`)
+	}
+
+	dedupSince := time.Now().Add(-dedupWindow)
+
+	// Strategy:
+	//   1. Try to find a recent matching alert within the dedup window.
+	//   2. If found, increment its event_count atomically and return it.
+	//   3. If not found, insert a new alert.
+	//
+	// Both steps are done inside a serializable transaction so two concurrent
+	// goroutines processing the same (agent_id, rule_id) pair cannot both
+	// reach step 3 and insert duplicates.
+	var resultAlert *Alert
+	var isNew bool
+
+	err := pgx.BeginTxFunc(ctx, r.pool, pgx.TxOptions{IsoLevel: pgx.ReadCommitted}, func(tx pgx.Tx) error {
+		// Step 1: find existing open alert in window (FOR UPDATE locks the row)
+		findQuery := `
+			SELECT id FROM sigma_alerts
+			WHERE agent_id = $1 AND rule_id = $2
+			  AND timestamp >= $3
+			  AND status NOT IN ('resolved', 'false_positive')
+			ORDER BY timestamp DESC
+			LIMIT 1
+			FOR UPDATE SKIP LOCKED`
+
+		var existingID string
+		err := tx.QueryRow(ctx, findQuery, alert.AgentID, alert.RuleID, dedupSince).Scan(&existingID)
+		if err != nil && err != pgx.ErrNoRows {
+			return fmt.Errorf("dedup lookup: %w", err)
+		}
+
+		if existingID != "" {
+			// Step 2: increment existing alert
+			updateQuery := `
+				UPDATE sigma_alerts
+				SET event_count = event_count + 1,
+				    event_ids   = event_ids || $2,
+				    updated_at  = NOW()
+				WHERE id = $1
+				RETURNING id, timestamp, agent_id, rule_id, rule_title, severity, category,
+					event_count, event_ids, mitre_tactics, mitre_techniques,
+					matched_fields, matched_selections, context_data,
+					status, assigned_to, resolution_notes,
+					confidence, false_positive_risk,
+					match_count, related_rules, combined_confidence,
+					severity_promoted, original_severity,
+					risk_score, context_snapshot, score_breakdown,
+					created_at, updated_at`
+			row := tx.QueryRow(ctx, updateQuery, existingID, alert.EventIDs)
+			updated, scanErr := r.scanAlertFromRow(row)
+			if scanErr != nil {
+				return fmt.Errorf("scan updated alert: %w", scanErr)
+			}
+			resultAlert = updated
+			isNew = false
+			return nil
+		}
+
+		// Step 3: insert new alert
+		insertQuery := `
+			INSERT INTO sigma_alerts (
+				timestamp, agent_id, rule_id, rule_title, severity, category,
+				event_count, event_ids, mitre_tactics, mitre_techniques,
+				matched_fields, matched_selections, context_data,
+				status, confidence, false_positive_risk,
+				match_count, related_rules, combined_confidence,
+				severity_promoted, original_severity,
+				risk_score, context_snapshot, score_breakdown
+			) VALUES (
+				$1, $2, $3, $4, $5, $6,
+				$7, $8, $9, $10,
+				$11, $12, $13,
+				$14, $15, $16,
+				$17, $18, $19,
+				$20, $21,
+				$22, $23, $24
+			) RETURNING id, created_at, updated_at`
+
+		row := tx.QueryRow(ctx, insertQuery,
+			alert.Timestamp, alert.AgentID, alert.RuleID, alert.RuleTitle, alert.Severity, alert.Category,
+			alert.EventCount, alert.EventIDs, alert.MitreTactics, alert.MitreTechniques,
+			matchedFieldsJSON, alert.MatchedSelections, contextDataJSON,
+			alert.Status, alert.Confidence, alert.FalsePositiveRisk,
+			alert.MatchCount, alert.RelatedRules, alert.CombinedConfidence,
+			alert.SeverityPromoted, alert.OriginalSeverity,
+			alert.RiskScore, contextSnapshotJSON, scoreBreakdownJSON,
+		)
+		if scanErr := row.Scan(&alert.ID, &alert.CreatedAt, &alert.UpdatedAt); scanErr != nil {
+			return fmt.Errorf("insert alert: %w", scanErr)
+		}
+		resultAlert = alert
+		isNew = true
+		return nil
+	})
+
+	if err != nil {
+		return nil, false, err
+	}
+	return resultAlert, isNew, nil
+}
+
+// scanAlertFromRow scans a pgx.Row into an Alert (used by UpsertWithDedup).
+func (r *PostgresAlertRepository) scanAlertFromRow(row pgx.Row) (*Alert, error) {
+	return r.scanAlert(row)
+}
+
 // GetByID retrieves an alert by its ID.
 func (r *PostgresAlertRepository) GetByID(ctx context.Context, id string) (*Alert, error) {
 	query := `

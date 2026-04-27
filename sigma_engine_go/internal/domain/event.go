@@ -2,6 +2,7 @@ package domain
 
 import (
 	"crypto/md5"
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -20,10 +21,12 @@ type LogEvent struct {
 	Service   string                 `json:"service,omitempty"`
 	Timestamp time.Time              `json:"timestamp"`
 
-	fieldCache map[string]interface{}
-	cacheMu    sync.RWMutex
-	hash       *string
-	hashMu     sync.Mutex
+	fieldCache  map[string]interface{}
+	cacheMu     sync.RWMutex
+	hash        *string
+	hashMu      sync.Mutex
+	keywordBlob string      // lazily-computed lowercase JSON blob for keyword rules
+	keywordOnce sync.Once
 }
 
 // NewLogEvent creates a new LogEvent from raw event data.
@@ -186,6 +189,22 @@ func (e *LogEvent) GetFieldWithDefault(fieldPath string, defaultValue interface{
 func (e *LogEvent) HasField(fieldPath string) bool {
 	val, ok := e.GetField(fieldPath)
 	return ok && val != nil
+}
+
+// KeywordBlob returns a lazily-computed, lowercased JSON serialisation of
+// RawData suitable for keyword rule full-text matching.
+// The result is computed once per event (sync.Once) and shared by all keyword
+// rule evaluations, eliminating repeated json.Marshal + strings.ToLower calls.
+func (e *LogEvent) KeywordBlob() string {
+	e.keywordOnce.Do(func() {
+		b, err := json.Marshal(e.RawData)
+		if err != nil {
+			e.keywordBlob = ""
+			return
+		}
+		e.keywordBlob = strings.ToLower(string(b))
+	})
+	return e.keywordBlob
 }
 
 // ComputeHash generates an MD5 hash for deduplication based on key fields.

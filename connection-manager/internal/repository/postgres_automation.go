@@ -6,6 +6,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/edr-platform/connection-manager/pkg/models"
@@ -34,12 +35,21 @@ func (r *PostgresResponsePlaybookRepository) Create(ctx context.Context, p *mode
 
 func (r *PostgresResponsePlaybookRepository) GetByID(ctx context.Context, id uuid.UUID) (*models.ResponsePlaybook, error) {
 	p := &models.ResponsePlaybook{}
-	err := r.pool.QueryRow(ctx, `SELECT id, name, COALESCE(description, ''), category, severity_filter, COALESCE(rule_pattern, ''), commands, mitre_techniques, enabled, created_at, updated_at FROM response_playbooks WHERE id = $1`, id).
-		Scan(&p.ID, &p.Name, &p.Description, &p.Category, &p.SeverityFilter, &p.RulePattern, &p.Commands, &p.MITRETechiques, &p.Enabled, &p.CreatedAt, &p.UpdatedAt)
+	var severityFilter pgtype.FlatArray[string]
+	var mitreArr pgtype.FlatArray[string]
+	err := r.pool.QueryRow(ctx,
+		`SELECT id, name, COALESCE(description, ''), category, COALESCE(severity_filter, '{}'), COALESCE(rule_pattern, ''), commands, COALESCE(mitre_techniques, '{}'), enabled, created_at, updated_at
+		 FROM response_playbooks WHERE id = $1`, id).
+		Scan(&p.ID, &p.Name, &p.Description, &p.Category, &severityFilter, &p.RulePattern, &p.Commands, &mitreArr, &p.Enabled, &p.CreatedAt, &p.UpdatedAt)
 	if err == pgx.ErrNoRows {
 		return nil, ErrNotFound
 	}
-	return p, err
+	if err != nil {
+		return nil, err
+	}
+	p.SeverityFilter = []string(severityFilter)
+	p.MITRETechiques = []string(mitreArr)
+	return p, nil
 }
 
 func (r *PostgresResponsePlaybookRepository) Update(ctx context.Context, p *models.ResponsePlaybook) error {
@@ -56,12 +66,13 @@ func (r *PostgresResponsePlaybookRepository) Delete(ctx context.Context, id uuid
 }
 
 func (r *PostgresResponsePlaybookRepository) List(ctx context.Context, filter PlaybookFilter) ([]*models.ResponsePlaybook, error) {
-	// Simplified list ignoring filters for brevity
 	limit := filter.Limit
 	if limit == 0 {
 		limit = 100
 	}
-	rows, err := r.pool.Query(ctx, `SELECT id, name, COALESCE(description, ''), category, severity_filter, COALESCE(rule_pattern, ''), commands, mitre_techniques, enabled, created_at, updated_at FROM response_playbooks LIMIT $1 OFFSET $2`, limit, filter.Offset)
+	rows, err := r.pool.Query(ctx,
+		`SELECT id, name, COALESCE(description, ''), category, COALESCE(severity_filter, '{}'), COALESCE(rule_pattern, ''), commands, COALESCE(mitre_techniques, '{}'), enabled, created_at, updated_at
+		 FROM response_playbooks LIMIT $1 OFFSET $2`, limit, filter.Offset)
 	if err != nil {
 		return nil, err
 	}
@@ -69,9 +80,13 @@ func (r *PostgresResponsePlaybookRepository) List(ctx context.Context, filter Pl
 	var playbooks []*models.ResponsePlaybook
 	for rows.Next() {
 		p := &models.ResponsePlaybook{}
-		if err := rows.Scan(&p.ID, &p.Name, &p.Description, &p.Category, &p.SeverityFilter, &p.RulePattern, &p.Commands, &p.MITRETechiques, &p.Enabled, &p.CreatedAt, &p.UpdatedAt); err != nil {
+		var severityFilter pgtype.FlatArray[string]
+		var mitreArr pgtype.FlatArray[string]
+		if err := rows.Scan(&p.ID, &p.Name, &p.Description, &p.Category, &severityFilter, &p.RulePattern, &p.Commands, &mitreArr, &p.Enabled, &p.CreatedAt, &p.UpdatedAt); err != nil {
 			return nil, err
 		}
+		p.SeverityFilter = []string(severityFilter)
+		p.MITRETechiques = []string(mitreArr)
 		playbooks = append(playbooks, p)
 	}
 	return playbooks, nil
@@ -293,7 +308,7 @@ func (r *PostgresAutomationMetricsRepository) RecordRuleExecution(ctx context.Co
 	} else {
 		failInc = 1
 	}
-	
+
 	_, err := r.pool.Exec(ctx, `
 		INSERT INTO automation_metrics (rule_id, date, executions_count, successful_executions, failed_executions, avg_execution_time_ms) 
 		VALUES ($1, $2, 1, $3, $4, $5)

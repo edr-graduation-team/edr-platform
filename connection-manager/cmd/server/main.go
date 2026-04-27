@@ -196,7 +196,7 @@ func main() {
 	var automationRuleRepo repository.AutomationRuleRepository
 	var executionRepo repository.PlaybookExecutionRepository
 	var automationMetricsRepo repository.AutomationMetricsRepository
-	var dbPool *database.PostgresPool            // scoped outside if-block for fallback access
+	var dbPool *database.PostgresPool // scoped outside if-block for fallback access
 
 	dbPoolInst, dbErr := database.NewPostgresPool(ctx, &database.PostgresConfig{
 		Host:            cfg.Database.Host,

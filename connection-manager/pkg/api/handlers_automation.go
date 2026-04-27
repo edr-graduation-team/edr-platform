@@ -50,16 +50,16 @@ type ExecutePlaybookRequest struct {
 
 // PlaybookListResponse represents a response with playbook list
 type PlaybookListResponse struct {
-	Data    []*models.ResponsePlaybook `json:"data"`
-	Total   int                         `json:"total"`
-	Meta    ResponseMeta                `json:"meta"`
+	Data  []*models.ResponsePlaybook `json:"data"`
+	Total int                        `json:"total"`
+	Meta  ResponseMeta               `json:"meta"`
 }
 
 // AutomationRuleListResponse represents a response with automation rule list
 type AutomationRuleListResponse struct {
-	Data    []*models.AutomationRule `json:"data"`
-	Total   int                      `json:"total"`
-	Meta    ResponseMeta             `json:"meta"`
+	Data  []*models.AutomationRule `json:"data"`
+	Total int                      `json:"total"`
+	Meta  ResponseMeta             `json:"meta"`
 }
 
 // CreatePlaybook creates a new response playbook
@@ -79,7 +79,7 @@ func (h *AutomationHandlers) CreatePlaybook(c echo.Context) error {
 		Description: req.Description,
 		Category:    req.Category,
 		Commands:    marshalCommands(req.Commands),
-		CreatedBy:    getCurrentUserID(c),
+		CreatedBy:   getCurrentUserID(c),
 	}
 
 	if err := h.automationService.CreatePlaybook(c.Request().Context(), playbook); err != nil {
@@ -161,8 +161,8 @@ func (h *AutomationHandlers) ListPlaybooks(c echo.Context) error {
 	}
 
 	return c.JSON(http.StatusOK, PlaybookListResponse{
-		Data:    playbooks,
-		Total:   len(playbooks),
+		Data:  playbooks,
+		Total: len(playbooks),
 		Meta: ResponseMeta{
 			RequestID: c.Response().Header().Get(echo.HeaderXRequestID),
 			Timestamp: time.Now().UTC().Format(time.RFC3339),
@@ -221,8 +221,8 @@ func (h *AutomationHandlers) ListAutomationRules(c echo.Context) error {
 	}
 
 	return c.JSON(http.StatusOK, AutomationRuleListResponse{
-		Data:    rules,
-		Total:   len(rules),
+		Data:  rules,
+		Total: len(rules),
 		Meta: ResponseMeta{
 			RequestID: c.Response().Header().Get(echo.HeaderXRequestID),
 			Timestamp: time.Now().UTC().Format(time.RFC3339),

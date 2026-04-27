@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
 import { AlertContextPanel } from '../../components/automation/AlertContextPanel';
 import { UserAssistant } from '../../components/automation/UserAssistant';
-import { Settings, TrendingUp, Clock, AlertTriangle, Plus, Activity, Power, Target, X, CheckCircle, Trash2 } from 'lucide-react';
+import { Settings, TrendingUp, Clock, AlertTriangle, Plus, Activity, Power, X, CheckCircle, Trash2 } from 'lucide-react';
 import { automationApi } from '../../api/client';
 
 interface AutomationRule {
@@ -13,7 +13,8 @@ interface AutomationRule {
   autoExecute: boolean;
   enabled: boolean;
   successRate: number;
-  lastExecution?: string;
+  cooldownMinutes: number;
+  lastExecution?: string;       // only set when DB has an actual last_execution
   matchesCurrentAlert?: boolean;
   playbookId?: string;
   triggerConditions?: any;
@@ -87,14 +88,16 @@ export function AutomationRulesPage() {
         id: r.id,
         name: r.name,
         description: r.description,
-        priority: r.priority,
-        autoExecute: r.auto_execute,
-        enabled: r.enabled,
-        successRate: r.success_rate || 0,
-        lastExecution: r.last_execution || r.created_at,
+        priority: r.priority ?? 5,
+        autoExecute: Boolean(r.auto_execute),
+        enabled: Boolean(r.enabled),
+        successRate: typeof r.success_rate === 'number' ? r.success_rate : 0,
+        cooldownMinutes: r.cooldown_minutes ?? 30,
+        // Only show lastExecution if the DB actually has a non-null last_execution field
+        lastExecution: r.last_execution ?? undefined,
         matchesCurrentAlert: false,
         playbookId: r.playbook_id,
-        triggerConditions: r.trigger_conditions
+        triggerConditions: r.trigger_conditions,
       }));
 
       setRules(formattedRules);
@@ -129,18 +132,20 @@ export function AutomationRulesPage() {
 
   const handleRuleToggle = async (rule: any) => {
     // Optimistic UI update
-    setRules(prev => prev.map(r => 
+    setRules(prev => prev.map(r =>
       r.id === rule.id ? { ...r, enabled: !r.enabled } : r
     ));
 
     try {
       if (rule.id) {
         await automationApi.toggleRule(rule.id, !rule.enabled);
+        // Re-fetch to guarantee UI matches DB state
+        await fetchRules();
       }
     } catch (error) {
-      console.error("Failed to toggle rule:", error);
-      // Revert on failure
-      setRules(prev => prev.map(r => 
+      console.error('Failed to toggle rule:', error);
+      // Revert optimistic update on failure
+      setRules(prev => prev.map(r =>
         r.id === rule.id ? { ...r, enabled: rule.enabled } : r
       ));
     }
@@ -182,7 +187,7 @@ export function AutomationRulesPage() {
       const payload = {
         name: newRuleName,
         description: `Custom rule triggering on condition: ${triggerCondition}`,
-        trigger_conditions: triggerCondition,
+        trigger_conditions: { condition: triggerCondition },
         priority: 5,
         auto_execute: autoExecute,
         enabled: true,
@@ -313,31 +318,64 @@ export function AutomationRulesPage() {
                       {rule.description}
                     </p>
                     
-                    {/* Metadata Badges */}
-                    <div className="flex flex-wrap items-center gap-6 text-sm mb-5">
+                    {/* Metadata Badges — all driven from DB data */}
+                    <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm mb-4">
+
+                      {/* Success Rate */}
                       <div className="flex items-center gap-2">
-                        <Target className="w-4 h-4 text-slate-400" />
-                        <span className="text-slate-500">Auto Execute:</span>
-                        <span className={`font-bold ${rule.autoExecute ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-700 dark:text-slate-300'}`}>
-                            {rule.autoExecute ? 'Enabled' : 'Disabled (Requires Approval)'}
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <TrendingUp className="w-4 h-4 text-slate-400" />
+                        <TrendingUp className="w-4 h-4 text-slate-400 shrink-0" />
                         <span className="text-slate-500">Success Rate:</span>
                         <span className={`font-bold ${getSuccessRateColor(rule.successRate)}`}>
-                            {(rule.successRate * 100).toFixed(1)}%
+                          {rule.successRate > 0 ? `${(rule.successRate * 100).toFixed(1)}%` : 'No data yet'}
                         </span>
                       </div>
-                      {rule.lastExecution && (
-                          <div className="flex items-center gap-2 text-slate-500">
-                            <Clock className="w-4 h-4" />
-                            <span>
-                              Last Run: {new Date(rule.lastExecution).toLocaleString()}
+
+                      {/* Cooldown */}
+                      <div className="flex items-center gap-2">
+                        <Clock className="w-4 h-4 text-slate-400 shrink-0" />
+                        <span className="text-slate-500">Cooldown:</span>
+                        <span className="font-semibold text-slate-700 dark:text-slate-300">
+                          {rule.cooldownMinutes === 0 ? 'None' : `${rule.cooldownMinutes} min`}
+                        </span>
+                      </div>
+
+                      {/* Linked Playbook */}
+                      {rule.playbookId && (() => {
+                        const pb = playbooks.find((p: any) => p.id === rule.playbookId);
+                        return pb ? (
+                          <div className="flex items-center gap-2">
+                            <Activity className="w-4 h-4 text-slate-400 shrink-0" />
+                            <span className="text-slate-500">Playbook:</span>
+                            <span className="font-semibold text-indigo-600 dark:text-indigo-400 truncate max-w-[200px]" title={pb.name}>
+                              {pb.name}
                             </span>
                           </div>
+                        ) : null;
+                      })()}
+
+                      {/* Last Run — only shown if DB has an actual last_execution value */}
+                      {rule.lastExecution ? (
+                        <div className="flex items-center gap-2 text-slate-500">
+                          <Clock className="w-4 h-4 shrink-0" />
+                          <span>Last Run: {new Date(rule.lastExecution).toLocaleString()}</span>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-2 text-slate-400">
+                          <Clock className="w-4 h-4 shrink-0" />
+                          <span className="italic">Never executed</span>
+                        </div>
                       )}
                     </div>
+
+                    {/* Trigger Conditions */}
+                    {rule.triggerConditions && (
+                      <div className="text-xs bg-slate-100 dark:bg-slate-800/60 rounded-lg px-3 py-2 font-mono text-slate-600 dark:text-slate-400 max-w-xl truncate" title={JSON.stringify(rule.triggerConditions)}>
+                        <span className="font-sans font-semibold text-slate-500 mr-2 not-italic">Trigger:</span>
+                        {typeof rule.triggerConditions === 'string'
+                          ? rule.triggerConditions
+                          : JSON.stringify(rule.triggerConditions)}
+                      </div>
+                    )}
                   </div>
 
                   {/* Actions */}

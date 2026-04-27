@@ -5,6 +5,24 @@ import { UserAssistant } from '../../components/automation/UserAssistant';
 import { Play, Shield, Clock, TrendingUp, AlertTriangle, Plus, Terminal, X, CheckCircle, Target, Trash2 } from 'lucide-react';
 import { automationApi, agentsApi } from '../../api/client';
 
+// Parameters required by each command type
+const COMMAND_PARAMS: Record<string, Array<{ key: string; label: string; placeholder: string; required: boolean }>> = {
+  terminate_process: [{ key: 'process_name', label: 'Process Name', placeholder: 'e.g., vssadmin.exe', required: true }],
+  quarantine_file:   [{ key: 'file_path',    label: 'File Path',    placeholder: 'e.g., C:\\Windows\\Temp\\malware.exe', required: true }],
+  run_cmd:           [{ key: 'cmd',          label: 'Command',      placeholder: 'e.g., powershell -Command "..."', required: true }],
+  collect_logs:      [{ key: 'log_types',    label: 'Log Types',    placeholder: 'System,Security,Application', required: true }],
+  scan_file:         [{ key: 'file_path',    label: 'Path to Scan', placeholder: 'e.g., C:\\Windows\\Temp', required: true }],
+  update_signatures: [{ key: 'url',          label: 'Signature URL',placeholder: 'https://...', required: false }],
+  collect_forensics: [
+    { key: 'event_types', label: 'Event Types', placeholder: 'process,file,network,registry', required: false },
+    { key: 'max_events',  label: 'Max Events',  placeholder: '1000', required: false },
+  ],
+  filesystem_timeline: [{ key: 'window_hours', label: 'Time Window (hours)', placeholder: '24', required: false }],
+  // Legacy type aliases
+  process_terminate: [{ key: 'process_name', label: 'Process Name', placeholder: 'e.g., vssadmin.exe', required: true }],
+  yara_scan:         [{ key: 'file_path',    label: 'Path to Scan', placeholder: 'C:\\Windows\\Temp', required: true }],
+};
+
 // Map API ResponsePlaybook to the component's Playbook interface
 interface Playbook {
   id: string;
@@ -15,6 +33,7 @@ interface Playbook {
     type: string;
     description: string;
     timeout: number;
+    params?: Record<string, string>;
   }>;
   mitreTechniques: string[];
   enabled: boolean;
@@ -55,8 +74,8 @@ export function PlaybooksPage() {
   const [activeCommandIndex, setActiveCommandIndex] = useState<number>(-1);
   const [executionComplete, setExecutionComplete] = useState(false);
   const [executionError, setExecutionError] = useState<string | null>(null);
-  const [processNameInput, setProcessNameInput] = useState<string>('');
-  const [filePathInput, setFilePathInput] = useState<string>('C:\\Windows\\Temp');
+  const [cmdParams, setCmdParams] = useState<Record<string, string>>({});
+  const [newPlaybookCategory, setNewPlaybookCategory] = useState('investigation');
   const [agents, setAgents] = useState<{ id: string; hostname: string }[]>([]);
 
   useEffect(() => {
@@ -102,6 +121,7 @@ export function PlaybooksPage() {
           type: cmd.type || cmd.command_type || 'unknown',
           description: cmd.description || 'Command',
           timeout: cmd.timeout || 300,
+          params: cmd.params || {},
         })),
         mitreTechniques: p.mitre_techniques || [],
         enabled: p.enabled,
@@ -152,25 +172,25 @@ export function PlaybooksPage() {
 
   const openExecuteModal = (playbook: Playbook) => {
     setSelectedPlaybook(playbook);
-    // Ensure agent ID is pre-filled if context exists
-    if (alertContext?.alertDetails?.agentId) {
-      setAgentIdInput(alertContext.alertDetails.agentId);
-    }
-    
-    // Auto-fill process name from alert context if available
-    let defaultProcess = 'suspicious_encrypter.exe';
-    if (alertContext?.alertDetails?.event_data) {
-      const ed = alertContext.alertDetails.event_data;
-      if (ed.Image) {
-        const parts = String(ed.Image).split('\\');
-        defaultProcess = parts[parts.length - 1];
-      } else if (ed.OriginalFileName) {
-        defaultProcess = String(ed.OriginalFileName);
-      } else if (ed.ProcessName) {
-        defaultProcess = String(ed.ProcessName);
+    if (alertContext?.alertDetails?.agentId) setAgentIdInput(alertContext.alertDetails.agentId);
+
+    // Pre-fill cmd params from DB defaults and alert context
+    const defaults: Record<string, string> = {};
+    playbook.commands.forEach((cmd, idx) => {
+      const defs = COMMAND_PARAMS[cmd.type] || [];
+      defs.forEach(pd => {
+        const dbVal = String(cmd.params?.[pd.key] || '');
+        // Don't pre-fill placeholder template vars like ${process_name}
+        defaults[`${idx}_${pd.key}`] = dbVal.startsWith('${') ? '' : dbVal;
+      });
+      // Override process name from alert context if available
+      if ((cmd.type === 'terminate_process' || cmd.type === 'process_terminate') && alertContext?.alertDetails?.event_data) {
+        const ed = alertContext.alertDetails.event_data;
+        const proc = (ed.Image?.split('\\').pop() || ed.ProcessName || ed.OriginalFileName || '') as string;
+        if (proc) defaults[`${idx}_process_name`] = proc;
       }
-    }
-    setProcessNameInput(defaultProcess);
+    });
+    setCmdParams(defaults);
   };
 
   const confirmExecution = async () => {
@@ -191,33 +211,35 @@ export function PlaybooksPage() {
       let mappedType = cmd.type;
       let params: Record<string, string> = {};
 
-      // Translate UI-friendly or legacy playbook types to actual backend Agent CommandTypes
+      // Build params from user inputs
+      const p = (key: string) => cmdParams[`${logIndex}_${key}`] || '';
+
       switch (cmd.type) {
-        case 'network_isolate': mappedType = 'isolate_network'; break;
-        case 'process_terminate': 
-            mappedType = 'terminate_process'; 
-            params = { process_name: processNameInput || 'suspicious_encrypter.exe' };
-            break;
-        case 'forensic_dump': 
-            mappedType = 'collect_forensics'; 
-            params = { log_types: 'Memory,System', time_range: '24h' };
-            break;
-        case 'device_unmount':
-          mappedType = 'run_cmd';
-          params = { cmd: 'powershell -Command "Get-Volume | Where-Object DriveType -eq Removable | Dismount-Volume"' };
-          break;
-        case 'log_pull':
-          mappedType = 'collect_logs';
-          params = { log_types: 'System,Security' };
-          break;
-        case 'yara_scan':
-          mappedType = 'scan_file';
-          params = { file_path: filePathInput || 'C:\\Windows\\Temp' }; // Use UI input
-          break;
-        case 'registry_query':
-          mappedType = 'run_cmd';
-          params = { cmd: 'reg query HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Run' };
-          break;
+        // ── Real DB command types ───────────────────────────────────────
+        case 'terminate_process':  params = { process_name: p('process_name') || 'suspicious.exe', kill_tree: 'true' }; break;
+        case 'quarantine_file':    params = { file_path: p('file_path') || 'C:\\Windows\\Temp' }; break;
+        case 'run_cmd':            params = { cmd: p('cmd') }; break;
+        case 'collect_logs':       params = { log_types: p('log_types') || 'System,Security' }; break;
+        case 'scan_file':          params = { file_path: p('file_path') || 'C:\\Windows\\Temp' }; break;
+        case 'collect_forensics':  params = { event_types: p('event_types') || 'process,file,network,registry', max_events: p('max_events') || '1000' }; break;
+        case 'update_signatures':  params = { url: p('url') }; break;
+        case 'filesystem_timeline':params = { window_hours: p('window_hours') || '24' }; break;
+        case 'isolate_network':
+        case 'unisolate_network':
+        case 'memory_dump':
+        case 'process_tree_snapshot':
+        case 'persistence_scan':
+        case 'agent_integrity_check':
+        case 'lsass_access_audit':
+        case 'network_last_seen':  params = {}; break;
+        // ── Legacy type aliases ─────────────────────────────────────────
+        case 'network_isolate':   mappedType = 'isolate_network'; break;
+        case 'process_terminate': mappedType = 'terminate_process'; params = { process_name: p('process_name') || 'suspicious.exe', kill_tree: 'true' }; break;
+        case 'forensic_dump':     mappedType = 'collect_forensics'; params = { event_types: 'process,file,network,registry', max_events: '1000' }; break;
+        case 'device_unmount':    mappedType = 'run_cmd'; params = { cmd: 'powershell -Command "Get-Volume | Where-Object DriveType -eq Removable | Dismount-Volume"' }; break;
+        case 'log_pull':          mappedType = 'collect_logs'; params = { log_types: 'System,Security' }; break;
+        case 'yara_scan':         mappedType = 'scan_file'; params = { file_path: p('file_path') || 'C:\\Windows\\Temp' }; break;
+        case 'registry_query':    mappedType = 'run_cmd'; params = { cmd: 'reg query HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Run' }; break;
       }
 
       try {
@@ -259,8 +281,8 @@ export function PlaybooksPage() {
       const payload = {
         name: newPlaybookName,
         description: newPlaybookDesc,
-        category: 'investigation',
-        commands: [{ type: 'network_isolate', description: 'Isolate machine', timeout: 300 }]
+        category: newPlaybookCategory,
+        commands: [{ type: 'isolate_network', description: 'Isolate machine from network', timeout: 300 }]
       };
 
       await automationApi.createPlaybook(payload);
@@ -475,7 +497,7 @@ export function PlaybooksPage() {
       {/* Execution Modal */}
       {selectedPlaybook && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden border border-slate-200 dark:border-slate-800">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-2xl flex flex-col border border-slate-200 dark:border-slate-800" style={{ maxHeight: '92vh' }}>
             <div className="flex items-center justify-between p-6 border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/30">
               <div>
                 <h2 className="text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
@@ -492,7 +514,8 @@ export function PlaybooksPage() {
               </button>
             </div>
 
-            <div className="p-6 space-y-6">
+            {/* Scrollable body */}
+            <div className="overflow-y-auto flex-1 p-6 space-y-6">
               {/* Playbook Summary */}
               <div className="bg-indigo-50 dark:bg-indigo-900/10 border border-indigo-100 dark:border-indigo-800/50 rounded-xl p-4">
                 <div className="flex items-center justify-between mb-2">
@@ -504,11 +527,11 @@ export function PlaybooksPage() {
                 <p className="text-sm text-indigo-700/80 dark:text-indigo-300/80">{selectedPlaybook.description}</p>
               </div>
 
-              {/* Form Input (Pre-filled Context) */}
+              {/* Agent selector + dynamic per-command parameter inputs */}
               <div className="space-y-4">
                 <div>
                   <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">
-                    Target Agent ID <span className="text-rose-500">*</span>
+                    Target Agent <span className="text-rose-500">*</span>
                   </label>
                   <div className="relative">
                     <select
@@ -520,9 +543,8 @@ export function PlaybooksPage() {
                       {agents.map(a => (
                         <option key={a.id} value={a.id}>{a.hostname} ({a.id})</option>
                       ))}
-                      {/* Allow custom ID for testing if list is empty or doesn't match context */}
                       {agentIdInput && !agents.some(a => a.id === agentIdInput) && (
-                        <option value={agentIdInput}>{agentIdInput} (From Context)</option>
+                        <option value={agentIdInput}>{agentIdInput} (From Alert Context)</option>
                       )}
                     </select>
                     <Target className="w-5 h-5 text-slate-400 absolute left-3 top-3.5" />
@@ -533,51 +555,42 @@ export function PlaybooksPage() {
                       Auto-filled from active alert context
                     </p>
                   )}
-                  
-                  {selectedPlaybook.commands.some(c => c.type === 'process_terminate') && (
-                    <div className="mt-6">
-                      <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">
-                        Target Process Name <span className="text-slate-400 font-normal ml-1">(for termination)</span>
-                      </label>
-                      <div className="relative">
-                        <input
-                          type="text"
-                          value={processNameInput}
-                          onChange={(e) => setProcessNameInput(e.target.value)}
-                          placeholder="e.g., vssadmin.exe"
-                          className="w-full bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-lg px-4 py-3 text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-shadow pl-10"
-                        />
-                        <Terminal className="w-5 h-5 text-slate-400 absolute left-3 top-3.5" />
-                      </div>
-                      <p className="text-xs text-slate-500 mt-2 flex items-center gap-1.5">
-                        <Shield className="w-3.5 h-3.5" />
-                        This parameter is automatically extracted from the alert details if available.
-                      </p>
-                    </div>
-                  )}
-
-                  {selectedPlaybook.commands.some(c => c.type === 'yara_scan') && (
-                    <div className="mt-6">
-                      <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">
-                        Target File Path <span className="text-slate-400 font-normal ml-1">(for YARA scan)</span> <span className="text-rose-500">*</span>
-                      </label>
-                      <div className="relative">
-                        <input
-                          type="text"
-                          value={filePathInput}
-                          onChange={(e) => setFilePathInput(e.target.value)}
-                          placeholder="e.g., C:\Windows\Temp"
-                          className="w-full bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-lg px-4 py-3 text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-shadow pl-10"
-                        />
-                        <Terminal className="w-5 h-5 text-slate-400 absolute left-3 top-3.5" />
-                      </div>
-                      <p className="text-xs text-slate-500 mt-2 flex items-center gap-1.5">
-                        <Shield className="w-3.5 h-3.5" />
-                        Specify the absolute path to scan on the target agent.
-                      </p>
-                    </div>
-                  )}
                 </div>
+
+                {/* Dynamic parameter inputs per command step */}
+                {(() => {
+                  const inputs: React.ReactNode[] = [];
+                  selectedPlaybook.commands.forEach((cmd, idx) => {
+                    const defs = COMMAND_PARAMS[cmd.type] || [];
+                    defs.forEach(pd => {
+                      inputs.push(
+                        <div key={`${idx}-${pd.key}`}>
+                          <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-1.5">
+                            Step {idx + 1} — {pd.label}
+                            {pd.required && <span className="text-rose-500 ml-1">*</span>}
+                            <span className="text-xs font-normal text-slate-400 ml-2">({cmd.type})</span>
+                          </label>
+                          <div className="relative">
+                            <input
+                              type="text"
+                              value={cmdParams[`${idx}_${pd.key}`] || ''}
+                              onChange={e => setCmdParams(prev => ({ ...prev, [`${idx}_${pd.key}`]: e.target.value }))}
+                              placeholder={pd.placeholder}
+                              className="w-full bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-lg px-4 py-2.5 text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none text-sm pl-10"
+                            />
+                            <Terminal className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
+                          </div>
+                        </div>
+                      );
+                    });
+                  });
+                  return inputs.length > 0 ? (
+                    <div className="space-y-4">
+                      <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Command Parameters</p>
+                      {inputs}
+                    </div>
+                  ) : null;
+                })()}
               </div>
 
               {/* Sequence Preview / Live UI Progress */}
@@ -714,10 +727,15 @@ export function PlaybooksPage() {
                 <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">
                   Category
                 </label>
-                <select className="w-full bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-lg px-4 py-3 text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none">
+                <select
+                  value={newPlaybookCategory}
+                  onChange={e => setNewPlaybookCategory(e.target.value)}
+                  className="w-full bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-lg px-4 py-3 text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
+                >
                   <option value="containment">Containment</option>
                   <option value="investigation">Investigation</option>
                   <option value="remediation">Remediation</option>
+                  <option value="validation">Validation</option>
                 </select>
               </div>
             </div>

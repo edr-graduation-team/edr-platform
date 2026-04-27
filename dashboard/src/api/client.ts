@@ -261,6 +261,8 @@ export interface Agent {
     installed_date?: string;
     created_at: string;
     updated_at: string;
+    sysmon_installed?: boolean;
+    sysmon_running?: boolean;
 }
 
 // Filter policy for dynamic agent-side event filtering

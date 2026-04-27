@@ -452,6 +452,10 @@ message HeartbeatRequest {
   
   // Certificate info
   int64 cert_expires_at = 40;
+
+  // Sysmon telemetry
+  bool sysmon_installed = 50; // Sysmon64 service is registered on the endpoint
+  bool sysmon_running   = 51; // Sysmon64 service is in RUNNING state
 }
 
 // AgentStatus - Current agent state

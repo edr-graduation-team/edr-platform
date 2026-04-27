@@ -122,6 +122,8 @@ func (h *HeartbeatHandler) Heartbeat(ctx context.Context, req *edrv1.HeartbeatRe
 				IPAddresses:     req.IpAddresses,
 				CpuCount:        int(req.DiskTotalMb), // CPU count sent via DiskTotalMb field
 				HealthScore:     healthScore,
+				SysmonInstalled: req.SysmonInstalled,
+				SysmonRunning:   req.SysmonRunning,
 			}
 
 			// UpdateStatus writes status + last_seen + optional metrics in one call.

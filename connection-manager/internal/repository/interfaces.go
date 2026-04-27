@@ -30,7 +30,8 @@ type AgentRepository interface {
 	// UpdateMetrics updates the agent's metrics from a heartbeat.
 	UpdateMetrics(ctx context.Context, id uuid.UUID, cpuUsage float64, memoryUsedMB int64,
 		memoryTotalMB int64, queueDepth int, eventsGenerated, eventsSent, eventsDropped int64,
-		agentVersion string, ipAddresses []string, cpuCount int, healthScore float64) error
+		agentVersion string, ipAddresses []string, cpuCount int, healthScore float64,
+		sysmonInstalled, sysmonRunning bool) error
 
 	// Delete soft-deletes an agent (sets status to deleted).
 	Delete(ctx context.Context, id uuid.UUID) error

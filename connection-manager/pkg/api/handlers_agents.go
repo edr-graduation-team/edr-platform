@@ -96,6 +96,8 @@ func (h *Handlers) ListAgents(c echo.Context) error {
 		if a.CertExpiresAt != nil && !a.CertExpiresAt.IsZero() {
 			summary.CertExpiresAt = a.CertExpiresAt
 		}
+		summary.SysmonInstalled = a.SysmonInstalled
+		summary.SysmonRunning = a.SysmonRunning
 		summaries = append(summaries, summary)
 	}
 
@@ -146,6 +148,8 @@ func (h *Handlers) GetAgent(c echo.Context) error {
 			HealthScore:     a.HealthScore,
 			EventsDelivered: a.EventsDelivered,
 			IsIsolated:      a.IsIsolated,
+			SysmonInstalled: a.SysmonInstalled,
+			SysmonRunning:   a.SysmonRunning,
 		},
 		IPAddresses:     ipAddresses,
 		CPUCount:        a.CPUCount,
@@ -156,6 +160,8 @@ func (h *Handlers) GetAgent(c echo.Context) error {
 		CPUUsage:        a.CPUUsage,
 		MemoryUsedMB:    a.MemoryUsedMB,
 		QueueDepth:      a.QueueDepth,
+		SysmonInstalled: a.SysmonInstalled,
+		SysmonRunning:   a.SysmonRunning,
 	}
 	if a.InstalledDate != nil {
 		detail.InstalledDate = *a.InstalledDate

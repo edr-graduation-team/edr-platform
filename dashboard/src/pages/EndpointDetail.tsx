@@ -685,6 +685,13 @@ function OverviewTab({
     }, [cmds]);
 
     const sysmonStatus = (() => {
+        // Primary source of truth: live heartbeat data from the agent
+        if (agent.sysmon_installed !== undefined || agent.sysmon_running !== undefined) {
+            if (agent.sysmon_running) return { label: 'Running', tone: 'ok' as const };
+            if (agent.sysmon_installed) return { label: 'Installed (stopped)', tone: 'warn' as const };
+            return { label: 'Not installed', tone: 'bad' as const };
+        }
+        // Fallback: infer from command history when heartbeat fields are absent
         if (!sysmonCmd) {
             if (sysmonObserved) return { label: 'Observed', tone: 'ok' as const };
             return { label: 'Unknown', tone: 'muted' as const };
@@ -739,6 +746,7 @@ function OverviewTab({
                         <Settings className="w-4 h-4 text-indigo-500" /> System Monitor (Sysmon)
                     </h3>
                     <div className="text-sm space-y-2">
+                        {/* Status badge */}
                         <div className="flex items-center justify-between gap-3">
                             <span className="text-slate-500">Status</span>
                             <span
@@ -755,11 +763,36 @@ function OverviewTab({
                                 {sysmonStatus.label}
                             </span>
                         </div>
-                        <div className="text-xs text-slate-500">
-                            Monitoring: Windows System Monitor (Sysmon)
-                        </div>
+
+                        {/* Live heartbeat rows — shown whenever the agent reports them */}
+                        {(agent.sysmon_installed !== undefined || agent.sysmon_running !== undefined) ? (
+                            <dl className="space-y-1 pt-1">
+                                <div className="flex justify-between gap-3 py-1 border-b border-slate-100 dark:border-slate-700/40">
+                                    <dt className="text-xs text-slate-500">Installed</dt>
+                                    <dd className="text-xs font-semibold">
+                                        {agent.sysmon_installed
+                                            ? <span className="text-emerald-600 dark:text-emerald-400">Yes</span>
+                                            : <span className="text-rose-600 dark:text-rose-400">No</span>}
+                                    </dd>
+                                </div>
+                                <div className="flex justify-between gap-3 py-1">
+                                    <dt className="text-xs text-slate-500">Service running</dt>
+                                    <dd className="text-xs font-semibold">
+                                        {agent.sysmon_running
+                                            ? <span className="text-emerald-600 dark:text-emerald-400">Yes</span>
+                                            : <span className="text-slate-500 dark:text-slate-400">No</span>}
+                                    </dd>
+                                </div>
+                            </dl>
+                        ) : (
+                            <div className="text-xs text-slate-500">
+                                Monitoring: Windows System Monitor (Sysmon)
+                            </div>
+                        )}
+
+                        {/* Command history detail */}
                         {sysmonCmd ? (
-                            <div className="text-xs text-slate-500 space-y-1">
+                            <div className="text-xs text-slate-500 space-y-1 pt-1">
                                 <div>
                                     Last action: <code>{sysmonCmd.command_type}</code> · {new Date(sysmonCmd.issued_at).toLocaleString()}
                                 </div>
@@ -770,17 +803,14 @@ function OverviewTab({
                                 ) : null}
                             </div>
                         ) : sysmonObserved ? (
-                            <div className="text-xs text-slate-500 space-y-1">
+                            <div className="text-xs text-slate-500 space-y-1 pt-1">
                                 <div>
                                     Observed via <code>{sysmonObserved.command_type}</code> · {new Date(sysmonObserved.issued_at).toLocaleString()}
                                 </div>
-                                <div className="text-[11px] text-slate-500">
-                                    Sysmon status was detected from collected security logs.
-                                </div>
                             </div>
-                        ) : (
-                            <p className="text-slate-500 text-sm">No Sysmon actions recorded yet.</p>
-                        )}
+                        ) : agent.sysmon_installed === undefined ? (
+                            <p className="text-slate-500 text-xs pt-1">No Sysmon actions recorded yet.</p>
+                        ) : null}
                     </div>
                 </div>
             </div>

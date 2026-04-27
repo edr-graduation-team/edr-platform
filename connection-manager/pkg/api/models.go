@@ -128,6 +128,8 @@ type AgentSummary struct {
 	UpdatedAt       time.Time         `json:"updated_at"`
 	Tags            map[string]string `json:"tags,omitempty"`
 	Metadata        map[string]string `json:"metadata,omitempty"`
+	SysmonInstalled bool              `json:"sysmon_installed"`
+	SysmonRunning   bool              `json:"sysmon_running"`
 }
 
 // AgentDetailResponse for single agent.
@@ -150,6 +152,8 @@ type AgentDetail struct {
 	CPUUsage        float64           `json:"cpu_usage"`
 	MemoryUsedMB    int64             `json:"memory_used_mb"`
 	QueueDepth      int               `json:"queue_depth"`
+	SysmonInstalled bool              `json:"sysmon_installed"`
+	SysmonRunning   bool              `json:"sysmon_running"`
 }
 
 // AgentUpdateRequest for updating agent.

@@ -341,6 +341,7 @@ func (h *AutomationHandlers) ToggleAutomationRule(c echo.Context) error {
 	}
 
 	rule.Enabled = req.Enabled
+	rule.AutoExecute = req.Enabled // auto_execute mirrors enabled: disabled rule never auto-fires
 
 	if err := h.automationService.UpdateRule(ctx, rule); err != nil {
 		return errorResponse(c, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to update rule")

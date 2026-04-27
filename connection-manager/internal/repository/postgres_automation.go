@@ -112,10 +112,16 @@ func (r *PostgresAutomationRuleRepository) Create(ctx context.Context, rule *mod
 		rule.ID = uuid.New()
 	}
 	now := time.Now()
+	// json.RawMessage is []byte; pgx would encode it as bytea (not jsonb).
+	// Casting to string forces pgx to send it as text, which PostgreSQL implicitly casts to jsonb.
+	triggerJSON := string(rule.TriggerConditions)
+	if triggerJSON == "" {
+		triggerJSON = "{}"
+	}
 	_, err := r.pool.Exec(ctx,
 		`INSERT INTO automation_rules (id, name, description, trigger_conditions, playbook_id, priority, auto_execute, cooldown_minutes, enabled, success_rate, created_at, updated_at) 
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
-		rule.ID, rule.Name, rule.Description, rule.TriggerConditions, rule.PlaybookID, rule.Priority, rule.AutoExecute, rule.CooldownMinutes, rule.Enabled, rule.SuccessRate, now, now)
+		 VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7, $8, $9, $10, $11, $12)`,
+		rule.ID, rule.Name, rule.Description, triggerJSON, rule.PlaybookID, rule.Priority, rule.AutoExecute, rule.CooldownMinutes, rule.Enabled, rule.SuccessRate, now, now)
 	return err
 }
 
@@ -131,9 +137,13 @@ func (r *PostgresAutomationRuleRepository) GetByID(ctx context.Context, id uuid.
 
 func (r *PostgresAutomationRuleRepository) Update(ctx context.Context, rule *models.AutomationRule) error {
 	now := time.Now()
+	triggerJSON := string(rule.TriggerConditions)
+	if triggerJSON == "" {
+		triggerJSON = "{}"
+	}
 	_, err := r.pool.Exec(ctx,
-		`UPDATE automation_rules SET name=$1, description=$2, trigger_conditions=$3, playbook_id=$4, priority=$5, auto_execute=$6, cooldown_minutes=$7, enabled=$8, success_rate=$9, last_execution=$10, updated_at=$11 WHERE id=$12`,
-		rule.Name, rule.Description, rule.TriggerConditions, rule.PlaybookID, rule.Priority, rule.AutoExecute, rule.CooldownMinutes, rule.Enabled, rule.SuccessRate, rule.LastExecution, now, rule.ID)
+		`UPDATE automation_rules SET name=$1, description=$2, trigger_conditions=$3::jsonb, playbook_id=$4, priority=$5, auto_execute=$6, cooldown_minutes=$7, enabled=$8, success_rate=$9, last_execution=$10, updated_at=$11 WHERE id=$12`,
+		rule.Name, rule.Description, triggerJSON, rule.PlaybookID, rule.Priority, rule.AutoExecute, rule.CooldownMinutes, rule.Enabled, rule.SuccessRate, rule.LastExecution, now, rule.ID)
 	return err
 }
 

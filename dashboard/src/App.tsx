@@ -41,8 +41,8 @@ const SecurityEndpointZeroTrustPage = lazy(() => import('./pages/parity/paritySe
 const SecuritySiemPage = lazy(() => import('./pages/parity/paritySectionPages').then((m) => ({ default: m.SecuritySiemPage })));
 const ManagedSecurityOverviewPage = lazy(() => import('./pages/parity/paritySectionPages').then((m) => ({ default: m.ManagedSecurityOverviewPage })));
 const ManagedSecurityIncidentsPage = lazy(() => import('./pages/parity/paritySectionPages').then((m) => ({ default: m.ManagedSecurityIncidentsPage })));
-const ItsmPlaybooksPage = lazy(() => import('./pages/parity/paritySectionPages').then((m) => ({ default: m.ItsmPlaybooksPage })));
-const ItsmAutomationsPage = lazy(() => import('./pages/parity/paritySectionPages').then((m) => ({ default: m.ItsmAutomationsPage })));
+const ItsmPlaybooksPage = lazy(() => import('./pages/automation/PlaybooksPage').then((m) => ({ default: m.PlaybooksPage })));
+const ItsmAutomationsPage = lazy(() => import('./pages/automation/AutomationRulesPage').then((m) => ({ default: m.AutomationRulesPage })));
 const ManagementNetworkPage = lazy(() => import('./pages/parity/paritySectionPages').then((m) => ({ default: m.ManagementNetworkPage })));
 const ManagementStaffPage = lazy(() => import('./pages/parity/paritySectionPages').then((m) => ({ default: m.ManagementStaffPage })));
 const ManagementAccountPage = lazy(() => import('./pages/parity/paritySectionPages').then((m) => ({ default: m.ManagementAccountPage })));

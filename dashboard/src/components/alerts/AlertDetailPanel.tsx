@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import {
     Check, Clock, CheckCircle, XCircle, AlertTriangle,
-    TrendingUp, Info, ChevronDown, ChevronUp, Shield
+    TrendingUp, Info, ChevronDown, ChevronUp, Shield, Play, Settings
 } from 'lucide-react';
 import { Modal } from '../';
+import { useNavigate } from 'react-router-dom';
 import { RiskScoreBadge } from './RiskScoreBadge';
 import { UEBASignalBadge } from './UEBASignalBadge';
 import { LineageTree } from './ProcessLineageTree';
@@ -32,6 +33,24 @@ export function AlertDetailPanel({
 }: AlertDetailPanelProps) {
     const [activeTab, setActiveTab] = useState<TabId>('summary');
     const [showRawJson, setShowRawJson] = useState(false);
+    const navigate = useNavigate();
+
+    const handleNavigateWithContext = (path: string) => {
+        if (!alert) return;
+        navigate(path, {
+            state: {
+                alertId: alert.id,
+                alertDetails: {
+                    severity: alert.severity,
+                    ruleName: alert.rule_title,
+                    agentId: alert.agent_id,
+                    title: alert.rule_title,
+                    description: alert.human_summary,
+                    riskScore: alert.risk_score
+                }
+            }
+        });
+    };
 
     if (!alert) return null;
 
@@ -218,6 +237,27 @@ export function AlertDetailPanel({
                                 <p className="text-sm text-slate-700 dark:text-slate-300">{alert.notes}</p>
                             </div>
                         )}
+
+                        {/* Automation Quick Links */}
+                        <div className="mt-4 pt-4 border-t border-slate-200 dark:border-slate-700">
+                            <label className="text-[10px] text-slate-400 uppercase tracking-wider font-bold block mb-3">Response Actions</label>
+                            <div className="flex flex-wrap gap-3">
+                                <button
+                                    onClick={() => handleNavigateWithContext('/itsm/playbooks')}
+                                    className="flex-1 py-2 px-3 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-2"
+                                >
+                                    <Play className="w-4 h-4 text-green-500" />
+                                    Run Playbook
+                                </button>
+                                <button
+                                    onClick={() => handleNavigateWithContext('/itsm/automations')}
+                                    className="flex-1 py-2 px-3 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-2"
+                                >
+                                    <Settings className="w-4 h-4 text-blue-500" />
+                                    Automation Rules
+                                </button>
+                            </div>
+                        </div>
                     </div>
                 )}
 

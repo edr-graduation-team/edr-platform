@@ -1,4 +1,4 @@
--- Migration: Remove English Playbooks
+-- Migration 036 down: Remove the seeded default playbooks and rules
 
 DELETE FROM automation_rules WHERE id IN (
     '44444444-4444-4444-4444-444444444444',

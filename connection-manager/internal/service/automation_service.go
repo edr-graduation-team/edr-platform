@@ -16,17 +16,17 @@ import (
 
 // AutomationService provides intelligent automation capabilities for EDR alerts
 type AutomationService struct {
-	logger             *logrus.Logger
-	alertRepo          repository.AlertRepository
-	playbookRepo       repository.ResponsePlaybookRepository
-	automationRepo     repository.AutomationRuleRepository
-	executionRepo      repository.PlaybookExecutionRepository
-	commandService     *CommandService
+	logger              *logrus.Logger
+	alertRepo           repository.AlertRepository
+	playbookRepo        repository.ResponsePlaybookRepository
+	automationRepo      repository.AutomationRuleRepository
+	executionRepo       repository.PlaybookExecutionRepository
+	commandService      *CommandService
 	notificationService *NotificationService
-	metricsService     *MetricsService
-	mlOptimizer        *MLOptimizer
-	cooldownMap        map[uuid.UUID]time.Time
-	cooldownMutex      sync.RWMutex
+	metricsService      *MetricsService
+	mlOptimizer         *MLOptimizer
+	cooldownMap         map[uuid.UUID]time.Time
+	cooldownMutex       sync.RWMutex
 }
 
 // NewAutomationService creates a new automation service instance
@@ -42,16 +42,16 @@ func NewAutomationService(
 	mlOptimizer *MLOptimizer,
 ) *AutomationService {
 	return &AutomationService{
-		logger:             logger,
-		alertRepo:          alertRepo,
-		playbookRepo:       playbookRepo,
-		automationRepo:     automationRepo,
-		executionRepo:      executionRepo,
-		commandService:     commandService,
-		notificationService:  notificationService,
-		metricsService:     metricsService,
-		mlOptimizer:        mlOptimizer,
-		cooldownMap:        make(map[uuid.UUID]time.Time),
+		logger:              logger,
+		alertRepo:           alertRepo,
+		playbookRepo:        playbookRepo,
+		automationRepo:      automationRepo,
+		executionRepo:       executionRepo,
+		commandService:      commandService,
+		notificationService: notificationService,
+		metricsService:      metricsService,
+		mlOptimizer:         mlOptimizer,
+		cooldownMap:         make(map[uuid.UUID]time.Time),
 	}
 }
 
@@ -61,7 +61,7 @@ func (s *AutomationService) ProcessAlert(ctx context.Context, alert *models.Aler
 
 	s.logger.WithFields(logrus.Fields{
 		"alert_id":  alert.ID,
-		"severity":   alert.Severity,
+		"severity":  alert.Severity,
 		"rule_name": alert.RuleName,
 		"agent_id":  alert.AgentID,
 	}).Info("Starting intelligent alert processing")
@@ -224,11 +224,11 @@ func (s *AutomationService) executePlaybookAsync(ctx context.Context, playbookID
 	startTime := time.Now()
 
 	execution := &models.PlaybookExecution{
-		AlertID:       alertID,
-		PlaybookID:    playbookID,
-		RuleID:        &ruleID,
-		Status:        "running",
-		StartedAt:     time.Now(),
+		AlertID:    alertID,
+		PlaybookID: playbookID,
+		RuleID:     &ruleID,
+		Status:     "running",
+		StartedAt:  time.Now(),
 	}
 
 	if err := s.executionRepo.Create(ctx, execution); err != nil {
@@ -336,7 +336,7 @@ func (s *AutomationService) updateRuleMetrics(ruleID uuid.UUID, success bool, ex
 	if success {
 		rule.SuccessRate = (rule.SuccessRate*0.8 + 0.2) // 80% weight to old, 20% to new success
 	} else {
-		rule.SuccessRate = (rule.SuccessRate*0.8) // 80% weight to old, 0% to new failure
+		rule.SuccessRate = (rule.SuccessRate * 0.8) // 80% weight to old, 0% to new failure
 	}
 
 	rule.LastExecution = &time.Time{}
@@ -372,11 +372,11 @@ func (s *AutomationService) GetSuggestions(ctx context.Context, alertID uuid.UUI
 // ExecutePlaybookForAlert manually executes a playbook for a specific alert
 func (s *AutomationService) ExecutePlaybookForAlert(ctx context.Context, playbookID, alertID, userID uuid.UUID) (*models.PlaybookExecution, error) {
 	execution := &models.PlaybookExecution{
-		AlertID:       alertID,
-		PlaybookID:    playbookID,
-		Status:        "running",
-		StartedAt:     time.Now(),
-		CreatedBy:     &userID,
+		AlertID:    alertID,
+		PlaybookID: playbookID,
+		Status:     "running",
+		StartedAt:  time.Now(),
+		CreatedBy:  &userID,
 	}
 
 	if err := s.executionRepo.Create(ctx, execution); err != nil {

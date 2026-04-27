@@ -251,19 +251,19 @@ func (s *Server) RegisterRoutes(handlers *Handlers) {
 	if handlers.AutomationHandlers != nil {
 		automation := protected.Group("/automation")
 		// Response Playbooks
-		automation.GET("/playbooks", handlers.AutomationHandlers.ListPlaybooks, handlers.RequirePermission("playbooks", "read"))
-		automation.POST("/playbooks", handlers.AutomationHandlers.CreatePlaybook, handlers.RequirePermission("playbooks", "write"))
-		automation.GET("/playbooks/:id", handlers.AutomationHandlers.GetPlaybook, handlers.RequirePermission("playbooks", "read"))
-		automation.DELETE("/playbooks/:id", handlers.AutomationHandlers.DeletePlaybook, handlers.RequirePermission("playbooks", "write"))
+		automation.GET("/playbooks", handlers.AutomationHandlers.ListPlaybooks, handlers.RequirePermission("responses", "read"))
+		automation.POST("/playbooks", handlers.AutomationHandlers.CreatePlaybook, handlers.RequirePermission("responses", "execute"))
+		automation.GET("/playbooks/:id", handlers.AutomationHandlers.GetPlaybook, handlers.RequirePermission("responses", "read"))
+		automation.DELETE("/playbooks/:id", handlers.AutomationHandlers.DeletePlaybook, handlers.RequirePermission("responses", "execute"))
 		// Automation Rules
-		automation.GET("/rules", handlers.AutomationHandlers.ListAutomationRules, handlers.RequirePermission("automation", "read"))
-		automation.POST("/rules", handlers.AutomationHandlers.CreateAutomationRule, handlers.RequirePermission("automation", "write"))
-		automation.PATCH("/rules/:id", handlers.AutomationHandlers.UpdateAutomationRule, handlers.RequirePermission("automation", "write"))
-		automation.DELETE("/rules/:id", handlers.AutomationHandlers.DeleteAutomationRule, handlers.RequirePermission("automation", "write"))
-		automation.PATCH("/rules/:id/toggle", handlers.AutomationHandlers.ToggleAutomationRule, handlers.RequirePermission("automation", "write"))
+		automation.GET("/rules", handlers.AutomationHandlers.ListAutomationRules, handlers.RequirePermission("responses", "read"))
+		automation.POST("/rules", handlers.AutomationHandlers.CreateAutomationRule, handlers.RequirePermission("responses", "execute"))
+		automation.PATCH("/rules/:id", handlers.AutomationHandlers.UpdateAutomationRule, handlers.RequirePermission("responses", "execute"))
+		automation.DELETE("/rules/:id", handlers.AutomationHandlers.DeleteAutomationRule, handlers.RequirePermission("responses", "execute"))
+		automation.PATCH("/rules/:id/toggle", handlers.AutomationHandlers.ToggleAutomationRule, handlers.RequirePermission("responses", "execute"))
 		// Metrics and Optimizations
-		automation.GET("/metrics", handlers.AutomationHandlers.GetAutomationMetrics, handlers.RequirePermission("automation", "read"))
-		automation.POST("/optimize", handlers.AutomationHandlers.GetAutomationOptimizations, handlers.RequirePermission("automation", "write"))
+		automation.GET("/metrics", handlers.AutomationHandlers.GetAutomationMetrics, handlers.RequirePermission("responses", "read"))
+		automation.POST("/optimize", handlers.AutomationHandlers.GetAutomationOptimizations, handlers.RequirePermission("responses", "execute"))
 	}
 }
 

@@ -34,7 +34,7 @@ func (r *PostgresResponsePlaybookRepository) Create(ctx context.Context, p *mode
 
 func (r *PostgresResponsePlaybookRepository) GetByID(ctx context.Context, id uuid.UUID) (*models.ResponsePlaybook, error) {
 	p := &models.ResponsePlaybook{}
-	err := r.pool.QueryRow(ctx, `SELECT id, name, description, category, severity_filter, rule_pattern, commands, mitre_techniques, enabled, created_at, updated_at FROM response_playbooks WHERE id = $1`, id).
+	err := r.pool.QueryRow(ctx, `SELECT id, name, COALESCE(description, ''), category, severity_filter, COALESCE(rule_pattern, ''), commands, mitre_techniques, enabled, created_at, updated_at FROM response_playbooks WHERE id = $1`, id).
 		Scan(&p.ID, &p.Name, &p.Description, &p.Category, &p.SeverityFilter, &p.RulePattern, &p.Commands, &p.MITRETechiques, &p.Enabled, &p.CreatedAt, &p.UpdatedAt)
 	if err == pgx.ErrNoRows {
 		return nil, ErrNotFound
@@ -57,7 +57,11 @@ func (r *PostgresResponsePlaybookRepository) Delete(ctx context.Context, id uuid
 
 func (r *PostgresResponsePlaybookRepository) List(ctx context.Context, filter PlaybookFilter) ([]*models.ResponsePlaybook, error) {
 	// Simplified list ignoring filters for brevity
-	rows, err := r.pool.Query(ctx, `SELECT id, name, description, category, severity_filter, rule_pattern, commands, mitre_techniques, enabled, created_at, updated_at FROM response_playbooks LIMIT $1 OFFSET $2`, filter.Limit, filter.Offset)
+	limit := filter.Limit
+	if limit == 0 {
+		limit = 100
+	}
+	rows, err := r.pool.Query(ctx, `SELECT id, name, COALESCE(description, ''), category, severity_filter, COALESCE(rule_pattern, ''), commands, mitre_techniques, enabled, created_at, updated_at FROM response_playbooks LIMIT $1 OFFSET $2`, limit, filter.Offset)
 	if err != nil {
 		return nil, err
 	}
@@ -102,7 +106,7 @@ func (r *PostgresAutomationRuleRepository) Create(ctx context.Context, rule *mod
 
 func (r *PostgresAutomationRuleRepository) GetByID(ctx context.Context, id uuid.UUID) (*models.AutomationRule, error) {
 	rule := &models.AutomationRule{}
-	err := r.pool.QueryRow(ctx, `SELECT id, name, description, trigger_conditions, playbook_id, priority, auto_execute, cooldown_minutes, enabled, success_rate, last_execution, created_at, updated_at FROM automation_rules WHERE id = $1`, id).
+	err := r.pool.QueryRow(ctx, `SELECT id, name, COALESCE(description, ''), trigger_conditions, playbook_id, priority, auto_execute, cooldown_minutes, enabled, success_rate, last_execution, created_at, updated_at FROM automation_rules WHERE id = $1`, id).
 		Scan(&rule.ID, &rule.Name, &rule.Description, &rule.TriggerConditions, &rule.PlaybookID, &rule.Priority, &rule.AutoExecute, &rule.CooldownMinutes, &rule.Enabled, &rule.SuccessRate, &rule.LastExecution, &rule.CreatedAt, &rule.UpdatedAt)
 	if err == pgx.ErrNoRows {
 		return nil, ErrNotFound
@@ -124,7 +128,7 @@ func (r *PostgresAutomationRuleRepository) Delete(ctx context.Context, id uuid.U
 }
 
 func (r *PostgresAutomationRuleRepository) List(ctx context.Context) ([]*models.AutomationRule, error) {
-	rows, err := r.pool.Query(ctx, `SELECT id, name, description, trigger_conditions, playbook_id, priority, auto_execute, cooldown_minutes, enabled, success_rate, last_execution, created_at, updated_at FROM automation_rules`)
+	rows, err := r.pool.Query(ctx, `SELECT id, name, COALESCE(description, ''), trigger_conditions, playbook_id, priority, auto_execute, cooldown_minutes, enabled, success_rate, last_execution, created_at, updated_at FROM automation_rules`)
 	if err != nil {
 		return nil, err
 	}
@@ -143,7 +147,7 @@ func (r *PostgresAutomationRuleRepository) List(ctx context.Context) ([]*models.
 func (r *PostgresAutomationRuleRepository) GetMatchingRules(ctx context.Context, alert *models.Alert) ([]*models.AutomationRule, error) {
 	// Simplified logic for fetching matching rules. Ideally done in DB via jsonb querying.
 	// For now, fetch all enabled rules and let service filter them.
-	rows, err := r.pool.Query(ctx, `SELECT id, name, description, trigger_conditions, playbook_id, priority, auto_execute, cooldown_minutes, enabled, success_rate, last_execution, created_at, updated_at FROM automation_rules WHERE enabled=true`)
+	rows, err := r.pool.Query(ctx, `SELECT id, name, COALESCE(description, ''), trigger_conditions, playbook_id, priority, auto_execute, cooldown_minutes, enabled, success_rate, last_execution, created_at, updated_at FROM automation_rules WHERE enabled=true`)
 	if err != nil {
 		return nil, err
 	}
@@ -197,7 +201,11 @@ func (r *PostgresPlaybookExecutionRepository) Update(ctx context.Context, execut
 }
 
 func (r *PostgresPlaybookExecutionRepository) List(ctx context.Context, filter ExecutionFilter) ([]*models.PlaybookExecution, error) {
-	rows, err := r.pool.Query(ctx, `SELECT id, alert_id, playbook_id, rule_id, agent_id, status, started_at, completed_at, error_message FROM playbook_executions LIMIT $1 OFFSET $2`, filter.Limit, filter.Offset)
+	limit := filter.Limit
+	if limit == 0 {
+		limit = 100
+	}
+	rows, err := r.pool.Query(ctx, `SELECT id, alert_id, playbook_id, rule_id, agent_id, status, started_at, completed_at, error_message FROM playbook_executions LIMIT $1 OFFSET $2`, limit, filter.Offset)
 	if err != nil {
 		return nil, err
 	}

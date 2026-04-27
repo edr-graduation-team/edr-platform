@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
 import { AlertContextPanel } from '../../components/automation/AlertContextPanel';
 import { UserAssistant } from '../../components/automation/UserAssistant';
-import { Play, Shield, Clock, TrendingUp, AlertTriangle, Plus, Terminal, X, CheckCircle, Target } from 'lucide-react';
+import { Play, Shield, Clock, TrendingUp, AlertTriangle, Plus, Terminal, X, CheckCircle, Target, Trash2 } from 'lucide-react';
 import { automationApi, agentsApi } from '../../api/client';
 
 // Map API ResponsePlaybook to the component's Playbook interface
@@ -35,48 +35,6 @@ interface AlertContext {
   timestamp: string;
 }
 
-const DEFAULT_PLAYBOOKS: Playbook[] = [
-  {
-    id: 'pb-ransomware-001',
-    name: 'Ransomware Immediate Containment',
-    description: 'Isolates the host from the network, terminates suspected encryption processes (like vssadmin or unknown encrypters), and captures a forensic memory dump.',
-    category: 'containment',
-    commands: [
-      { type: 'network_isolate', description: 'Isolate agent from network (keep C2 channel open)', timeout: 30 },
-      { type: 'process_terminate', description: 'Terminate processes matching ransomware behavior heuristics', timeout: 45 },
-      { type: 'forensic_dump', description: 'Capture volatile memory snapshot for analysis', timeout: 300 }
-    ],
-    mitreTechniques: ['T1486', 'T1490'],
-    enabled: true,
-    createdAt: new Date().toISOString()
-  },
-  {
-    id: 'pb-usb-002',
-    name: 'Unauthorized USB Device Response',
-    description: 'Automatically unmounts unauthorized mass storage devices and pulls recent file system logs to track potential exfiltration.',
-    category: 'remediation',
-    commands: [
-      { type: 'device_unmount', description: 'Force unmount untrusted USB storage volume', timeout: 15 },
-      { type: 'log_pull', description: 'Retrieve Windows Event Logs for Device insertions', timeout: 60 }
-    ],
-    mitreTechniques: ['T1091', 'T1052'],
-    enabled: true,
-    createdAt: new Date().toISOString()
-  },
-  {
-    id: 'pb-malware-003',
-    name: 'Deep Malware Investigation',
-    description: 'Executes a comprehensive YARA scan and queries the registry for persistence mechanisms.',
-    category: 'investigation',
-    commands: [
-      { type: 'yara_scan', description: 'Run full YARA signature scan on recent file modifications', timeout: 600 },
-      { type: 'registry_query', description: 'Analyze Run/RunOnce keys and Scheduled Tasks', timeout: 120 }
-    ],
-    mitreTechniques: ['T1547', 'T1053'],
-    enabled: true,
-    createdAt: new Date().toISOString()
-  }
-];
 
 export function PlaybooksPage() {
   const location = useLocation();
@@ -98,6 +56,8 @@ export function PlaybooksPage() {
   const [executionComplete, setExecutionComplete] = useState(false);
   const [executionError, setExecutionError] = useState<string | null>(null);
   const [processNameInput, setProcessNameInput] = useState<string>('');
+  const [filePathInput, setFilePathInput] = useState<string>('C:\\Windows\\Temp');
+  const [agents, setAgents] = useState<{ id: string; hostname: string }[]>([]);
 
   useEffect(() => {
     const state = location.state as any;
@@ -114,7 +74,19 @@ export function PlaybooksPage() {
     }
 
     fetchPlaybooks();
+    fetchAgents();
   }, [location.state]);
+
+  const fetchAgents = async () => {
+    try {
+      const res = await agentsApi.list({ limit: 100 });
+      if (res && res.data) {
+        setAgents(res.data.map((a: any) => ({ id: a.id, hostname: a.hostname || a.id })));
+      }
+    } catch (error) {
+      console.error('Failed to fetch agents:', error);
+    }
+  };
 
   const fetchPlaybooks = async () => {
     try {
@@ -136,11 +108,6 @@ export function PlaybooksPage() {
         createdAt: p.created_at || new Date().toISOString(),
       }));
 
-      // Fallback to our realistic project data if DB is empty
-      if (mappedPlaybooks.length === 0) {
-        mappedPlaybooks = DEFAULT_PLAYBOOKS;
-      }
-
       setPlaybooks(mappedPlaybooks);
 
       if (alertContext) {
@@ -158,7 +125,6 @@ export function PlaybooksPage() {
       }
     } catch (error) {
       console.error('Failed to fetch playbooks:', error);
-      setPlaybooks(DEFAULT_PLAYBOOKS); // Fallback on error
     } finally {
       setLoading(false);
     }
@@ -166,6 +132,22 @@ export function PlaybooksPage() {
 
   const handleSuggestionAction = (action: string) => {
     console.log('Suggestion action:', action);
+  };
+
+  const handleDeletePlaybook = async (playbookId: string) => {
+    if (!window.confirm("Are you sure you want to delete this playbook?")) return;
+    try {
+      if (playbookId) {
+        await automationApi.deletePlaybook(playbookId);
+      }
+      setPlaybooks(prev => prev.filter(p => p.id !== playbookId));
+      if (suggestions.some(p => p.id === playbookId)) {
+        setSuggestions(prev => prev.filter(p => p.id !== playbookId));
+      }
+    } catch (error) {
+      console.error("Failed to delete playbook:", error);
+      alert("Failed to delete playbook.");
+    }
   };
 
   const openExecuteModal = (playbook: Playbook) => {
@@ -230,7 +212,7 @@ export function PlaybooksPage() {
           break;
         case 'yara_scan':
           mappedType = 'scan_file';
-          params = { file_path: 'C:\\Windows\\Temp' }; // Demo target
+          params = { file_path: filePathInput || 'C:\\Windows\\Temp' }; // Use UI input
           break;
         case 'registry_query':
           mappedType = 'run_cmd';
@@ -467,12 +449,21 @@ export function PlaybooksPage() {
                       <Play className="w-4 h-4" />
                       Execute
                     </button>
-                    <button
-                      onClick={() => setViewPlaybook(playbook)}
-                      className="px-6 py-2.5 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-600 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700 font-medium w-full transition-colors"
-                    >
-                      View Details
-                    </button>
+                    <div className="flex w-full gap-2">
+                        <button
+                          onClick={() => setViewPlaybook(playbook)}
+                          className="flex-1 px-4 py-2 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-600 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700 font-medium transition-colors text-sm"
+                        >
+                          View Details
+                        </button>
+                        <button
+                          onClick={() => handleDeletePlaybook(playbook.id)}
+                          className="px-3 py-2 bg-white dark:bg-slate-800 text-rose-600 dark:text-rose-400 border border-slate-300 dark:border-slate-600 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-900/20 font-medium transition-colors flex items-center justify-center"
+                          title="Delete Playbook"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -520,13 +511,20 @@ export function PlaybooksPage() {
                     Target Agent ID <span className="text-rose-500">*</span>
                   </label>
                   <div className="relative">
-                    <input
-                      type="text"
+                    <select
                       value={agentIdInput}
                       onChange={(e) => setAgentIdInput(e.target.value)}
-                      placeholder="e.g., agent-1234-abcd"
-                      className="w-full bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-lg px-4 py-3 text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-shadow pl-10"
-                    />
+                      className="w-full bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-lg px-4 py-3 text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none appearance-none transition-shadow pl-10"
+                    >
+                      <option value="" disabled>Select Target Agent</option>
+                      {agents.map(a => (
+                        <option key={a.id} value={a.id}>{a.hostname} ({a.id})</option>
+                      ))}
+                      {/* Allow custom ID for testing if list is empty or doesn't match context */}
+                      {agentIdInput && !agents.some(a => a.id === agentIdInput) && (
+                        <option value={agentIdInput}>{agentIdInput} (From Context)</option>
+                      )}
+                    </select>
                     <Target className="w-5 h-5 text-slate-400 absolute left-3 top-3.5" />
                   </div>
                   {alertContext?.alertDetails?.agentId && (
@@ -554,6 +552,28 @@ export function PlaybooksPage() {
                       <p className="text-xs text-slate-500 mt-2 flex items-center gap-1.5">
                         <Shield className="w-3.5 h-3.5" />
                         This parameter is automatically extracted from the alert details if available.
+                      </p>
+                    </div>
+                  )}
+
+                  {selectedPlaybook.commands.some(c => c.type === 'yara_scan') && (
+                    <div className="mt-6">
+                      <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">
+                        Target File Path <span className="text-slate-400 font-normal ml-1">(for YARA scan)</span> <span className="text-rose-500">*</span>
+                      </label>
+                      <div className="relative">
+                        <input
+                          type="text"
+                          value={filePathInput}
+                          onChange={(e) => setFilePathInput(e.target.value)}
+                          placeholder="e.g., C:\Windows\Temp"
+                          className="w-full bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-lg px-4 py-3 text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-shadow pl-10"
+                        />
+                        <Terminal className="w-5 h-5 text-slate-400 absolute left-3 top-3.5" />
+                      </div>
+                      <p className="text-xs text-slate-500 mt-2 flex items-center gap-1.5">
+                        <Shield className="w-3.5 h-3.5" />
+                        Specify the absolute path to scan on the target agent.
                       </p>
                     </div>
                   )}

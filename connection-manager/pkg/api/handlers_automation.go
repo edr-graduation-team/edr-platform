@@ -96,6 +96,26 @@ func (h *AutomationHandlers) CreatePlaybook(c echo.Context) error {
 	})
 }
 
+// DeletePlaybook deletes a playbook
+func (h *AutomationHandlers) DeletePlaybook(c echo.Context) error {
+	playbookID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		return errorResponse(c, http.StatusBadRequest, "INVALID_ID", "Invalid playbook ID")
+	}
+
+	if err := h.automationService.DeletePlaybook(c.Request().Context(), playbookID); err != nil {
+		return errorResponse(c, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to delete playbook")
+	}
+
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"message": "Playbook deleted successfully",
+		"meta": ResponseMeta{
+			RequestID: c.Response().Header().Get(echo.HeaderXRequestID),
+			Timestamp: time.Now().UTC().Format(time.RFC3339),
+		},
+	})
+}
+
 // ListPlaybooks retrieves all response playbooks with optional filtering
 func (h *AutomationHandlers) ListPlaybooks(c echo.Context) error {
 	ctx := c.Request().Context()
@@ -224,6 +244,75 @@ func (h *AutomationHandlers) CreateAutomationRule(c echo.Context) error {
 	return c.JSON(http.StatusCreated, map[string]interface{}{
 		"message": "Automation rule created successfully",
 		"data":    rule,
+		"meta": ResponseMeta{
+			RequestID: c.Response().Header().Get(echo.HeaderXRequestID),
+			Timestamp: time.Now().UTC().Format(time.RFC3339),
+		},
+	})
+}
+
+// UpdateAutomationRule updates an existing automation rule
+func (h *AutomationHandlers) UpdateAutomationRule(c echo.Context) error {
+	ruleID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		return errorResponse(c, http.StatusBadRequest, "INVALID_ID", "Invalid rule ID")
+	}
+
+	var req models.AutomationRule
+	if err := c.Bind(&req); err != nil {
+		return errorResponse(c, http.StatusBadRequest, "INVALID_REQUEST", "Invalid request body")
+	}
+
+	ctx := c.Request().Context()
+	rule, err := h.automationService.GetRuleByID(ctx, ruleID)
+	if err != nil {
+		return errorResponse(c, http.StatusNotFound, "NOT_FOUND", "Rule not found")
+	}
+
+	// Update fields
+	if req.Name != "" {
+		rule.Name = req.Name
+	}
+	if req.Description != "" {
+		rule.Description = req.Description
+	}
+	if len(req.TriggerConditions) > 0 {
+		rule.TriggerConditions = req.TriggerConditions
+	}
+	if req.PlaybookID != uuid.Nil {
+		rule.PlaybookID = req.PlaybookID
+	}
+	rule.Priority = req.Priority
+	rule.AutoExecute = req.AutoExecute
+	rule.Enabled = req.Enabled
+
+	if err := h.automationService.UpdateRule(ctx, rule); err != nil {
+		return errorResponse(c, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to update rule")
+	}
+
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"message": "Automation rule updated successfully",
+		"data":    rule,
+		"meta": ResponseMeta{
+			RequestID: c.Response().Header().Get(echo.HeaderXRequestID),
+			Timestamp: time.Now().UTC().Format(time.RFC3339),
+		},
+	})
+}
+
+// DeleteAutomationRule deletes an automation rule
+func (h *AutomationHandlers) DeleteAutomationRule(c echo.Context) error {
+	ruleID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		return errorResponse(c, http.StatusBadRequest, "INVALID_ID", "Invalid rule ID")
+	}
+
+	if err := h.automationService.DeleteRule(c.Request().Context(), ruleID); err != nil {
+		return errorResponse(c, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to delete rule")
+	}
+
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"message": "Automation rule deleted successfully",
 		"meta": ResponseMeta{
 			RequestID: c.Response().Header().Get(echo.HeaderXRequestID),
 			Timestamp: time.Now().UTC().Format(time.RFC3339),

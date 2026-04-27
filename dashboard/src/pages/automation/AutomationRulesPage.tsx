@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
 import { AlertContextPanel } from '../../components/automation/AlertContextPanel';
 import { UserAssistant } from '../../components/automation/UserAssistant';
-import { Settings, TrendingUp, Clock, AlertTriangle, Plus, Activity, Power, Target, X, CheckCircle } from 'lucide-react';
+import { Settings, TrendingUp, Clock, AlertTriangle, Plus, Activity, Power, Target, X, CheckCircle, Trash2 } from 'lucide-react';
 import { automationApi } from '../../api/client';
 
 interface AutomationRule {
@@ -15,6 +15,8 @@ interface AutomationRule {
   successRate: number;
   lastExecution?: string;
   matchesCurrentAlert?: boolean;
+  playbookId?: string;
+  triggerConditions?: any;
 }
 
 interface AlertContext {
@@ -30,39 +32,6 @@ interface AlertContext {
   timestamp: string;
 }
 
-const DEFAULT_RULES: AutomationRule[] = [
-  {
-    id: 'rule-ransomware-01',
-    name: 'Auto-Contain Suspected Ransomware',
-    description: 'Triggers the Ransomware Containment Playbook when highly suspicious encryption behavior (e.g. vssadmin deletion + mass file rename) is detected on any agent.',
-    priority: 1,
-    autoExecute: true,
-    enabled: true,
-    successRate: 0.98,
-    lastExecution: new Date(Date.now() - 3600000).toISOString()
-  },
-  {
-    id: 'rule-usb-02',
-    name: 'Block Untrusted Mass Storage',
-    description: 'Triggers the USB response playbook to unmount unknown devices immediately upon detection of the hardware insertion event.',
-    priority: 3,
-    autoExecute: true,
-    enabled: true,
-    successRate: 0.95,
-    lastExecution: new Date(Date.now() - 86400000).toISOString()
-  },
-  {
-    id: 'rule-mimikatz-03',
-    name: 'High Risk Process Termination',
-    description: 'Terminates known credential dumping utilities (e.g. Mimikatz, Procdump against LSASS) and triggers an advanced memory scan playbook.',
-    priority: 2,
-    autoExecute: false, // Requires approval by default
-    enabled: true,
-    successRate: 0.85,
-    lastExecution: new Date(Date.now() - 172800000).toISOString()
-  }
-];
-
 export function AutomationRulesPage() {
   const location = useLocation();
   const [alertContext, setAlertContext] = useState<AlertContext | null>(null);
@@ -74,6 +43,10 @@ export function AutomationRulesPage() {
   const [newRuleName, setNewRuleName] = useState('');
   const [triggerCondition, setTriggerCondition] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+  const [playbooks, setPlaybooks] = useState<any[]>([]);
+  const [selectedPlaybookId, setSelectedPlaybookId] = useState('');
+  const [editingRuleId, setEditingRuleId] = useState<string | null>(null);
+  const [autoExecute, setAutoExecute] = useState(true);
 
   useEffect(() => {
     // Extract alert context from navigation state
@@ -86,9 +59,24 @@ export function AutomationRulesPage() {
       });
     }
 
-    // Fetch automation rules
+    // Fetch automation rules and playbooks
     fetchRules();
+    fetchPlaybooks();
   }, [location.state]);
+
+  const fetchPlaybooks = async () => {
+    try {
+      const res = await automationApi.listPlaybooks();
+      let pbs = res.playbooks || [];
+      
+      setPlaybooks(pbs);
+      if (pbs.length > 0 && !selectedPlaybookId) {
+        setSelectedPlaybookId(pbs[0].id);
+      }
+    } catch (error) {
+      console.error('Failed to fetch playbooks:', error);
+    }
+  };
 
   const fetchRules = async () => {
     try {
@@ -104,26 +92,14 @@ export function AutomationRulesPage() {
         enabled: r.enabled,
         successRate: r.success_rate || 0,
         lastExecution: r.last_execution || r.created_at,
-        matchesCurrentAlert: false
+        matchesCurrentAlert: false,
+        playbookId: r.playbook_id,
+        triggerConditions: r.trigger_conditions
       }));
-
-      // Fallback to our EDR project defaults if DB is empty
-      if (formattedRules.length === 0) {
-        formattedRules = DEFAULT_RULES;
-      }
-
-      // Check for current alert matches
-      if (alertContext) {
-        formattedRules = formattedRules.map((rule) => {
-           const ruleKeyword = alertContext.alertDetails.ruleName.toLowerCase().split(' ')[0];
-           return { ...rule, matchesCurrentAlert: rule.name.toLowerCase().includes(ruleKeyword) };
-        });
-      }
 
       setRules(formattedRules);
     } catch (error) {
       console.error('Failed to fetch automation rules:', error);
-      setRules(DEFAULT_RULES); // Fallback on error
     } finally {
       setLoading(false);
     }
@@ -136,6 +112,21 @@ export function AutomationRulesPage() {
     }
   };
 
+  const handleDeleteRule = async (ruleId: string) => {
+    if (!window.confirm("Are you sure you want to delete this rule?")) return;
+    
+    try {
+      if (ruleId) {
+        await automationApi.deleteRule(ruleId);
+      }
+      setRules(prev => prev.filter(r => r.id !== ruleId));
+    } catch (error) {
+      console.error("Failed to delete rule:", error);
+      alert("Failed to delete rule.");
+    }
+  };
+
+
   const handleRuleToggle = async (rule: any) => {
     // Optimistic UI update
     setRules(prev => prev.map(r => 
@@ -143,8 +134,7 @@ export function AutomationRulesPage() {
     ));
 
     try {
-      // If it's a default/fallback rule that doesn't exist in DB, it will fail, which is fine for demo
-      if (rule.id && !rule.id.startsWith('rule-def')) {
+      if (rule.id) {
         await automationApi.toggleRule(rule.id, !rule.enabled);
       }
     } catch (error) {
@@ -158,6 +148,8 @@ export function AutomationRulesPage() {
 
   const openCreateModal = () => {
     setIsCreatingRule(true);
+    setEditingRuleId(null);
+    setAutoExecute(true);
     if (alertContext?.alertDetails?.ruleName) {
       setNewRuleName(`Response Rule for: ${alertContext.alertDetails.ruleName}`);
       setTriggerCondition(`RuleName == "${alertContext.alertDetails.ruleName}" && Severity == "${alertContext.alertDetails.severity}"`);
@@ -165,6 +157,18 @@ export function AutomationRulesPage() {
       setNewRuleName('');
       setTriggerCondition('');
     }
+  };
+
+  const openEditModal = (rule: AutomationRule) => {
+    setIsCreatingRule(true);
+    setEditingRuleId(rule.id);
+    setNewRuleName(rule.name);
+    // Best effort mapping of condition
+    let cond = rule.description.replace('Custom rule triggering on condition: ', '');
+    if (rule.triggerConditions && typeof rule.triggerConditions === 'string') cond = rule.triggerConditions;
+    setTriggerCondition(cond);
+    setAutoExecute(rule.autoExecute);
+    if (rule.playbookId) setSelectedPlaybookId(rule.playbookId);
   };
 
   const confirmCreateRule = async () => {
@@ -180,33 +184,27 @@ export function AutomationRulesPage() {
         description: `Custom rule triggering on condition: ${triggerCondition}`,
         trigger_conditions: triggerCondition,
         priority: 5,
-        auto_execute: true,
+        auto_execute: autoExecute,
         enabled: true,
+        playbook_id: selectedPlaybookId || undefined
       };
       
-      await automationApi.createRule(payload);
+      if (editingRuleId) {
+        await automationApi.updateRule(editingRuleId, payload);
+        alert(`Automation Rule "${newRuleName}" updated successfully!`);
+      } else {
+        await automationApi.createRule(payload);
+        alert(`Automation Rule "${newRuleName}" created successfully!`);
+      }
       
       setIsSaving(false);
       setIsCreatingRule(false);
-      alert(`Automation Rule "${newRuleName}" created successfully!`);
       
       fetchRules();
     } catch (err) {
-      console.error("Failed to create rule:", err);
-      // Fallback for demo if DB is unavailable
-      setRules([{
-        id: `rule-new-${Date.now()}`,
-        name: newRuleName,
-        description: `Custom rule triggering on condition: ${triggerCondition}`,
-        priority: 5,
-        autoExecute: true,
-        enabled: true,
-        successRate: 1.0,
-        matchesCurrentAlert: true
-      }, ...rules]);
+      console.error("Failed to save rule:", err);
+      alert("Failed to save rule. Please try again.");
       setIsSaving(false);
-      setIsCreatingRule(false);
-      alert(`Automation Rule "${newRuleName}" created successfully!`);
     }
   };
 
@@ -355,13 +353,22 @@ export function AutomationRulesPage() {
                       <Power className="w-4 h-4" />
                       {rule.enabled ? 'Disable Rule' : 'Enable Rule'}
                     </button>
-                    <button
-                        onClick={() => openCreateModal()}
-                        className="px-4 py-2 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-600 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700 font-medium w-full transition-colors flex items-center justify-center gap-2"
-                    >
-                        <Settings className="w-4 h-4" />
-                        Configure
-                    </button>
+                    <div className="flex w-full gap-2">
+                        <button
+                            onClick={() => openEditModal(rule)}
+                            className="flex-1 px-4 py-2 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-600 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700 font-medium transition-colors flex items-center justify-center gap-2"
+                        >
+                            <Settings className="w-4 h-4" />
+                            Configure
+                        </button>
+                        <button
+                            onClick={() => handleDeleteRule(rule.id)}
+                            className="px-3 py-2 bg-white dark:bg-slate-800 text-rose-600 dark:text-rose-400 border border-slate-300 dark:border-slate-600 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-900/20 font-medium transition-colors flex items-center justify-center"
+                            title="Delete Rule"
+                        >
+                            <Trash2 className="w-4 h-4" />
+                        </button>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -378,7 +385,7 @@ export function AutomationRulesPage() {
               <div>
                 <h2 className="text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
                   <Activity className="w-5 h-5 text-blue-500" />
-                  Create Automation Rule
+                  {editingRuleId ? 'Edit Automation Rule' : 'Create Automation Rule'}
                 </h2>
                 <p className="text-sm text-slate-500 mt-1">Map alert telemetry to automated playbooks.</p>
               </div>
@@ -426,15 +433,25 @@ export function AutomationRulesPage() {
                 <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">
                   Target Playbook
                 </label>
-                <select className="w-full bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-lg px-4 py-3 text-slate-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none appearance-none">
-                    <option>Deep Malware Investigation (ID: pb-malware-003)</option>
-                    <option>Ransomware Immediate Containment (ID: pb-ransomware-001)</option>
-                    <option>Unauthorized USB Device Response (ID: pb-usb-002)</option>
+                <select 
+                  value={selectedPlaybookId}
+                  onChange={(e) => setSelectedPlaybookId(e.target.value)}
+                  className="w-full bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-lg px-4 py-3 text-slate-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none appearance-none"
+                >
+                  {playbooks.map(pb => (
+                    <option key={pb.id} value={pb.id}>{pb.name}</option>
+                  ))}
                 </select>
               </div>
 
               <div className="flex items-center gap-3 pt-2">
-                <input type="checkbox" id="autoExec" className="w-4 h-4 text-blue-600 rounded border-gray-300" defaultChecked />
+                <input 
+                  type="checkbox" 
+                  id="autoExec" 
+                  checked={autoExecute}
+                  onChange={(e) => setAutoExecute(e.target.checked)}
+                  className="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500" 
+                />
                 <label htmlFor="autoExec" className="text-sm font-medium text-slate-700 dark:text-slate-300">
                   Enable Auto-Execution (No manual approval required)
                 </label>
@@ -462,7 +479,7 @@ export function AutomationRulesPage() {
                 ) : (
                   <>
                     <Activity className="w-4 h-4" />
-                    Create Rule
+                    {editingRuleId ? 'Save Changes' : 'Create Rule'}
                   </>
                 )}
               </button>

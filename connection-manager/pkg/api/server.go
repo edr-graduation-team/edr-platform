@@ -254,9 +254,12 @@ func (s *Server) RegisterRoutes(handlers *Handlers) {
 		automation.GET("/playbooks", handlers.AutomationHandlers.ListPlaybooks, handlers.RequirePermission("playbooks", "read"))
 		automation.POST("/playbooks", handlers.AutomationHandlers.CreatePlaybook, handlers.RequirePermission("playbooks", "write"))
 		automation.GET("/playbooks/:id", handlers.AutomationHandlers.GetPlaybook, handlers.RequirePermission("playbooks", "read"))
+		automation.DELETE("/playbooks/:id", handlers.AutomationHandlers.DeletePlaybook, handlers.RequirePermission("playbooks", "write"))
 		// Automation Rules
 		automation.GET("/rules", handlers.AutomationHandlers.ListAutomationRules, handlers.RequirePermission("automation", "read"))
 		automation.POST("/rules", handlers.AutomationHandlers.CreateAutomationRule, handlers.RequirePermission("automation", "write"))
+		automation.PATCH("/rules/:id", handlers.AutomationHandlers.UpdateAutomationRule, handlers.RequirePermission("automation", "write"))
+		automation.DELETE("/rules/:id", handlers.AutomationHandlers.DeleteAutomationRule, handlers.RequirePermission("automation", "write"))
 		automation.PATCH("/rules/:id/toggle", handlers.AutomationHandlers.ToggleAutomationRule, handlers.RequirePermission("automation", "write"))
 		// Metrics and Optimizations
 		automation.GET("/metrics", handlers.AutomationHandlers.GetAutomationMetrics, handlers.RequirePermission("automation", "read"))

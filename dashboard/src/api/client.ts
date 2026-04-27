@@ -743,10 +743,22 @@ export const automationApi = {
         const response = await connectionApi.post<{ data: AutomationRule }>('/api/v1/automation/rules', data);
         return response.data;
     },
+    updateRule: async (id: string, data: Partial<AutomationRule>) => {
+        const response = await connectionApi.patch<{ data: AutomationRule }>(`/api/v1/automation/rules/${id}`, data);
+        return response.data;
+    },
     toggleRule: async (id: string, enabled: boolean) => {
         const response = await connectionApi.patch<{ data: AutomationRule }>(`/api/v1/automation/rules/${id}/toggle`, { enabled });
         return response.data;
     },
+    deleteRule: async (id: string) => {
+        const response = await connectionApi.delete(`/api/v1/automation/rules/${id}`);
+        return response.data;
+    },
+    deletePlaybook: async (id: string) => {
+        const response = await connectionApi.delete(`/api/v1/automation/playbooks/${id}`);
+        return response.data;
+    }
 };
 
 // ============================================================================

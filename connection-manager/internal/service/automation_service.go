@@ -429,6 +429,16 @@ func (s *AutomationService) UpdateRule(ctx context.Context, rule *models.Automat
 	return s.automationRepo.Update(ctx, rule)
 }
 
+// DeleteRule deletes an automation rule
+func (s *AutomationService) DeleteRule(ctx context.Context, ruleID uuid.UUID) error {
+	return s.automationRepo.Delete(ctx, ruleID)
+}
+
+// DeletePlaybook deletes a playbook
+func (s *AutomationService) DeletePlaybook(ctx context.Context, playbookID uuid.UUID) error {
+	return s.playbookRepo.Delete(ctx, playbookID)
+}
+
 // GetAlertByID retrieves an alert by ID
 func (s *AutomationService) GetAlertByID(ctx context.Context, alertID uuid.UUID) (*models.Alert, error) {
 	return s.alertRepo.GetByID(ctx, alertID)

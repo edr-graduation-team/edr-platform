@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	infracache "github.com/edr-platform/sigma-engine/internal/infrastructure/cache"
+	"github.com/edr-platform/sigma-engine/internal/infrastructure/logger"
 )
 
 // =============================================================================
@@ -744,6 +745,14 @@ func (m *SuspicionMatrix) ComputeBonus(chain []*infracache.ProcessLineageEntry) 
 				maxLevel = entry.Level
 			}
 		}
+	}
+
+	if maxBonus == 0 && len(chain) >= 2 {
+		// Gap detection: no matrix entry exists for this parent→child pair.
+		// Emitted at Debug level (not Warn) to avoid log spam in production.
+		// Tune to Warn during matrix review sessions.
+		logger.Debugf("[SUSPICION-GAP] no matrix entry: parent=%s child=%s",
+			strings.ToLower(chain[1].Name), strings.ToLower(chain[0].Name))
 	}
 
 	return maxBonus, string(maxLevel)

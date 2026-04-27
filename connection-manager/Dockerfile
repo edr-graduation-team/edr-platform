@@ -10,8 +10,8 @@ WORKDIR /app
 # Copy go mod files
 COPY go.mod go.sum ./
 
-# Use fast Go proxy to bypass network throttling
-ENV GOPROXY="https://goproxy.io,direct"
+# Use official Go module proxy
+ENV GOPROXY="https://proxy.golang.org,direct"
 
 # Download dependencies first (Docker layer cache optimization)
 RUN go mod download

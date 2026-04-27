@@ -194,6 +194,13 @@ func (rs *DefaultRiskScorer) Score(ctx context.Context, input ScoringInput) (*Sc
 	executable := extractString(input.Event.RawData, "executable")
 	fpDiscount := computeFPDiscount(sigStatus, executable, rs.cfg.FalsePositive)
 	fpRisk := computeFPRisk(sigStatus, executable, rs.cfg.FalsePositive)
+	// Lineage override: a Microsoft-signed binary spawned by a suspicious
+	// parent (e.g. powershell.exe from winword.exe) is an attack, not a FP.
+	// Cap FP risk at 0.25 when lineage suspicion is critical so the FP risk
+	// value does not suppress genuinely malicious signed binaries.
+	if lineageSuspicion == "critical" && fpRisk > 0.25 {
+		fpRisk = 0.25
+	}
 
 	// ── Step 5.5: UEBA Behavioral Baseline Adjustment ────────────────────────
 	// Query the in-memory baseline cache to determine if this process is:
@@ -204,7 +211,7 @@ func (rs *DefaultRiskScorer) Score(ctx context.Context, input ScoringInput) (*Sc
 	// on brand-new agents.
 	processName := extractString(input.Event.RawData, "name")
 	hourOfDay := time.Now().UTC().Hour()
-	uebaBonus, uebaDiscount, uebaSignal, uebaErr := rs.computeUEBA(ctx, input.AgentID, processName, hourOfDay)
+	uebaBonus, uebaDiscount, uebaSignal, uebaErr := rs.computeUEBA(ctx, input.AgentID, processName, hourOfDay, int(burstCount))
 	if uebaErr != nil {
 		uebaErr = fmt.Errorf("ueba baseline: %w", uebaErr)
 	}
@@ -312,10 +319,16 @@ const (
 //   - uebaBonus (positive, applied for anomalous behavior): +15
 //   - uebaDiscount (positive value, subtracted from score): +10
 //   - uebaSignal: "anomaly", "normal", or "none"
+//
+// observedCount is the actual number of executions recorded in the current
+// scoring window (from the burst tracker). This replaces the previous
+// hardcoded value of 1.0 which caused the Z-score to always be negative
+// for frequently-running processes (e.g. svchost.exe).
 func (rs *DefaultRiskScorer) computeUEBA(
 	ctx context.Context,
 	agentID, processName string,
 	hourOfDay int,
+	observedCount int,
 ) (bonus int, discount int, signal string, err error) {
 	if rs.baselineProvider == nil || processName == "" {
 		return 0, 0, UEBASignalNone, nil
@@ -349,15 +362,16 @@ func (rs *DefaultRiskScorer) computeUEBA(
 
 	// Case B: Z-score based anomaly detection.
 	// Industry standard: Z-score > 3.0 indicates a statistically significant
-	// deviation (99.7th percentile under normal distribution). This replaces
-	// the previous comparison of a hardcoded "1" against the spike threshold,
-	// which was dimensionally inconsistent (comparing a count against a rate).
+	// deviation (99.7th percentile under normal distribution).
 	//
 	// Z = (observed - expected) / stddev
-	// We use 1.0 as the observed value (one execution at scoring time).
+	// observed = actual execution count in the current burst window (not 1.0).
+	// Using burstCount (the real observed rate) prevents the sign inversion that
+	// made high-frequency processes (svchost, explorer) impossible to flag.
 	// Reference: NIST SP 800-92 (Guide to Computer Security Log Management)
+	observed := math.Max(1.0, float64(observedCount))
 	if stddev > 0 {
-		zScore := (1.0 - avg) / stddev
+		zScore := (observed - avg) / stddev
 		if zScore > rs.cfg.UEBA.ZScoreAnomalyThreshold && !math.IsInf(zScore, 1) {
 			return rs.cfg.UEBA.AnomalyBonus, 0, UEBASignalAnomaly, nil
 		}
@@ -374,7 +388,7 @@ func (rs *DefaultRiskScorer) computeUEBA(
 			return 0, rs.cfg.UEBA.NormalDiscount, UEBASignalNormal, nil
 		}
 	} else {
-		if math.Abs(1.0-avg) <= stddev {
+		if math.Abs(observed-avg) <= stddev {
 			return 0, rs.cfg.UEBA.NormalDiscount, UEBASignalNormal, nil
 		}
 	}

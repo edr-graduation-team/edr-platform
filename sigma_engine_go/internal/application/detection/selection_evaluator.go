@@ -1,9 +1,9 @@
 package detection
 
 import (
-	"encoding/json"
 	"fmt"
 	"reflect"
+	"strconv"
 	"strings"
 
 	"github.com/edr-platform/sigma-engine/internal/application/mapping"
@@ -149,9 +149,11 @@ func (se *SelectionEvaluator) resolveFieldValue(
 	fieldName string,
 	event *domain.LogEvent,
 ) (interface{}, bool) {
-	// Check cache first
+	// Compute hash once — ComputeHash() is itself cached on the event, but
+	// calling it twice per invocation (get + put) was wasteful before caching.
+	var cacheKey string
 	if se.cache != nil {
-		cacheKey := fmt.Sprintf("%s:%s", event.ComputeHash(), fieldName)
+		cacheKey = event.ComputeHash() + ":" + fieldName
 		if cached, ok := se.cache.Get(cacheKey); ok {
 			return cached, true
 		}
@@ -163,9 +165,8 @@ func (se *SelectionEvaluator) resolveFieldValue(
 		return nil, false
 	}
 
-	// Cache result
+	// Cache result using the already-computed key
 	if se.cache != nil {
-		cacheKey := fmt.Sprintf("%s:%s", event.ComputeHash(), fieldName)
 		se.cache.Put(cacheKey, value)
 	}
 
@@ -205,6 +206,9 @@ func (se *SelectionEvaluator) compareValue(
 }
 
 // directCompare performs direct value comparison without modifiers.
+// If the expected string value contains a leading or trailing '*' (implicit
+// glob pattern from community Sigma rules that omit the modifier), it is
+// treated as contains/startswith/endswith automatically.
 func (se *SelectionEvaluator) directCompare(
 	fieldValue interface{},
 	expectedValue interface{},
@@ -215,6 +219,21 @@ func (se *SelectionEvaluator) directCompare(
 		ev, ok := expectedValue.(string)
 		if !ok {
 			ev = toString(expectedValue)
+		}
+		// Implicit glob: community rules sometimes use "*pattern*" without
+		// an explicit modifier. Handle the four common forms.
+		hasLeadingStar := strings.HasPrefix(ev, "*")
+		hasTrailingStar := strings.HasSuffix(ev, "*")
+		if hasLeadingStar || hasTrailingStar {
+			inner := strings.Trim(ev, "*")
+			switch {
+			case hasLeadingStar && hasTrailingStar:
+				return strings.Contains(strings.ToLower(fv), strings.ToLower(inner))
+			case hasLeadingStar:
+				return strings.HasSuffix(strings.ToLower(fv), strings.ToLower(inner))
+			default: // trailing star only
+				return strings.HasPrefix(strings.ToLower(fv), strings.ToLower(inner))
+			}
 		}
 		return strings.EqualFold(fv, ev)
 
@@ -278,17 +297,16 @@ func (se *SelectionEvaluator) compareArray(
 
 // evaluateKeywords evaluates keyword-based selections (full-text search).
 // Searches the full event payload (RawData serialized to JSON) for keywords.
+// Uses event.KeywordBlob() which computes and caches the lowercased JSON once
+// per event, eliminating repeated json.Marshal + strings.ToLower allocations.
 func (se *SelectionEvaluator) evaluateKeywords(
 	keywords []string,
 	event *domain.LogEvent,
 ) bool {
-	// Serialize the full event data so keyword search covers all field values
-	eventBytes, err := json.Marshal(event.RawData)
-	if err != nil {
-		logger.Warnf("Failed to marshal event for keyword search: %v", err)
+	eventStr := event.KeywordBlob()
+	if eventStr == "" {
 		return false
 	}
-	eventStr := strings.ToLower(string(eventBytes))
 
 	for _, keyword := range keywords {
 		if strings.Contains(eventStr, strings.ToLower(keyword)) {
@@ -329,6 +347,13 @@ func convertToFloat64(v interface{}) float64 {
 		return float64(n)
 	case uint64:
 		return float64(n)
+	case string:
+		// Agent emits EventID as a string ("4688"). Parse it so Sigma integer
+		// comparisons work without requiring a modifier.
+		if f, err := strconv.ParseFloat(n, 64); err == nil {
+			return f
+		}
+		return 0
 	default:
 		// Try reflection for other numeric types
 		rv := reflect.ValueOf(v)
@@ -339,6 +364,10 @@ func convertToFloat64(v interface{}) float64 {
 			return float64(rv.Uint())
 		case reflect.Float32, reflect.Float64:
 			return rv.Float()
+		case reflect.String:
+			if f, err := strconv.ParseFloat(rv.String(), 64); err == nil {
+				return f
+			}
 		}
 		return 0
 	}

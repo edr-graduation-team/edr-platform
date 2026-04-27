@@ -110,6 +110,11 @@ type AlertRepository interface {
 	// GetTimeline retrieves timeline data for the alert chart.
 	GetTimeline(ctx context.Context, from, to, granularity string) ([]*TimelineDataPoint, error)
 
+	// UpsertWithDedup atomically inserts a new alert or increments the
+	// event_count of an existing alert within the deduplication window.
+	// Returns (alert, true, nil) for new inserts; (alert, false, nil) for dedup.
+	UpsertWithDedup(ctx context.Context, alert *Alert, dedupWindow time.Duration) (*Alert, bool, error)
+
 	// FindRecent finds recent similar alerts for deduplication.
 	FindRecent(ctx context.Context, agentID, ruleID string, since time.Time) (*Alert, error)
 

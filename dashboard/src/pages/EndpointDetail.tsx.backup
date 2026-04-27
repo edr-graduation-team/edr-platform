@@ -4,7 +4,7 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
     ArrowLeft, Activity, Terminal, Shield, HardDrive, Loader2,
     Server, Network, AlertTriangle, CheckCircle2, XCircle, Settings,
-    RefreshCw, ChevronLeft, ChevronRight, FileText, List, Package
+    RefreshCw, ChevronLeft, ChevronRight,
 } from 'lucide-react';
 import {
     agentBuildApi,
@@ -40,16 +40,16 @@ type DetailTab =
     | 'configuration'
     | 'software';
 
-const TAB_LABELS: { id: DetailTab; label: string; icon: React.FC<any> }[] = [
-    { id: 'overview', label: 'Overview', icon: Activity },
-    { id: 'incident', label: 'Incident', icon: AlertTriangle },
-    { id: 'response', label: 'Response', icon: Terminal },
-    { id: 'quarantine', label: 'Quarantine', icon: Shield },
-    { id: 'activity', label: 'Activity', icon: List },
-    { id: 'forensics', label: 'Forensic Logs', icon: FileText },
-    { id: 'network', label: 'Network', icon: Network },
-    { id: 'configuration', label: 'Configuration', icon: Settings },
-    { id: 'software', label: 'Software', icon: Package },
+const TAB_LABELS: { id: DetailTab; label: string }[] = [
+    { id: 'overview', label: 'Overview' },
+    { id: 'incident', label: '🔴 Incident' },
+    { id: 'response', label: 'Response' },
+    { id: 'quarantine', label: 'Quarantine' },
+    { id: 'activity', label: 'Activity' },
+    { id: 'forensics', label: 'Forensic Logs' },
+    { id: 'network', label: 'Network' },
+    { id: 'configuration', label: 'Configuration' },
+    { id: 'software', label: 'Software' },
 ];
 
 /** Legacy `?tab=summary` from earlier builds → Overview. */
@@ -404,92 +404,81 @@ export default function EndpointDetail() {
     // lastCmd previously shown in Overview; Response tab now owns command details.
 
     return (
-        <div className="relative flex flex-col min-h-[calc(100vh-2rem)] -mx-4 sm:-mx-6 lg:-mx-8 -my-4 sm:-my-6 lg:-my-8 p-4 sm:p-6 lg:p-8 bg-slate-100 dark:bg-gradient-to-br dark:from-slate-900 dark:via-[#0b1120] dark:to-slate-900">
-            <div className="w-full space-y-5">
-                {/* Back button */}
-                <button
-                    type="button"
-                    onClick={() => navigate('/management/devices')}
-                    className="inline-flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400 hover:text-cyan-600 dark:hover:text-cyan-400 transition-colors"
-                >
-                    <ArrowLeft className="w-4 h-4" />
-                    Back to Devices
-                </button>
+        <div className="relative flex flex-col min-h-[calc(100vh-2rem)] -mx-4 sm:-mx-6 lg:-mx-8 -my-4 sm:-my-6 lg:-my-8 p-4 sm:p-6 lg:p-8 bg-slate-200 dark:bg-gradient-to-br dark:from-slate-900 dark:via-[#0b1120] dark:to-slate-900">
+            <div className=" w-full space-y-4">
+                <div className="flex flex-wrap items-start gap-4">
+                    <button
+                        type="button"
+                        onClick={() => navigate('/management/devices')}
+                        className="inline-flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300 hover:text-primary-600"
+                    >
+                        <ArrowLeft className="w-4 h-4" />
+                        Devices
+                    </button>
+                </div>
 
-                {/* Agent Header Card */}
-                <div className="bg-white/95 dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800 backdrop-blur-md rounded-2xl p-5 sm:p-6 shadow-sm">
-                    <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-                        <div className="flex items-center gap-4">
-                            <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-cyan-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-cyan-500/20">
-                                <Server className="w-6 h-6 text-white" />
-                            </div>
-                            <div>
-                                <h2 className="text-xl font-bold text-slate-900 dark:text-white break-all">{agent.hostname}</h2>
-                                <div className="flex items-center gap-3 mt-1">
-                                    <span className="text-xs text-slate-500 font-mono">{agent.id.slice(0, 20)}...</span>
-                                    <span className="text-[10px] text-slate-400">{agent.os_type || 'Unknown OS'}</span>
-                                    {agent.agent_version && <span className="text-[10px] text-slate-400">v{agent.agent_version}</span>}
-                                </div>
-                            </div>
-                        </div>
-                        <div className="flex flex-wrap items-center gap-2">
-                            <span
-                                className={`px-3 py-1.5 rounded-full text-xs font-bold uppercase tracking-wider border ${
-                                    eff === 'online'
-                                        ? 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800/50'
-                                        : eff === 'offline'
-                                          ? 'bg-slate-100 dark:bg-slate-800 text-slate-500 border-slate-200 dark:border-slate-700'
-                                          : eff === 'uninstalled'
-                                            ? 'bg-rose-50 dark:bg-rose-900/20 text-rose-600 dark:text-rose-400 border-rose-200 dark:border-rose-800/50'
-                                            : eff === 'pending_uninstall'
-                                              ? 'bg-rose-50 dark:bg-rose-900/20 text-rose-500 border-rose-200 dark:border-rose-800/50'
-                                              : 'bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400 border-amber-200 dark:border-amber-800/50'
-                                }`}
-                            >
-                                {eff === 'pending_uninstall' ? 'Uninstalling…' : eff}
+                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                    <div>
+                        <h2 className="text-2xl font-bold text-slate-900 dark:text-white flex flex-wrap items-center gap-3">
+                            <Server className="w-7 h-7 text-cyan-500 shrink-0" />
+                            <span className="break-all">{agent.hostname}</span>
+                        </h2>
+                        <p className="text-sm text-slate-500 mt-1 font-mono break-all">{agent.id}</p>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                        <span
+                            className={`px-3 py-1 rounded-full text-xs font-bold uppercase ${
+                                eff === 'online'
+                                    ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400'
+                                    : eff === 'offline'
+                                      ? 'bg-slate-500/15 text-slate-600'
+                                      : eff === 'uninstalled'
+                                        ? 'bg-rose-500/15 text-rose-700 dark:text-rose-400'
+                                        : eff === 'pending_uninstall'
+                                          ? 'bg-rose-500/10 text-rose-600 dark:text-rose-300'
+                                          : 'bg-amber-500/15 text-amber-700 dark:text-amber-300'
+                            }`}
+                        >
+                            {eff === 'pending_uninstall' ? 'Uninstalling…' : eff}
+                        </span>
+                        {agent.is_isolated && (
+                            <span className="px-3 py-1 rounded-full text-xs font-bold uppercase bg-rose-500/15 text-rose-600 dark:text-rose-400">
+                                Isolated
                             </span>
-                            {agent.is_isolated && (
-                                <span className="px-3 py-1.5 rounded-full text-xs font-bold uppercase tracking-wider bg-rose-50 dark:bg-rose-900/20 text-rose-600 dark:text-rose-400 border border-rose-200 dark:border-rose-800/50">
-                                    Isolated
-                                </span>
-                            )}
-                            <Link
-                                to={`/responses?agent_id=${encodeURIComponent(agent.id)}`}
-                                className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-cyan-50 dark:bg-cyan-900/20 text-cyan-700 dark:text-cyan-300 border border-cyan-200 dark:border-cyan-800/50 hover:bg-cyan-100 dark:hover:bg-cyan-900/40 transition-colors"
-                            >
-                                View Commands
-                            </Link>
-                            <Link
-                                to={`/events?agent_id=${encodeURIComponent(agent.id)}`}
-                                className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
-                            >
-                                View Events
-                            </Link>
-                        </div>
+                        )}
+                        <Link
+                            to={`/responses?agent_id=${encodeURIComponent(agent.id)}`}
+                            className="px-3 py-1 rounded-lg text-xs font-semibold bg-cyan-500/10 text-cyan-700 dark:text-cyan-300 border border-cyan-500/20 hover:bg-cyan-500/20"
+                        >
+                            Command Center (filtered)
+                        </Link>
+                        <Link
+                            to={`/events?agent_id=${encodeURIComponent(agent.id)}`}
+                            className="px-3 py-1 rounded-lg text-xs font-semibold bg-slate-500/10 text-slate-700 dark:text-slate-300 border border-slate-500/20 hover:bg-slate-500/20"
+                        >
+                            Telemetry Search (filtered)
+                        </Link>
                     </div>
                 </div>
 
-                {/* Modern Tab Bar */}
-                <div className="bg-white/95 dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800 backdrop-blur-md rounded-2xl p-1.5 shadow-sm flex flex-wrap gap-1 overflow-x-auto">
-                    {TAB_LABELS.map(({ id, label, icon: Icon }) => (
+                <div className="flex flex-wrap gap-1 border-b border-slate-200 dark:border-slate-700 pb-px">
+                    {TAB_LABELS.map(({ id, label }) => (
                         <button
                             key={id}
                             type="button"
                             onClick={() => setTabAndUrl(id)}
-                            className={`flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-xl transition-all duration-200 whitespace-nowrap ${
+                            className={`px-3 py-2 text-sm font-medium rounded-t-lg transition-colors ${
                                 tab === id
-                                    ? 'bg-gradient-to-r from-cyan-500 to-indigo-600 text-white shadow-md shadow-cyan-500/20'
-                                    : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800'
+                                    ? 'bg-white dark:bg-slate-800 text-cyan-600 dark:text-cyan-400 border border-b-0 border-slate-200 dark:border-slate-700'
+                                    : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
                             }`}
                         >
-                            <Icon className="w-3.5 h-3.5" />
                             {label}
                         </button>
                     ))}
                 </div>
 
-                {/* Tab Content */}
-                <div className="bg-white/95 dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800 backdrop-blur-md rounded-2xl p-5 sm:p-6 shadow-sm min-h-[400px]">
+                <div className="bg-white/80 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700 rounded-xl p-4 sm:p-6 shadow-sm">
                     {tab === 'overview' && (
                         <OverviewTab
                             agent={agent}
@@ -529,13 +518,7 @@ export default function EndpointDetail() {
                     )}
 
                     {tab === 'response' && !canViewResp && (
-                        <div className="flex flex-col items-center justify-center py-16 text-center">
-                                <div className="w-16 h-16 rounded-2xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center mb-4">
-                                    <Terminal className="w-8 h-8 text-slate-400" />
-                                </div>
-                                <h3 className="text-lg font-bold text-slate-800 dark:text-slate-200 mb-2">Access Required</h3>
-                                <p className="text-sm text-slate-500 max-w-md">You need command execution permissions to access this section.</p>
-                            </div>
+                        <p className="text-slate-500">You do not have permission to view response commands.</p>
                     )}
 
                     {tab === 'quarantine' && canViewResp && (
@@ -550,13 +533,7 @@ export default function EndpointDetail() {
                     )}
 
                     {tab === 'quarantine' && !canViewResp && (
-                        <div className="flex flex-col items-center justify-center py-16 text-center">
-                                <div className="w-16 h-16 rounded-2xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center mb-4">
-                                    <Shield className="w-8 h-8 text-slate-400" />
-                                </div>
-                                <h3 className="text-lg font-bold text-slate-800 dark:text-slate-200 mb-2">Access Required</h3>
-                                <p className="text-sm text-slate-500 max-w-md">You need security permissions to view quarantined items.</p>
-                            </div>
+                        <p className="text-slate-500">You do not have permission to view quarantine.</p>
                     )}
 
                     {tab === 'activity' && (
@@ -573,43 +550,26 @@ export default function EndpointDetail() {
                     )}
 
                     {tab === 'forensics' && !canViewResp && (
-                        <div className="flex flex-col items-center justify-center py-16 text-center">
-                                <div className="w-16 h-16 rounded-2xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center mb-4">
-                                    <FileText className="w-8 h-8 text-slate-400" />
-                                </div>
-                                <h3 className="text-lg font-bold text-slate-800 dark:text-slate-200 mb-2">Access Required</h3>
-                                <p className="text-sm text-slate-500 max-w-md">You need forensics permissions to view collection data.</p>
-                            </div>
+                        <p className="text-slate-500">You do not have permission to view forensic logs.</p>
                     )}
 
                     {tab === 'network' &&
                         (canViewAlerts ? (
                             <NetworkTab agentId={agentId} canViewAlerts={canViewAlerts} />
                         ) : (
-                            <div className="flex flex-col items-center justify-center py-16 text-center">
-                                <div className="w-16 h-16 rounded-2xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center mb-4">
-                                    <Network className="w-8 h-8 text-slate-400" />
-                                </div>
-                                <h3 className="text-lg font-bold text-slate-800 dark:text-slate-200 mb-2">Access Required</h3>
-                                <p className="text-sm text-slate-500 max-w-md">
-                                    You need additional permissions to view network data for this endpoint. 
-                                    Please contact your system administrator.
-                                </p>
-                            </div>
+                            <p className="text-sm text-slate-500">
+                                Event search requires <code className="text-xs">alerts:read</code> (same guard as{' '}
+                                event search permissions).
+                            </p>
                         ))}
 
                     {tab === 'configuration' && <ConfigurationTab agent={agent} />}
 
                     {tab === 'software' && (
-                        <div className="flex flex-col items-center justify-center py-16 text-center">
-                            <div className="w-16 h-16 rounded-2xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center mb-4">
-                                <Package className="w-8 h-8 text-slate-400" />
-                            </div>
-                            <h3 className="text-lg font-bold text-slate-800 dark:text-slate-200 mb-2">Software Inventory</h3>
-                            <p className="text-sm text-slate-500 max-w-md">
-                                Software inventory collection is being prepared for this endpoint. 
-                                Once available, you will see all installed applications, versions, and publishers here.
-                            </p>
+                        <div className="text-sm text-slate-600 dark:text-slate-400 space-y-2">
+                            <p className="font-medium text-slate-800 dark:text-slate-200">Software inventory</p>
+                            {/* TODO: Needs new API endpoint GET /api/v1/agents/:id/software — not yet implemented */}
+                            <p>No inventory API is available yet. This tab is reserved for a future agent telemetry feed.</p>
                         </div>
                     )}
                 </div>
@@ -696,47 +656,44 @@ function OverviewTab({
 
     return (
         <div className="space-y-6">
-            {/* Status Cards Row */}
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-                <div className="rounded-xl border border-slate-200 dark:border-slate-700/60 bg-white dark:bg-slate-800/60 p-4">
-                    <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Status</div>
-                    <div className={`text-lg font-bold mt-1.5 capitalize ${eff === 'online' ? 'text-emerald-600 dark:text-emerald-400' : eff === 'offline' ? 'text-slate-500' : 'text-amber-600 dark:text-amber-400'}`}>{eff}</div>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="rounded-lg border border-slate-200 dark:border-slate-700 p-4 bg-slate-50/80 dark:bg-slate-800/40">
+                    <div className="text-xs font-semibold text-slate-500 uppercase">Status</div>
+                    <div className="text-lg font-bold text-slate-900 dark:text-white mt-1">{eff}</div>
                 </div>
-                <div className="rounded-xl border border-slate-200 dark:border-slate-700/60 bg-white dark:bg-slate-800/60 p-4">
-                    <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Health Score</div>
-                    <div className="text-lg font-bold text-slate-900 dark:text-white mt-1.5">{Math.round(agent.health_score ?? 0)}%</div>
+                <div className="rounded-lg border border-slate-200 dark:border-slate-700 p-4 bg-slate-50/80 dark:bg-slate-800/40">
+                    <div className="text-xs font-semibold text-slate-500 uppercase">Health</div>
+                    <div className="text-lg font-bold text-slate-900 dark:text-white mt-1">{Math.round(agent.health_score ?? 0)}%</div>
                 </div>
-                <div className="rounded-xl border border-slate-200 dark:border-slate-700/60 bg-white dark:bg-slate-800/60 p-4">
-                    <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Active Alerts</div>
-                    <div className="text-lg font-bold text-slate-900 dark:text-white mt-1.5">{riskRow?.open_count ?? '—'}</div>
+                <div className="rounded-lg border border-slate-200 dark:border-slate-700 p-4 bg-slate-50/80 dark:bg-slate-800/40">
+                    <div className="text-xs font-semibold text-slate-500 uppercase">Open alerts (sigma)</div>
+                    <div className="text-lg font-bold text-slate-900 dark:text-white mt-1">{riskRow?.open_count ?? '—'}</div>
                 </div>
-                <div className="rounded-xl border border-slate-200 dark:border-slate-700/60 bg-white dark:bg-slate-800/60 p-4">
-                    <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Network Isolation</div>
-                    <div className={`text-lg font-bold mt-1.5 ${agent.is_isolated ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400'}`}>{agent.is_isolated ? 'Isolated' : 'Normal'}</div>
+                <div className="rounded-lg border border-slate-200 dark:border-slate-700 p-4 bg-slate-50/80 dark:bg-slate-800/40">
+                    <div className="text-xs font-semibold text-slate-500 uppercase">Isolation</div>
+                    <div className="text-lg font-bold text-slate-900 dark:text-white mt-1">{agent.is_isolated ? 'Yes' : 'No'}</div>
                 </div>
             </div>
 
-            {/* Device Information + Sysmon - Two Column */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                {/* Device Info Card */}
-                <div className="rounded-xl border border-slate-200 dark:border-slate-700/60 bg-white dark:bg-slate-800/60 p-5">
-                    <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4 flex items-center gap-2">
-                        <Server className="w-4 h-4 text-cyan-500" /> Device Information
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div>
+                    <h3 className="text-sm font-bold text-slate-700 dark:text-slate-200 mb-2 flex items-center gap-2">
+                        <Activity className="w-4 h-4" /> Identity
                     </h3>
-                    <dl className="text-sm space-y-2.5">
-                        <div className="flex justify-between gap-4 py-1 border-b border-slate-100 dark:border-slate-700/40"><dt className="text-slate-500">Operating System</dt><dd className="text-right font-medium text-slate-800 dark:text-slate-200">{agent.os_type} {agent.os_version}</dd></div>
-                        <div className="flex justify-between gap-4 py-1 border-b border-slate-100 dark:border-slate-700/40"><dt className="text-slate-500">Agent Version</dt><dd className="text-right font-medium text-slate-800 dark:text-slate-200">v{agent.agent_version || '—'}</dd></div>
-                        <div className="flex justify-between gap-4 py-1 border-b border-slate-100 dark:border-slate-700/40"><dt className="text-slate-500">Last Seen</dt><dd className="text-right font-medium text-slate-800 dark:text-slate-200">{new Date(agent.last_seen).toLocaleString()}</dd></div>
-                        <div className="flex justify-between gap-4 py-1 border-b border-slate-100 dark:border-slate-700/40"><dt className="text-slate-500">IP Addresses</dt><dd className="text-right font-medium text-slate-800 dark:text-slate-200 break-all">{(agent.ip_addresses || []).join(', ') || '—'}</dd></div>
-                        <div className="flex justify-between gap-4 py-1 border-b border-slate-100 dark:border-slate-700/40"><dt className="text-slate-500">Install Date</dt><dd className="text-right font-medium text-slate-800 dark:text-slate-200">{agent.installed_date ? new Date(agent.installed_date).toLocaleDateString() : '—'}</dd></div>
-                        <div className="flex justify-between gap-4 py-1 border-b border-slate-100 dark:border-slate-700/40"><dt className="text-slate-500">Enrollment Date</dt><dd className="text-right font-medium text-slate-800 dark:text-slate-200">{agent.created_at ? new Date(agent.created_at).toLocaleDateString() : '—'}</dd></div>
-                        {tagEntries.length > 0 && <div className="flex justify-between gap-4 py-1"><dt className="text-slate-500">Tags</dt><dd className="text-right text-xs font-mono text-slate-600 dark:text-slate-300 break-all">{tagEntries.map(([k, v]) => `${k}=${v}`).join(', ')}</dd></div>}
+                    <dl className="text-sm space-y-1.5">
+                        <div className="flex justify-between gap-2"><dt className="text-slate-500">OS</dt><dd className="text-right">{agent.os_type} {agent.os_version}</dd></div>
+                        <div className="flex justify-between gap-2"><dt className="text-slate-500">Agent</dt><dd className="text-right">v{agent.agent_version || '—'}</dd></div>
+                        <div className="flex justify-between gap-2"><dt className="text-slate-500">Last seen</dt><dd className="text-right">{new Date(agent.last_seen).toLocaleString()}</dd></div>
+                        <div className="flex justify-between gap-2"><dt className="text-slate-500">IPs</dt><dd className="text-right break-all">{(agent.ip_addresses || []).join(', ') || '—'}</dd></div>
+                        <div className="flex justify-between gap-2"><dt className="text-slate-500">Tags</dt><dd className="text-right break-all">{tagEntries.length ? tagEntries.map(([k, v]) => `${k}=${v}`).join(', ') : '—'}</dd></div>
+                        <div className="flex justify-between gap-2"><dt className="text-slate-500">Installed</dt><dd className="text-right">{agent.installed_date ? new Date(agent.installed_date).toLocaleDateString() : '—'}</dd></div>
+                        <div className="flex justify-between gap-2"><dt className="text-slate-500">Enrolled</dt><dd className="text-right">{agent.created_at ? new Date(agent.created_at).toLocaleDateString() : '—'}</dd></div>
+                        <div className="flex justify-between gap-2"><dt className="text-slate-500">Cert ID</dt><dd className="text-right font-mono text-xs break-all">{agent.current_cert_id || '—'}</dd></div>
                     </dl>
                 </div>
-                {/* Sysmon Card */}
-                <div className="rounded-xl border border-slate-200 dark:border-slate-700/60 bg-white dark:bg-slate-800/60 p-5">
-                    <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4 flex items-center gap-2">
-                        <Settings className="w-4 h-4 text-indigo-500" /> System Monitor (Sysmon)
+                <div>
+                    <h3 className="text-sm font-bold text-slate-700 dark:text-slate-200 mb-2 flex items-center gap-2">
+                        <Settings className="w-4 h-4" /> Sysmon
                     </h3>
                     <div className="text-sm space-y-2">
                         <div className="flex items-center justify-between gap-3">
@@ -756,7 +713,7 @@ function OverviewTab({
                             </span>
                         </div>
                         <div className="text-xs text-slate-500">
-                            Monitoring: Windows System Monitor (Sysmon)
+                            Channel: <code>Microsoft-Windows-Sysmon/Operational</code>
                         </div>
                         {sysmonCmd ? (
                             <div className="text-xs text-slate-500 space-y-1">
@@ -775,7 +732,7 @@ function OverviewTab({
                                     Observed via <code>{sysmonObserved.command_type}</code> · {new Date(sysmonObserved.issued_at).toLocaleString()}
                                 </div>
                                 <div className="text-[11px] text-slate-500">
-                                    Sysmon status was detected from collected security logs.
+                                    Note: Sysmon was not enabled/disabled via C2, so status is inferred from log collection.
                                 </div>
                             </div>
                         ) : (
@@ -785,11 +742,10 @@ function OverviewTab({
                 </div>
             </div>
 
-            {/* Network, Health, Resources - Three Column */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-                <div className="rounded-xl border border-slate-200 dark:border-slate-700/60 bg-white dark:bg-slate-800/60 p-5">
-                    <div className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 flex items-center gap-2">
-                        <Network className="w-4 h-4 text-sky-500" /> Connectivity & Certificate
+                <div className="rounded-lg border border-slate-200 dark:border-slate-700 p-4 bg-slate-50/80 dark:bg-slate-800/40">
+                    <div className="text-xs font-semibold text-slate-500 uppercase mb-2 flex items-center gap-2">
+                        <Network className="w-4 h-4" /> Network & mTLS
                     </div>
                     <div className="text-sm space-y-1.5">
                         <div className="flex justify-between gap-2"><span className="text-slate-500">Heartbeat age</span><span>{formatRelativeTime(agent.last_seen)}</span></div>
@@ -798,9 +754,9 @@ function OverviewTab({
                         <div className="flex justify-between gap-2"><span className="text-slate-500">Expiry</span><span>{certExpiry ? certExpiry.toLocaleDateString() : '—'}</span></div>
                     </div>
                 </div>
-                <div className="rounded-xl border border-slate-200 dark:border-slate-700/60 bg-white dark:bg-slate-800/60 p-5">
-                    <div className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 flex items-center gap-2">
-                        <HardDrive className="w-4 h-4 text-emerald-500" /> Event Delivery
+                <div className="rounded-lg border border-slate-200 dark:border-slate-700 p-4 bg-slate-50/80 dark:bg-slate-800/40">
+                    <div className="text-xs font-semibold text-slate-500 uppercase mb-2 flex items-center gap-2">
+                        <HardDrive className="w-4 h-4" /> Health & QoS
                     </div>
                     <div className="text-sm space-y-1.5">
                         <div className="flex justify-between gap-2"><span className="text-slate-500">Events collected</span><span className="font-mono text-xs">{eventsCollected.toLocaleString()}</span></div>
@@ -810,9 +766,9 @@ function OverviewTab({
                         <div className="flex justify-between gap-2"><span className="text-slate-500">Delivery</span><span className="font-mono text-xs">{deliveryRate.toFixed(1)}%</span></div>
                     </div>
                 </div>
-                <div className="rounded-xl border border-slate-200 dark:border-slate-700/60 bg-white dark:bg-slate-800/60 p-5">
-                    <div className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 flex items-center gap-2">
-                        <Activity className="w-4 h-4 text-violet-500" /> Resource Usage
+                <div className="rounded-lg border border-slate-200 dark:border-slate-700 p-4 bg-slate-50/80 dark:bg-slate-800/40">
+                    <div className="text-xs font-semibold text-slate-500 uppercase mb-2 flex items-center gap-2">
+                        <Settings className="w-4 h-4" /> Resource usage
                     </div>
                     <div className="text-sm space-y-1.5">
                         <div className="flex justify-between gap-2"><span className="text-slate-500">CPU</span><span className="font-mono text-xs">{cpuPct.toFixed(1)}%</span></div>
@@ -822,35 +778,33 @@ function OverviewTab({
                 </div>
             </div>
 
-            {/* Recent Alerts */}
-            <div className="rounded-xl border border-slate-200 dark:border-slate-700/60 bg-white dark:bg-slate-800/60 p-5">
-                <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4 flex items-center gap-2">
-                    <Shield className="w-4 h-4 text-rose-500" /> Recent Security Alerts
+            <div>
+                <h3 className="text-sm font-bold text-slate-700 dark:text-slate-200 mb-2 flex items-center gap-2">
+                    <Shield className="w-4 h-4" /> Recent Sigma alerts
                 </h3>
                 {overviewAlertsLoading ? (
                     <Loader2 className="w-6 h-6 animate-spin text-cyan-500" />
                 ) : overviewAlerts.length === 0 ? (
-                    <p className="text-sm text-slate-500">No recent alerts detected for this device.</p>
+                    <p className="text-sm text-slate-500">No recent alerts for this device (or you lack alerts access).</p>
                 ) : (
                     <ul className="space-y-2">
                         {overviewAlerts.map((a) => (
                             <li key={a.id} className="text-sm border border-slate-200 dark:border-slate-700 rounded-lg p-2 flex justify-between gap-2">
                                 <span className="font-medium text-slate-900 dark:text-slate-100 truncate">{a.rule_title || a.rule_id || 'Alert'}</span>
-                                <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${a.severity === 'critical' ? 'bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-400' : a.severity === 'high' ? 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400' : a.severity === 'medium' ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400' : 'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300'}`}>{a.severity || '—'}</span>
+                                <span className="text-xs text-slate-500 shrink-0">{a.severity || '—'}</span>
                             </li>
                         ))}
                     </ul>
                 )}
             </div>
 
-            {/* Recent Telemetry */}
-            <div className="rounded-xl border border-slate-200 dark:border-slate-700/60 bg-white dark:bg-slate-800/60 p-5">
-                <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4 flex items-center gap-2">
-                    <Network className="w-4 h-4 text-cyan-500" /> Recent Events
+            <div>
+                <h3 className="text-sm font-bold text-slate-700 dark:text-slate-200 mb-2 flex items-center gap-2">
+                    <Network className="w-4 h-4" /> Telemetry snapshot (connection-manager)
                 </h3>
                 {cmEvents.length === 0 ? (
                     <p className="text-sm text-slate-500">
-                        No recent events available. Events will appear here once the agent starts reporting telemetry data.
+                        No raw events in the latest fetch. Open the full Events view for filters and raw JSON per event.
                     </p>
                 ) : (
                     <ul className="text-sm space-y-1">
@@ -865,10 +819,9 @@ function OverviewTab({
                 )}
             </div>
 
-            {/* Commands Quick Access */}
-            <div className="rounded-xl border border-slate-200 dark:border-slate-700/60 bg-white dark:bg-slate-800/60 p-5">
+            <div>
                 <div className="flex items-center justify-between gap-3">
-                    <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider">Command Center</h3>
+                    <h3 className="text-sm font-bold text-slate-700 dark:text-slate-200">Commands</h3>
                     <Link
                         to={`/management/devices/${encodeURIComponent(agent.id)}?tab=response`}
                         className="text-xs font-semibold text-cyan-700 dark:text-cyan-300 hover:underline"
@@ -907,8 +860,6 @@ function ForensicsTab({ agentId }: { agentId: string }) {
     const [rows, setRows] = useState<ForensicEvent[]>([]);
     const [rawOpen, setRawOpen] = useState(false);
     const [rawEvent, setRawEvent] = useState<ForensicEvent | null>(null);
-    const [forPage, setForPage] = useState(1);
-    const FOR_PAGE_SIZE = 15;
 
     const collectionsQ = useQuery({
         queryKey: ['forensics', 'collections', agentId],
@@ -981,7 +932,7 @@ function ForensicsTab({ agentId }: { agentId: string }) {
             <div>
                 <h2 className="text-lg font-bold text-slate-900 dark:text-white">Forensic Logs</h2>
                 <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-                    Browse security logs collected from this endpoint. Select a collection to view its events.
+                    Browse events returned from <code className="text-xs">collect_logs</code> / <code className="text-xs">collect_forensics</code>.
                 </p>
             </div>
 
@@ -1058,7 +1009,6 @@ function ForensicsTab({ agentId }: { agentId: string }) {
                             setLogType(e.target.value);
                             setCursor(undefined);
                             setRows([]);
-                            setForPage(1);
                         }}
                         className="w-full bg-white dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-sm"
                     >
@@ -1104,7 +1054,7 @@ function ForensicsTab({ agentId }: { agentId: string }) {
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
-                            {rows.slice((forPage - 1) * FOR_PAGE_SIZE, forPage * FOR_PAGE_SIZE).map((e) => (
+                            {rows.map((e) => (
                                 <tr
                                     key={e.id}
                                     className="hover:bg-slate-50 dark:hover:bg-slate-800/40 cursor-pointer"
@@ -1132,23 +1082,14 @@ function ForensicsTab({ agentId }: { agentId: string }) {
                         </tbody>
                     </table>
                 </div>
-                <div className="px-4 py-3 border-t border-slate-200 dark:border-slate-700 flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                        <button type="button" className="inline-flex items-center gap-1 px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-medium disabled:opacity-40" disabled={forPage <= 1} onClick={() => setForPage((p) => Math.max(1, p - 1))}>
-                            <ChevronLeft className="w-4 h-4" /> Previous
-                        </button>
-                        <span className="text-xs text-slate-500">Page <span className="font-semibold text-slate-700 dark:text-slate-200">{forPage}</span> of {Math.max(1, Math.ceil(rows.length / FOR_PAGE_SIZE))}</span>
-                        <button type="button" className="inline-flex items-center gap-1 px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-medium disabled:opacity-40" disabled={forPage >= Math.max(1, Math.ceil(rows.length / FOR_PAGE_SIZE))} onClick={() => setForPage((p) => Math.min(Math.max(1, Math.ceil(rows.length / FOR_PAGE_SIZE)), p + 1))}>
-                            Next <ChevronRight className="w-4 h-4" />
-                        </button>
-                    </div>
+                <div className="px-4 py-3 border-t border-slate-200 dark:border-slate-700 flex justify-end">
                     <button
                         type="button"
                         disabled={!nextCursor || eventsQ.isFetching}
                         onClick={() => setCursor(nextCursor)}
-                        className="px-3 py-2 text-xs font-semibold rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/60 disabled:opacity-50"
+                        className="px-3 py-2 text-sm font-semibold rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/60 disabled:opacity-50"
                     >
-                        Fetch more from server
+                        Load more
                     </button>
                 </div>
             </div>
@@ -1156,19 +1097,19 @@ function ForensicsTab({ agentId }: { agentId: string }) {
             <Modal
                 isOpen={rawOpen}
                 onClose={() => { setRawOpen(false); setRawEvent(null); }}
-                title="Event Details"
+                title="Event raw payload"
                 footer={
                     <div className="flex justify-end gap-2">
                         <button
                             type="button"
-                            className="btn btn-secondary px-4 py-2"
+                            className="btn btn-secondary"
                             onClick={() => { setRawOpen(false); setRawEvent(null); }}
                         >
                             Close
                         </button>
                         <button
                             type="button"
-                            className="btn bg-cyan-600 hover:bg-cyan-700 text-white px-4 py-2 flex items-center gap-2"
+                            className="btn bg-cyan-600 hover:bg-cyan-700 text-white"
                             onClick={async () => {
                                 try {
                                     await navigator.clipboard.writeText(JSON.stringify(rawEvent?.raw ?? {}, null, 2));
@@ -1178,34 +1119,14 @@ function ForensicsTab({ agentId }: { agentId: string }) {
                                 }
                             }}
                         >
-                            Copy Payload
+                            Copy
                         </button>
                     </div>
                 }
             >
-                <div className="flex flex-col items-center justify-center space-y-4 p-2 w-full max-w-4xl mx-auto">
-                    {rawEvent && (
-                        <div className="w-full grid grid-cols-2 gap-4 mb-2 text-sm">
-                            <div className="p-3 bg-slate-50 dark:bg-slate-800/40 rounded-lg border border-slate-200 dark:border-slate-700">
-                                <span className="block text-xs font-semibold text-slate-500 uppercase">Provider</span>
-                                <span className="font-medium text-slate-800 dark:text-slate-200">{rawEvent.provider || '—'}</span>
-                            </div>
-                            <div className="p-3 bg-slate-50 dark:bg-slate-800/40 rounded-lg border border-slate-200 dark:border-slate-700">
-                                <span className="block text-xs font-semibold text-slate-500 uppercase">Event ID</span>
-                                <span className="font-mono text-slate-800 dark:text-slate-200">{rawEvent.event_id || '—'}</span>
-                            </div>
-                        </div>
-                    )}
-                    <div className="w-full bg-[#1e1e1e] rounded-xl overflow-hidden border border-slate-700 shadow-xl">
-                        <div className="bg-[#2d2d2d] px-4 py-2 text-xs font-mono text-slate-400 flex items-center justify-between border-b border-slate-700">
-                            <span>raw_payload.json</span>
-                            <span>{JSON.stringify(rawEvent?.raw ?? {}).length} bytes</span>
-                        </div>
-                        <pre className="p-4 text-[#d4d4d4] font-mono text-xs whitespace-pre-wrap break-words max-h-[50vh] overflow-y-auto">
-                            {JSON.stringify(rawEvent?.raw ?? {}, null, 2)}
-                        </pre>
-                    </div>
-                </div>
+                <pre className="bg-slate-900 p-3 rounded-md text-slate-100 whitespace-pre-wrap break-words max-h-[30rem] overflow-y-auto text-xs">
+                    {JSON.stringify(rawEvent?.raw ?? {}, null, 2)}
+                </pre>
             </Modal>
         </div>
     );
@@ -1447,7 +1368,9 @@ function NetworkTab({ agentId, canViewAlerts }: { agentId: string; canViewAlerts
         <div className="space-y-4 text-sm">
             <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                 <p className="text-slate-600 dark:text-slate-400 max-w-3xl">
-                    Network activity captured from this endpoint. Click any row to view the full event details.
+                    Network telemetry via <code className="text-xs">POST /api/v1/events/search</code> — filters{' '}
+                    <code className="text-xs">agent_id</code> + <code className="text-xs">event_type=network</code>. Click a row for raw JSON (
+                    raw event requests).
                 </p>
                 <div className="flex flex-wrap items-center gap-2 shrink-0">
                     <Link
@@ -1508,11 +1431,11 @@ function NetworkTab({ agentId, canViewAlerts }: { agentId: string; canViewAlerts
                 </div>
             ) : rows.length === 0 ? (
                 <div className="rounded-lg border border-dashed border-slate-300 dark:border-slate-600 p-4 text-slate-500">
-                    No network events found in this time range. Try selecting a longer time range, or open{' '}
+                    No network events in this window. Try <strong>Last 90 days</strong>, generate outbound telemetry from the agent, or open{' '}
                     <Link className="text-cyan-600 dark:text-cyan-400 underline" to={eventsPageHref}>
                         Events
                     </Link>
-                    for a broader search.
+                    . If the list stays empty, confirm network connectivity to the connection manager.
                 </div>
             ) : (
                 <>
@@ -1582,18 +1505,6 @@ function NetworkTab({ agentId, canViewAlerts }: { agentId: string; canViewAlerts
     );
 }
 
-const WHITELISTED_COMMANDS = [
-    { value: 'ipconfig /all', label: 'ipconfig /all (Network Interfaces)' },
-    { value: 'netstat -anob', label: 'netstat -anob (Active Connections)' },
-    { value: 'tasklist /v', label: 'tasklist /v (Running Processes)' },
-    { value: 'systeminfo', label: 'systeminfo (System Details)' },
-    { value: 'whoami /all', label: 'whoami /all (Current User/Groups)' },
-    { value: 'route print', label: 'route print (Routing Table)' },
-    { value: 'arp -a', label: 'arp -a (ARP Cache)' },
-    { value: 'vssadmin list shadows', label: 'vssadmin list shadows (Shadow Copies)' },
-    { value: 'schtasks /query /fo LIST', label: 'schtasks (Scheduled Tasks)' }
-];
-
 function ResponseTab({
     agent: _agent,
     agentId,
@@ -1624,19 +1535,14 @@ function ResponseTab({
         const seen = new Set<string>();
         return RESPONSE_OPTIONS.filter((o) => {
             if (seen.has(o.value)) return false;
-            // Remove custom command - run_cmd covers it
-            if (o.value === 'custom') return false;
             seen.add(o.value);
             return true;
         });
     }, []);
 
-    const [cmdPage, setCmdPage] = useState(1);
-    const CMD_PAGE_SIZE = 10;
     const { showToast } = useToast();
     const queryClient = useQueryClient();
     const [upgradeOpen, setUpgradeOpen] = useState(false);
-    // @ts-ignore
     const [upgradeForm, setUpgradeForm] = useState<{
         serverIP: string;
         serverDomain: string;
@@ -1645,21 +1551,24 @@ function ResponseTab({
         installSysmon: boolean;
     }>({ serverIP: '', serverDomain: '', serverPort: '47051', tokenId: '', installSysmon: false });
 
-    // @ts-ignore
     const { data: upgradeTokens = [], isLoading: upgradeTokensLoading } = useQuery<EnrollmentToken[]>({
         queryKey: ['enrollment-tokens-valid', 'upgrade'],
         queryFn: () => agentBuildApi.listValidTokens(),
         enabled: upgradeOpen,
     });
 
-    // @ts-ignore
     const upgradeMutation = useMutation({
         mutationFn: async () => {
+            // Bind the package to THIS agent's identity. The download endpoint
+            // verifies the agent_id against the peer mTLS certificate CN and
+            // revokes the link after the first successful download (or expiry).
             const pkg = await agentPackagesApi.create({
                 server_ip: upgradeForm.serverIP || undefined,
                 server_domain: upgradeForm.serverDomain || undefined,
                 server_port: upgradeForm.serverPort || undefined,
-                public_api_base_url: typeof window !== 'undefined' ? window.location.origin : undefined,
+                // Lets the CM mint URLs reachable from remote agents (browser origin).
+                public_api_base_url:
+                    typeof window !== 'undefined' ? window.location.origin : undefined,
                 token_id: upgradeForm.tokenId,
                 skip_config: false,
                 install_sysmon: upgradeForm.installSysmon,
@@ -1689,50 +1598,8 @@ function ResponseTab({
         onError: (e: Error) => showToast(e.message || 'Upgrade failed', 'error'),
     });
 
-    const isCriticalAsset = useMemo(() => {
-        const hn = (_agent.hostname || '').toLowerCase();
-        return hn.includes('server') || hn.includes('dc') || hn.includes('prod');
-    }, [_agent]);
-
-    const handleExecute = () => {
-        // Validate required fields based on command type
-        if ((cmdType === 'kill_process' || cmdType === 'terminate_process') && !fields.pid?.trim()) {
-            showToast('Please enter a Process ID (PID) before sending the command.', 'error');
-            return;
-        }
-        if (cmdType === 'quarantine_file' && !fields.path?.trim()) {
-            showToast('Please enter a file path before sending the command.', 'error');
-            return;
-        }
-        if ((cmdType === 'block_ip' || cmdType === 'unblock_ip') && !fields.ip?.trim()) {
-            showToast('Please enter an IP address before sending the command.', 'error');
-            return;
-        }
-        if ((cmdType === 'block_domain' || cmdType === 'unblock_domain') && !fields.domain?.trim()) {
-            showToast('Please enter a domain before sending the command.', 'error');
-            return;
-        }
-        if (cmdType === 'run_cmd' && !fields.cmd?.trim()) {
-            showToast('Please select a command to run.', 'error');
-            return;
-        }
-        if ((cmdType === 'scan_memory' || cmdType === 'scan_file') && !fields.file_path?.trim()) {
-            showToast('Please enter a file path to scan.', 'error');
-            return;
-        }
-        if (cmdType === 'update_config' && (!fields.config_key?.trim() || !fields.config_value?.trim())) {
-            showToast('Please enter both a configuration key and value.', 'error');
-            return;
-        }
-        if (isCriticalAsset && fields.manual_approval !== 'true') {
-            showToast('This is a critical asset. Manual approval confirmation is required before executing commands.', 'error');
-            return;
-        }
-        onSubmit();
-    };
-
     return (
-        <div className="space-y-8 animate-slide-up-fade">
+        <div className="space-y-8">
             <div>
                 <div className="flex items-center justify-between gap-3 mb-4">
                     <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2">
@@ -1748,19 +1615,10 @@ function ResponseTab({
                         </button>
                     )}
                 </div>
-                
-                {/* Rate Limiting Notice */}
-                <div className="mb-6 rounded-lg border border-amber-200 dark:border-amber-800/40 bg-amber-50 dark:bg-amber-900/10 px-4 py-3 text-xs text-amber-800 dark:text-amber-200 flex items-start gap-3">
-                    <Shield className="w-4 h-4 shrink-0 mt-0.5 text-amber-500" />
-                    <div>
-                        <strong>Rate Limit:</strong> To prevent accidental overload, a maximum of 5 critical commands per minute is enforced for this endpoint.
-                    </div>
-                </div>
-
                 <div className="grid grid-cols-1 xl:grid-cols-12 gap-6">
-                    <div className="xl:col-span-6 space-y-3">
+                    <div className="xl:col-span-7 space-y-3">
                         <label className="block text-xs font-bold tracking-wider text-slate-500 uppercase mb-2">Select Action</label>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-[500px] overflow-y-auto pr-2 custom-scrollbar">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
                             {uniqueOptions.map((o) => {
                                 const isSelected = cmdType === o.value;
                                 return (
@@ -1789,232 +1647,205 @@ function ResponseTab({
                         </div>
                     </div>
 
-                    <div className="xl:col-span-6 bg-slate-50 dark:bg-slate-900/30 p-5 rounded-2xl border border-slate-200 dark:border-slate-700/60 flex flex-col">
+                    <div className="xl:col-span-5 bg-slate-50 dark:bg-slate-900/30 p-5 rounded-2xl border border-slate-200 dark:border-slate-700/60 flex flex-col">
                         <h4 className="text-sm font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2 mb-4">
-                            <Settings className="w-4 h-4 text-slate-400" /> Command Parameters
+                            <Settings className="w-4 h-4 text-slate-400" /> Parameters
                         </h4>
                         
                         <div className="space-y-4 flex-1">
-                            {/* DECISION LOGIC SECTION */}
-                            <div className="p-3 bg-white dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-xl space-y-3">
-                                <div className="text-xs font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-widest mb-1 border-b border-slate-100 dark:border-slate-700 pb-1">Decision Logic & Auditability</div>
-                                
-                                <div className="grid grid-cols-2 gap-3">
-                                    <div>
-                                        <label className="block text-[10px] text-slate-500 uppercase mb-1">Confidence Score</label>
-                                        <select className="input w-full text-xs" value={fields.decision_confidence || 'High'} onChange={(e) => patch('decision_confidence', e.target.value)} disabled={!canExec}>
-                                            <option value="High">High (Automated/Verified)</option>
-                                            <option value="Medium">Medium (Suspicious)</option>
-                                            <option value="Low">Low (Exploratory)</option>
-                                        </select>
-                                    </div>
-                                    <div>
-                                        <label className="block text-[10px] text-slate-500 uppercase mb-1">D3FEND Category</label>
-                                        <select className="input w-full text-xs" value={fields.d3fend_mapping || 'Process Eviction'} onChange={(e) => patch('d3fend_mapping', e.target.value)} disabled={!canExec}>
-                                            <option value="Process Eviction">Process Eviction</option>
-                                            <option value="File Eviction">File Eviction</option>
-                                            <option value="Network Isolation">Network Isolation</option>
-                                            <option value="Telemetry Collection">Telemetry Collection</option>
-                                            <option value="System Configuration">System Configuration</option>
-                                        </select>
-                                    </div>
-                                </div>
-                                <div>
-                                    <label className="block text-[10px] text-slate-500 uppercase mb-1">Reason / Justification</label>
-                                    <input className="input w-full text-xs" placeholder="e.g. Mitigating ransomware behavioral pattern" value={fields.decision_reason || ''} onChange={(e) => patch('decision_reason', e.target.value)} disabled={!canExec} />
-                                </div>
+                            <div>
+                                <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Timeout (seconds)</label>
+                                <input
+                                    className="w-full rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-2 text-sm focus:ring-2 focus:ring-cyan-500/20 focus:border-cyan-500 transition-colors"
+                                    type="number"
+                                    min={0}
+                                    max={3600}
+                                    value={fields.timeout ?? '300'}
+                                    onChange={(e) => patch('timeout', e.target.value)}
+                                    disabled={!canExec}
+                                />
                             </div>
 
-                            {/* ASSET CRITICALITY OVERRIDE */}
-                            {isCriticalAsset && (
-                                <div className="p-3 bg-rose-50 dark:bg-rose-900/10 border border-rose-200 dark:border-rose-800 rounded-xl">
-                                    <label className="flex items-start gap-2 cursor-pointer">
-                                        <input type="checkbox" className="mt-0.5 rounded border-rose-300 text-rose-600 focus:ring-rose-500" checked={fields.manual_approval === 'true'} onChange={(e) => patch('manual_approval', e.target.checked ? 'true' : 'false')} disabled={!canExec} />
-                                        <div>
-                                            <span className="text-xs font-bold text-rose-800 dark:text-rose-200 block mb-0.5">Asset Criticality Override Required</span>
-                                            <span className="text-[10px] text-rose-600 dark:text-rose-400 leading-tight block">This asset ({_agent.hostname}) is classified as a Server/Domain Controller. Manual approval must be acknowledged to execute this response action.</span>
-                                        </div>
-                                    </label>
-                                </div>
-                            )}
+                        {(cmdType === 'kill_process' || cmdType === 'terminate_process') && (
+                            <>
+                                <label className="text-xs text-slate-500">PID</label>
+                                <input className="input w-full" value={fields.pid || ''} onChange={(e) => patch('pid', e.target.value)} disabled={!canExec} />
+                                <label className="text-xs text-slate-500">Process name (optional)</label>
+                                <input className="input w-full" value={fields.process_name || ''} onChange={(e) => patch('process_name', e.target.value)} disabled={!canExec} />
+                                <label className="text-xs text-slate-500">Kill tree</label>
+                                <select className="input w-full" value={fields.kill_tree || 'false'} onChange={(e) => patch('kill_tree', e.target.value)} disabled={!canExec}>
+                                    <option value="false">false</option>
+                                    <option value="true">true</option>
+                                </select>
+                            </>
+                        )}
 
-                            {/* PARAMETERS SECTION */}
-                            <div className="pt-2 border-t border-slate-200 dark:border-slate-700">
-                                <label className="block text-xs font-semibold text-slate-500 uppercase mb-3">Action Parameters</label>
-                                
-                                <div>
-                                    <label className="block text-[10px] text-slate-500 uppercase mb-1">Timeout (seconds)</label>
-                                    <input className="input w-full" type="number" min={0} max={3600} value={fields.timeout ?? '300'} onChange={(e) => patch('timeout', e.target.value)} disabled={!canExec} />
-                                </div>
+                        {cmdType === 'quarantine_file' && (
+                            <>
+                                <label className="text-xs text-slate-500">File path</label>
+                                <input className="input w-full font-mono text-xs" placeholder="C:\path\to\file" value={fields.path || ''} onChange={(e) => patch('path', e.target.value)} disabled={!canExec} />
+                            </>
+                        )}
 
-                                {(cmdType === 'kill_process' || cmdType === 'terminate_process') && (
-                                    <div className="mt-3 space-y-3 p-3 bg-slate-100 dark:bg-slate-800/40 rounded-xl">
-                                        <div>
-                                            <label className="text-[10px] text-slate-500 uppercase">PID</label>
-                                            <input className="input w-full mt-1" value={fields.pid || ''} onChange={(e) => patch('pid', e.target.value)} disabled={!canExec} />
-                                        </div>
-                                        <div>
-                                            <label className="text-[10px] text-slate-500 uppercase">Process name (optional)</label>
-                                            <input className="input w-full mt-1" value={fields.process_name || ''} onChange={(e) => patch('process_name', e.target.value)} disabled={!canExec} />
-                                        </div>
-                                        
-                                        <div className="flex items-center justify-between gap-2 mt-2 pt-2 border-t border-slate-200 dark:border-slate-700">
-                                            <label className="flex items-center gap-2 text-xs font-medium text-slate-700 dark:text-slate-300">
-                                                <input type="checkbox" className="rounded" checked={fields.kill_tree === 'true'} onChange={(e) => patch('kill_tree', e.target.checked ? 'true' : 'false')} disabled={!canExec} />
-                                                Kill Process Tree
-                                            </label>
-                                            <label className="flex items-center gap-2 text-xs font-medium text-emerald-600 dark:text-emerald-400" title="Retain Parent-Child Process Tree metadata to allow state restoration upon False Positive detection.">
-                                                <input type="checkbox" className="rounded text-emerald-500 focus:ring-emerald-500" checked={fields.enable_rollback !== 'false'} onChange={(e) => patch('enable_rollback', e.target.checked ? 'true' : 'false')} disabled={!canExec} />
-                                                Enable Action Rollback (Metadata tracking)
-                                            </label>
-                                        </div>
-                                    </div>
-                                )}
+                        {(cmdType === 'isolate_network' || cmdType === 'restore_network') && (
+                            <p className="text-xs text-slate-500">No parameters required. C2 allowlist is injected server-side for isolation.</p>
+                        )}
 
-                                {cmdType === 'quarantine_file' && (
-                                    <div className="mt-3 space-y-3 p-3 bg-slate-100 dark:bg-slate-800/40 rounded-xl">
-                                        <div>
-                                            <label className="text-[10px] text-slate-500 uppercase">File path</label>
-                                            <input className="input w-full font-mono text-xs mt-1" placeholder="C:\path	oile" value={fields.path || ''} onChange={(e) => patch('path', e.target.value)} disabled={!canExec} />
-                                        </div>
-                                        <div className="flex items-center gap-2 mt-2 pt-2 border-t border-slate-200 dark:border-slate-700">
-                                            <label className="flex items-center gap-2 text-xs font-medium text-emerald-600 dark:text-emerald-400" title="Preserve file hash and original path securely to allow restoration.">
-                                                <input type="checkbox" className="rounded text-emerald-500 focus:ring-emerald-500" checked={fields.enable_rollback !== 'false'} onChange={(e) => patch('enable_rollback', e.target.checked ? 'true' : 'false')} disabled={!canExec} />
-                                                Enable Action Rollback (Safe Quarantine)
-                                            </label>
-                                        </div>
-                                    </div>
-                                )}
-
-                                {(cmdType === 'isolate_network' || cmdType === 'restore_network') && (
-                                    <p className="text-xs text-slate-500 mt-3 p-3 bg-slate-100 dark:bg-slate-800/40 rounded-xl">No additional parameters needed. The platform will handle the isolation process automatically.</p>
-                                )}
-
-                                {(cmdType === 'block_ip' || cmdType === 'unblock_ip') && (
-                                    <div className="mt-3 space-y-3">
-                                        <label className="text-[10px] text-slate-500 uppercase">IP</label>
-                                        <input className="input w-full" value={fields.ip || ''} onChange={(e) => patch('ip', e.target.value)} disabled={!canExec} />
-                                        {cmdType === 'block_ip' && (
-                                            <>
-                                                <label className="text-[10px] text-slate-500 uppercase">Direction</label>
-                                                <select className="input w-full" value={fields.direction || 'both'} onChange={(e) => patch('direction', e.target.value)} disabled={!canExec}>
-                                                    <option value="both">both</option>
-                                                    <option value="in">in</option>
-                                                    <option value="out">out</option>
-                                                </select>
-                                            </>
-                                        )}
-                                    </div>
-                                )}
-
-                                {(cmdType === 'block_domain' || cmdType === 'unblock_domain') && (
-                                    <div className="mt-3 space-y-3">
-                                        <label className="text-[10px] text-slate-500 uppercase">Domain</label>
-                                        <input className="input w-full" value={fields.domain || ''} onChange={(e) => patch('domain', e.target.value)} disabled={!canExec} />
-                                    </div>
-                                )}
-
-                                {cmdType === 'run_cmd' && (
-                                    <div className="mt-3 space-y-3">
-                                        <label className="text-[10px] text-slate-500 uppercase">Select Command</label>
-                                        <select className="input w-full font-mono text-xs" value={fields.cmd || ''} onChange={(e) => patch('cmd', e.target.value)} disabled={!canExec}>
-                                            <option value="">Select a command...</option>
-                                            {WHITELISTED_COMMANDS.map(cmd => (
-                                                <option key={cmd.value} value={cmd.value}>{cmd.label}</option>
-                                            ))}
+                        {(cmdType === 'block_ip' || cmdType === 'unblock_ip') && (
+                            <>
+                                <label className="text-xs text-slate-500">IP</label>
+                                <input className="input w-full" value={fields.ip || ''} onChange={(e) => patch('ip', e.target.value)} disabled={!canExec} />
+                                {cmdType === 'block_ip' && (
+                                    <>
+                                        <label className="text-xs text-slate-500">Direction</label>
+                                        <select className="input w-full" value={fields.direction || 'both'} onChange={(e) => patch('direction', e.target.value)} disabled={!canExec}>
+                                            <option value="both">both</option>
+                                            <option value="in">in</option>
+                                            <option value="out">out</option>
                                         </select>
-                                    </div>
+                                    </>
                                 )}
+                            </>
+                        )}
 
+                        {(cmdType === 'block_domain' || cmdType === 'unblock_domain') && (
+                            <>
+                                <label className="text-xs text-slate-500">Domain</label>
+                                <input className="input w-full" value={fields.domain || ''} onChange={(e) => patch('domain', e.target.value)} disabled={!canExec} />
+                            </>
+                        )}
 
+                        {(cmdType === 'run_cmd' || cmdType === 'custom') && (
+                            <>
+                                <label className="text-xs text-slate-500">Command (whitelisted)</label>
+                                <input className="input w-full font-mono text-xs" placeholder="hostname" value={fields.cmd || ''} onChange={(e) => patch('cmd', e.target.value)} disabled={!canExec} />
+                            </>
+                        )}
 
-                                {(cmdType === 'collect_logs' || cmdType === 'collect_forensics') && (
-                                    <div className="mt-3 space-y-3">
-                                        <label className="text-[10px] text-slate-500 uppercase">Log types (comma-separated)</label>
-                                        <input
-                                            className="input w-full text-xs"
-                                            placeholder="Security,System,Application,Sysmon,PowerShell"
-                                            value={fields.log_types || ''}
-                                            onChange={(e) => patch('log_types', e.target.value)}
-                                            disabled={!canExec}
-                                        />
-                                        <label className="text-[10px] text-slate-500 uppercase">Time range</label>
-                                        <input
-                                            className="input w-full text-xs"
-                                            placeholder="24h | 7d | Last 6 hours"
-                                            value={fields.time_range || '24h'}
-                                            onChange={(e) => patch('time_range', e.target.value)}
-                                            disabled={!canExec}
-                                        />
-                                        <label className="text-[10px] text-slate-500 uppercase">Max events (per log)</label>
-                                        <input className="input w-full" value={fields.max_events || '500'} onChange={(e) => patch('max_events', e.target.value)} disabled={!canExec} />
-                                    </div>
-                                )}
+                        {(cmdType === 'collect_logs' || cmdType === 'collect_forensics') && (
+                            <>
+                                <label className="text-xs text-slate-500">Log types (comma-separated)</label>
+                                <input
+                                    className="input w-full text-xs"
+                                    placeholder="Security,System,Application,Sysmon,PowerShell"
+                                    value={fields.log_types || ''}
+                                    onChange={(e) => patch('log_types', e.target.value)}
+                                    disabled={!canExec}
+                                />
+                                <label className="text-xs text-slate-500">Time range</label>
+                                <input
+                                    className="input w-full text-xs"
+                                    placeholder="24h | 7d | Last 6 hours"
+                                    value={fields.time_range || '24h'}
+                                    onChange={(e) => patch('time_range', e.target.value)}
+                                    disabled={!canExec}
+                                />
+                                <label className="text-xs text-slate-500">Max events (per log)</label>
+                                <input className="input w-full" value={fields.max_events || '500'} onChange={(e) => patch('max_events', e.target.value)} disabled={!canExec} />
+                                <label className="text-xs text-slate-500">File path (optional, hash scan)</label>
+                                <input className="input w-full font-mono text-xs" placeholder="C:\\path\\to\\file.exe" value={fields.file_path || ''} onChange={(e) => patch('file_path', e.target.value)} disabled={!canExec} />
+                            </>
+                        )}
 
-                                {(cmdType === 'scan_memory' || cmdType === 'scan_file') && (
-                                    <div className="mt-3 space-y-3">
-                                        <label className="text-[10px] text-slate-500 uppercase">File path</label>
-                                        <input
-                                            className="input w-full font-mono text-xs"
-                                            placeholder="C:\path\to\file.exe"
-                                            value={fields.file_path || ''}
-                                            onChange={(e) => patch('file_path', e.target.value)}
-                                            disabled={!canExec}
-                                        />
-                                    </div>
-                                )}
+                        {(cmdType === 'scan_memory' || cmdType === 'scan_file') && (
+                            <>
+                                <label className="text-xs text-slate-500">File path</label>
+                                <input
+                                    className="input w-full font-mono text-xs"
+                                    placeholder="C:\\path\\to\\file.exe"
+                                    value={fields.file_path || ''}
+                                    onChange={(e) => patch('file_path', e.target.value)}
+                                    disabled={!canExec}
+                                />
+                                <p className="text-xs text-slate-500">
+                                    Note: in this build, <code>scan_memory</code> is implemented as a safe on-disk hash scan (same as <code>scan_file</code>).
+                                </p>
+                            </>
+                        )}
 
-                                {(cmdType === 'restart_agent' || cmdType === 'stop_agent' || cmdType === 'start_agent' || cmdType === 'restart_service') && (
-                                    <p className="text-xs text-slate-500 mt-3 p-3 bg-slate-100 dark:bg-slate-800/40 rounded-xl">
-                                        No additional parameters needed. The agent service will be managed automatically.
-                                    </p>
-                                )}
+                        {(cmdType === 'restart_agent' || cmdType === 'stop_agent' || cmdType === 'start_agent' || cmdType === 'restart_service') && (
+                            <p className="text-xs text-slate-500">
+                                No parameters required. The agent service is controlled via Windows SCM (mode: stop/start/restart).
+                            </p>
+                        )}
 
-                                {cmdType === 'enable_sysmon' && (
-                                    <div className="mt-3 space-y-3">
-                                        <label className="text-[10px] text-slate-500 uppercase">Sysmon config URL (optional)</label>
-                                        <input
-                                            className="input w-full font-mono text-xs"
-                                            placeholder="https://example.com/sysmonconfig.xml"
-                                            value={fields.sysmon_config_url || ''}
-                                            onChange={(e) => patch('sysmon_config_url', e.target.value)}
-                                            disabled={!canExec}
-                                        />
-                                    </div>
-                                )}
+                        {cmdType === 'enable_sysmon' && (
+                            <>
+                                <label className="text-xs text-slate-500">Sysmon config URL (optional)</label>
+                                <input
+                                    className="input w-full font-mono text-xs"
+                                    placeholder="https://example.com/sysmonconfig.xml"
+                                    value={fields.sysmon_config_url || ''}
+                                    onChange={(e) => patch('sysmon_config_url', e.target.value)}
+                                    disabled={!canExec}
+                                />
+                                <p className="text-xs text-slate-500">
+                                    Installs Sysmon if missing, enables <code>Microsoft-Windows-Sysmon/Operational</code>, and applies config if provided.
+                                </p>
+                            </>
+                        )}
 
-                                {cmdType === 'update_signatures' && (
-                                    <div className="mt-3 space-y-3">
-                                        <label className="text-[10px] text-slate-500 uppercase">Feed URL</label>
-                                        <input className="input w-full text-xs" value={fields.sig_url || ''} onChange={(e) => patch('sig_url', e.target.value)} disabled={!canExec} />
-                                    </div>
-                                )}
+                        {cmdType === 'disable_sysmon' && (
+                            <p className="text-xs text-slate-500">
+                                Disables the Sysmon channel and uninstalls Sysmon if present.
+                            </p>
+                        )}
 
-                                {cmdType === 'update_config' && (
-                                    <div className="mt-3 space-y-3">
-                                        <label className="text-[10px] text-slate-500 uppercase">Key (dot path)</label>
-                                        <input className="input w-full font-mono text-xs" placeholder="collectors.etw_enabled" value={fields.config_key || ''} onChange={(e) => patch('config_key', e.target.value)} disabled={!canExec} />
-                                        <label className="text-[10px] text-slate-500 uppercase">Value</label>
-                                        <input className="input w-full text-xs" placeholder="false" value={fields.config_value || ''} onChange={(e) => patch('config_value', e.target.value)} disabled={!canExec} />
-                                    </div>
-                                )}
+                        {cmdType === 'update_signatures' && (
+                            <>
+                                <label className="text-xs text-slate-500">Feed URL</label>
+                                <input className="input w-full text-xs" value={fields.sig_url || ''} onChange={(e) => patch('sig_url', e.target.value)} disabled={!canExec} />
+                                <label className="text-xs text-slate-500">SHA256 checksum (optional)</label>
+                                <input className="input w-full font-mono text-xs" value={fields.checksum_sha256 || ''} onChange={(e) => patch('checksum_sha256', e.target.value)} disabled={!canExec} />
+                                <label className="text-xs text-slate-500">Format (optional)</label>
+                                <input className="input w-full text-xs" placeholder="csv | ndjson" value={fields.format || ''} onChange={(e) => patch('format', e.target.value)} disabled={!canExec} />
+                                <label className="flex items-center gap-2 text-xs text-slate-500">
+                                    <input type="checkbox" checked={fields.force === 'true'} onChange={(e) => patch('force', e.target.checked ? 'true' : 'false')} disabled={!canExec} />
+                                    Force
+                                </label>
+                            </>
+                        )}
 
-                                {cmdType === 'update_filter_policy' && (
-                                    <div className="mt-3 space-y-3">
-                                        <label className="text-[10px] text-slate-500 uppercase">Policy JSON</label>
-                                        <textarea
-                                            className="w-full min-h-[120px] font-mono text-xs rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-900 p-2"
-                                            value={fields.policy_json || '{\n  "exclude_processes": []\n}'}
-                                            onChange={(e) => patch('policy_json', e.target.value)}
-                                            disabled={!canExec}
-                                        />
-                                    </div>
-                                )}
+                        {cmdType === 'update_config' && (
+                            <>
+                                <label className="text-xs text-slate-500">Key (dot path)</label>
+                                <input className="input w-full font-mono text-xs" placeholder="collectors.etw_enabled" value={fields.config_key || ''} onChange={(e) => patch('config_key', e.target.value)} disabled={!canExec} />
+                                <label className="text-xs text-slate-500">Value</label>
+                                <input className="input w-full text-xs" placeholder="false" value={fields.config_value || ''} onChange={(e) => patch('config_value', e.target.value)} disabled={!canExec} />
+                            </>
+                        )}
 
-                                {(cmdType === 'restart_machine' || cmdType === 'shutdown_machine') && (
-                                    <p className="text-xs text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 p-3 rounded-lg border border-amber-200 dark:border-amber-800/30 font-medium mt-3">You will be asked to confirm — these actions affect the whole host.</p>
-                                )}
-                            </div>
+                        {cmdType === 'update_filter_policy' && (
+                            <>
+                                <label className="text-xs text-slate-500">Policy JSON</label>
+                                <textarea
+                                    className="w-full min-h-[120px] font-mono text-xs rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-900 p-2"
+                                    value={fields.policy_json || '{\n  "exclude_processes": []\n}'}
+                                    onChange={(e) => patch('policy_json', e.target.value)}
+                                    disabled={!canExec}
+                                />
+                            </>
+                        )}
+
+                        {(cmdType === 'restart_machine' || cmdType === 'shutdown_machine') && (
+                            <p className="text-xs text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 p-3 rounded-lg border border-amber-200 dark:border-amber-800/30 font-medium">You will be asked to confirm — these actions affect the whole host.</p>
+                        )}
+
+                        {cmdType === 'uninstall_agent' && (
+                            <>
+                                <label className="text-xs text-slate-500">Reason (audit trail)</label>
+                                <input
+                                    className="input w-full text-xs"
+                                    placeholder="Decommission / replaced host / offboarding"
+                                    value={fields.reason || ''}
+                                    onChange={(e) => patch('reason', e.target.value)}
+                                    disabled={!canExec}
+                                />
+                                <p className="text-xs text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-900/20 p-3 rounded-lg border border-rose-200 dark:border-rose-800/30 font-medium">
+                                    Permanent: the agent will release its protections, confirm back to the server, and remove itself. No further commands will be accepted.
+                                </p>
+                            </>
+                        )}
                         </div>
 
                         <div className="pt-5 mt-5 border-t border-slate-200 dark:border-slate-700/60 flex items-center justify-between">
@@ -2022,7 +1853,7 @@ function ResponseTab({
                             <button
                                 type="button"
                                 disabled={!canExec || execMutation.isPending}
-                                onClick={handleExecute}
+                                onClick={onSubmit}
                                 className="ml-auto flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white shadow-sm disabled:opacity-50 transition-all"
                             >
                                 {execMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Terminal className="w-4 h-4" />}
@@ -2033,36 +1864,59 @@ function ResponseTab({
                 </div>
             </div>
 
-            <Modal isOpen={upgradeOpen} onClose={() => setUpgradeOpen(false)} title="Upgrade Agent">
-                <div className="space-y-4 p-1">
-                    <p className="text-sm text-slate-600 dark:text-slate-400">Build a new agent package and push an upgrade command to this endpoint.</p>
-                    <div>
-                        <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Server IP</label>
-                        <input className="input w-full text-sm" placeholder="e.g. 192.168.1.100" value={upgradeForm.serverIP} onChange={(e) => setUpgradeForm(f => ({...f, serverIP: e.target.value}))} />
+            <Modal isOpen={upgradeOpen} onClose={() => setUpgradeOpen(false)} title="Upgrade agent (in-place)">
+                <div className="space-y-4 animate-slide-up-fade">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <div>
+                            <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Server IP</label>
+                            <input className="input w-full" value={upgradeForm.serverIP} onChange={(e) => setUpgradeForm((p) => ({ ...p, serverIP: e.target.value }))} />
+                        </div>
+                        <div>
+                            <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Server domain</label>
+                            <input className="input w-full" value={upgradeForm.serverDomain} onChange={(e) => setUpgradeForm((p) => ({ ...p, serverDomain: e.target.value }))} />
+                        </div>
+                        <div>
+                            <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">gRPC port</label>
+                            <input className="input w-full" value={upgradeForm.serverPort} onChange={(e) => setUpgradeForm((p) => ({ ...p, serverPort: e.target.value }))} />
+                        </div>
+                        <div>
+                            <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Enrollment token</label>
+                            <select
+                                className="input w-full"
+                                value={upgradeForm.tokenId}
+                                onChange={(e) => setUpgradeForm((p) => ({ ...p, tokenId: e.target.value }))}
+                                disabled={upgradeTokensLoading}
+                            >
+                                <option value="">{upgradeTokensLoading ? 'Loading…' : 'Select token'}</option>
+                                {upgradeTokens.map((t) => (
+                                    <option key={t.id} value={t.id}>
+                                        {t.description || t.id.slice(0, 8)}
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
                     </div>
-                    <div>
-                        <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Server Domain</label>
-                        <input className="input w-full text-sm" placeholder="e.g. edr.company.com" value={upgradeForm.serverDomain} onChange={(e) => setUpgradeForm(f => ({...f, serverDomain: e.target.value}))} />
-                    </div>
-                    <div>
-                        <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Server Port</label>
-                        <input className="input w-full text-sm" value={upgradeForm.serverPort} onChange={(e) => setUpgradeForm(f => ({...f, serverPort: e.target.value}))} />
-                    </div>
-                    <div>
-                        <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Enrollment Token</label>
-                        <select className="input w-full text-sm" value={upgradeForm.tokenId} onChange={(e) => setUpgradeForm(f => ({...f, tokenId: e.target.value}))}>
-                            <option value="">Select a token...</option>
-                            {(upgradeTokens || []).map((t: any) => <option key={t.id || t.token_id} value={t.id || t.token_id}>{(t.id || t.token_id || '').slice(0, 12)}... - {t.description || 'Token'}</option>)}
-                        </select>
-                    </div>
+
                     <label className="flex items-center gap-2 text-sm">
-                        <input type="checkbox" className="rounded" checked={upgradeForm.installSysmon} onChange={(e) => setUpgradeForm(f => ({...f, installSysmon: e.target.checked}))} />
-                        Install Sysmon with upgrade
+                        <input
+                            type="checkbox"
+                            checked={upgradeForm.installSysmon}
+                            onChange={(e) => setUpgradeForm((p) => ({ ...p, installSysmon: e.target.checked }))}
+                        />
+                        Install and enable Sysmon on first run
                     </label>
-                    <div className="flex justify-end gap-2 pt-3 border-t border-slate-200 dark:border-slate-700">
-                        <button type="button" className="px-4 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-700" onClick={() => setUpgradeOpen(false)}>Cancel</button>
-                        <button type="button" className="px-4 py-2 text-sm rounded-lg bg-cyan-600 hover:bg-cyan-700 text-white font-semibold disabled:opacity-50" disabled={!upgradeForm.tokenId || upgradeMutation.isPending} onClick={() => upgradeMutation.mutate()}>
-                            {upgradeMutation.isPending ? 'Upgrading...' : 'Start Upgrade'}
+
+                    <div className="flex justify-end gap-2 pt-2">
+                        <button type="button" className="btn" onClick={() => setUpgradeOpen(false)}>
+                            Cancel
+                        </button>
+                        <button
+                            type="button"
+                            className="btn btn-primary"
+                            disabled={!upgradeForm.tokenId || upgradeMutation.isPending}
+                            onClick={() => upgradeMutation.mutate()}
+                        >
+                            {upgradeMutation.isPending ? 'Queuing…' : 'Queue upgrade'}
                         </button>
                     </div>
                 </div>
@@ -2073,40 +1927,26 @@ function ResponseTab({
                 {cmdsLoading ? (
                     <Loader2 className="w-8 h-8 animate-spin text-cyan-500" />
                 ) : (
-                    <>
                     <div className="overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-700">
                         <table className="w-full text-left text-xs">
                             <thead className="bg-slate-100 dark:bg-slate-800/80 text-slate-600 uppercase">
                                 <tr>
                                     <th className="p-2">Status</th>
-                                    <th className="p-2">Type & Logic</th>
-                                    <th className="p-2">D3FEND Mapping</th>
+                                    <th className="p-2">Type</th>
                                     <th className="p-2">Issued</th>
                                     <th className="p-2">By</th>
                                     <th className="p-2">Output / error</th>
-                                    <th className="p-2">Rollback</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 {cmds.length === 0 ? (
-                                    <tr><td colSpan={7} className="p-4 text-slate-500">No commands</td></tr>
+                                    <tr><td colSpan={5} className="p-4 text-slate-500">No commands</td></tr>
                                 ) : (
-                                    cmds.slice((cmdPage - 1) * CMD_PAGE_SIZE, cmdPage * CMD_PAGE_SIZE).map((c) => (
+                                    cmds.map((c) => (
                                         <tr key={c.id} className="border-t border-slate-100 dark:border-slate-800 align-top">
-                                            <td className="p-2 whitespace-nowrap font-medium text-slate-700 dark:text-slate-200">{c.status}</td>
-                                            <td className="p-2">
-                                                <div className="font-mono text-cyan-600 dark:text-cyan-400 font-semibold">{c.command_type}</div>
-                                                <div className="text-[10px] text-slate-500 mt-1 max-w-[200px] leading-tight">
-                                                    Reason: {c.parameters?.decision_reason || 'Manual execution'} <br/>
-                                                    Confidence: {c.parameters?.decision_confidence || 'N/A'}
-                                                </div>
-                                            </td>
-                                            <td className="p-2">
-                                                <span className="bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400 px-1.5 py-0.5 rounded border border-indigo-200 dark:border-indigo-800/50 whitespace-nowrap">
-                                                    {c.parameters?.d3fend_mapping || 'Unmapped'}
-                                                </span>
-                                            </td>
-                                            <td className="p-2 whitespace-nowrap text-slate-600 dark:text-slate-400">{new Date(c.issued_at).toLocaleString()}</td>
+                                            <td className="p-2 whitespace-nowrap">{c.status}</td>
+                                            <td className="p-2 font-mono">{c.command_type}</td>
+                                            <td className="p-2 whitespace-nowrap">{new Date(c.issued_at).toLocaleString()}</td>
                                             <td className="p-2 max-w-[140px] break-all">{c.issued_by_user || c.issued_by || '—'}</td>
                                             <td className="p-2 max-w-md">
                                                 {c.error_message ? (
@@ -2115,38 +1955,18 @@ function ResponseTab({
                                                     commandHistoryOutputCell(c, agentId)
                                                 )}
                                             </td>
-                                            <td className="p-2">
-                                                {(c.command_type === 'kill_process' || c.command_type === 'terminate_process' || c.command_type === 'quarantine_file') && c.status === 'completed' ? (
-                                                    <button className="text-[10px] text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/20 hover:bg-emerald-100 dark:hover:bg-emerald-900/40 border border-emerald-200 dark:border-emerald-800/40 px-2 py-1 rounded transition-colors font-medium">
-                                                        Rollback Action
-                                                    </button>
-                                                ) : (
-                                                    <span className="text-[10px] text-slate-400">—</span>
-                                                )}
-                                            </td>
                                         </tr>
                                     ))
                                 )}
                             </tbody>
                         </table>
                     </div>
-                    {cmds.length > CMD_PAGE_SIZE && (
-                        <div className="flex items-center justify-between gap-3 pt-3 mt-3">
-                            <button type="button" className="inline-flex items-center gap-1 px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-medium disabled:opacity-40" disabled={cmdPage <= 1} onClick={() => setCmdPage((p) => Math.max(1, p - 1))}>
-                                <ChevronLeft className="w-4 h-4" /> Previous
-                            </button>
-                            <span className="text-xs text-slate-500">Page <span className="font-semibold text-slate-700 dark:text-slate-200">{cmdPage}</span> of {Math.max(1, Math.ceil(cmds.length / CMD_PAGE_SIZE))}</span>
-                            <button type="button" className="inline-flex items-center gap-1 px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-medium disabled:opacity-40" disabled={cmdPage >= Math.max(1, Math.ceil(cmds.length / CMD_PAGE_SIZE))} onClick={() => setCmdPage((p) => Math.min(Math.max(1, Math.ceil(cmds.length / CMD_PAGE_SIZE)), p + 1))}>
-                                Next <ChevronRight className="w-4 h-4" />
-                            </button>
-                        </div>
-                    )}
-                    </>
                 )}
             </div>
         </div>
     );
 }
+
 function QuarantineTab({
     items,
     loading,
@@ -2166,7 +1986,7 @@ function QuarantineTab({
         <div className="space-y-4 animate-slide-up-fade">
             <div className="flex items-center gap-2 text-slate-600 dark:text-slate-400 text-sm">
                 <HardDrive className="w-4 h-4" />
-                Files that have been quarantined on this endpoint for security analysis.
+                Files recorded in server inventory (telemetry + manual C2 quarantine).
             </div>
             {loading ? <Loader2 className="w-8 h-8 animate-spin text-cyan-500" /> : (
                 <div className="overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-700">
@@ -2249,8 +2069,6 @@ function ActivityTab({
     canViewAlerts: boolean;
 }) {
     const [detailId, setDetailId] = useState<string | null>(null);
-    const [actPage, setActPage] = useState(1);
-    const ACT_PAGE_SIZE = 20;
 
     const merged = useMemo(() => {
         const rows: TimelineRow[] = [];
@@ -2277,23 +2095,22 @@ function ActivityTab({
         <div className="space-y-6">
             <div>
                 <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100 mb-2 flex items-center gap-2">
-                    <Activity className="w-4 h-4" /> Activity Timeline
+                    <Activity className="w-4 h-4" /> Timeline (Sigma + connection-manager events)
                 </h3>
                 {!canViewAlerts && (
                     <p className="text-sm text-amber-700 dark:text-amber-300 mb-2">
-                        Detection alerts require additional permissions. Server events are still shown below.
+                        Sigma alerts are hidden — your role does not include alerts read. Connection-manager events still appear below when available.
                     </p>
                 )}
                 {alertsLoading && canViewAlerts ? (
                     <Loader2 className="w-6 h-6 animate-spin text-cyan-500" />
                 ) : merged.length === 0 ? (
                     <p className="text-sm text-slate-500">
-                        No activity recorded yet. Events and alerts will appear here as the agent reports data.
+                        No timeline entries yet. Alerts need Sigma data; raw events need telemetry data populated.
                     </p>
                 ) : (
-                    <>
                     <ul className="space-y-2">
-                        {merged.slice((actPage - 1) * ACT_PAGE_SIZE, actPage * ACT_PAGE_SIZE).map((r) =>
+                        {merged.map((r) =>
                             r.kind === 'alert' ? (
                                 <li
                                     key={r.id}
@@ -2334,24 +2151,12 @@ function ActivityTab({
                                     <div className="min-w-0 flex-1">
                                         <div className="font-mono text-xs text-cyan-700 dark:text-cyan-300">{r.ev.event_type}</div>
                                         <div className="text-slate-800 dark:text-slate-100">{r.ev.summary}</div>
-                                        <div className="text-xs text-slate-500">{new Date(r.at).toLocaleString()} · Server event · Click to view details</div>
+                                        <div className="text-xs text-slate-500">{new Date(r.at).toLocaleString()} · CM event · click for raw JSON</div>
                                     </div>
                                 </li>
                             )
                         )}
                     </ul>
-                    {merged.length > ACT_PAGE_SIZE && (
-                        <div className="flex items-center justify-between gap-3 pt-3 border-t border-slate-200 dark:border-slate-700 mt-3">
-                            <button type="button" className="inline-flex items-center gap-1 px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-medium disabled:opacity-40" disabled={actPage <= 1} onClick={() => setActPage((p) => Math.max(1, p - 1))}>
-                                <ChevronLeft className="w-4 h-4" /> Previous
-                            </button>
-                            <span className="text-xs text-slate-500">Page <span className="font-semibold text-slate-700 dark:text-slate-200">{actPage}</span> of {Math.max(1, Math.ceil(merged.length / ACT_PAGE_SIZE))}</span>
-                            <button type="button" className="inline-flex items-center gap-1 px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-medium disabled:opacity-40" disabled={actPage >= Math.max(1, Math.ceil(merged.length / ACT_PAGE_SIZE))} onClick={() => setActPage((p) => Math.min(Math.max(1, Math.ceil(merged.length / ACT_PAGE_SIZE)), p + 1))}>
-                                Next <ChevronRight className="w-4 h-4" />
-                            </button>
-                        </div>
-                    )}
-                </>
                 )}
             </div>
 

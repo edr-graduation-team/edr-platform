@@ -72,6 +72,7 @@ export const SYSTEM_CONTEXT_TABS: ContextTab[] = [
     { to: '/system/access/users', label: 'Users' },
     { to: '/system/access/roles', label: 'Roles & Permissions' },
     { to: '/system/audit-logs', label: 'Audit Logs' },
+    { to: '/system/account', label: 'Account' },
     { to: '/system/reliability-health', label: 'Reliability Health' },
 ];
 
@@ -80,7 +81,6 @@ export const MANAGEMENT_TABS: ContextTab[] = [
     { to: '/management/devices', label: 'Devices (Fleet)' },
     { to: '/management/network', label: 'Fleet Connectivity' },
     { to: '/management/app-control', label: 'Application Control' },
-    { to: '/management/account', label: 'Account' },
     { to: '/management/agent-profiles', label: 'Agents Profiles' },
     { to: '/management/agent-deploy', label: 'Agent Deployment' },
     { to: '/management/context-policies', label: 'Context Policies' },

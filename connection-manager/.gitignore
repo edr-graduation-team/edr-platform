@@ -6,6 +6,8 @@
 *.dylib
 /connection-manager
 /server
+bin/
+dist/
 
 # Test binary
 *.test
@@ -13,11 +15,7 @@
 # Output of go coverage
 *.out
 coverage.html
-
-# Generated protobuf files — TRACKED in Git (Go standard practice).
-# .pb.go files must be committed so Docker builds and fresh clones work
-# without needing protoc installed.
-# proto/v1/*.pb.go
+coverage/
 
 # IDE
 .idea/
@@ -37,13 +35,12 @@ Thumbs.db
 *.pem
 *.key
 !certs/README.md
+certs/ca.key
+certs/server.key
+certs/jwt_*.pem
 
 # Vendor (if using)
 vendor/
-
-# Build output
-bin/
-dist/
 
 # Logs
 *.log
@@ -53,9 +50,14 @@ logs/
 debug
 __debug_bin
 
-# Coverage reports
-coverage/
-
 # Temporary files
 tmp/
 temp/
+
+# Documentation / Markdown
+*.md
+!README.md
+
+# Protobuf files explicitly tracked
+!*.proto
+!*.pb.go

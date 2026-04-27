@@ -158,3 +158,28 @@ func (h *Handlers) RevokeEnrollmentToken(c echo.Context) error {
 
 	return c.JSON(http.StatusOK, map[string]string{"status": "revoked"})
 }
+
+// DeleteEnrollmentToken permanently deletes an enrollment token.
+func (h *Handlers) DeleteEnrollmentToken(c echo.Context) error {
+	if h.enrollmentTokenRepo == nil {
+		return c.JSON(http.StatusServiceUnavailable, map[string]string{"error": "database unavailable"})
+	}
+
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid token ID"})
+	}
+
+	if err := h.enrollmentTokenRepo.Delete(c.Request().Context(), id); err != nil {
+		if err == repository.ErrNotFound {
+			return c.JSON(http.StatusNotFound, map[string]string{"error": "token not found"})
+		}
+		h.logger.Errorf("DeleteEnrollmentToken: %v", err)
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to delete token"})
+	}
+
+	// Audit: token deleted
+	h.fireAudit(c, "TOKEN_DELETED", "token", id, "", false, "")
+
+	return c.JSON(http.StatusOK, map[string]string{"status": "deleted"})
+}

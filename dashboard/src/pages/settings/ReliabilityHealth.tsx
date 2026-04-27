@@ -117,7 +117,7 @@ export default function ReliabilityHealth() {
     return (
         <div className="space-y-6 md:space-y-8 w-full min-w-0 animate-slide-up-fade">
             <InsightHero
-                variant="dark"
+                
                 accent="teal"
                 icon={Server}
                 eyebrow="Data plane durability"

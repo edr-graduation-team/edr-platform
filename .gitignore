@@ -9,14 +9,14 @@
 /sigma_engine_go/sigma-engine-kafka
 /win_edrAgent/bin/
 /connection-manager/bin/
+bin/
 
 # Test binary, build with `go test -c`
 *.test
 
 # Output of go coverage
-#*.out
-#*.prof
-*.md
+*.out
+*.prof
 
 # Go workspace
 go.work
@@ -28,7 +28,6 @@ go.work.sum
 *.swp
 *.swo
 *~
-connection-manager/certs/
 
 # OS
 .DS_Store
@@ -41,7 +40,9 @@ Thumbs.db
 *.key
 *.crt
 
-# Node modules (dashboard)
+# Node modules
+node_modules/
+dist/
 dashboard/node_modules/
 dashboard/dist/
 
@@ -52,11 +53,7 @@ dashboard/dist/
 tmp/
 temp/
 
-# Node
-node_modules/
-
 # C# / .NET
-bin/
 obj/
 .vs/
 
@@ -65,9 +62,10 @@ venv/
 __pycache__/
 *.pyc
 
-# IDEs
-.idea/
+# Documentation / Markdown
+*.md
+!README.md
 
-# OS generated files
-.DS_Store
-Thumbs.db
+# Protobuf files explicitly tracked
+!*.proto
+!*.pb.go

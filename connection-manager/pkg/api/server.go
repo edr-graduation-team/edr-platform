@@ -231,6 +231,7 @@ func (s *Server) RegisterRoutes(handlers *Handlers) {
 	tokens.GET("", handlers.ListEnrollmentTokens, handlers.RequirePermission("tokens", "read"))
 	tokens.POST("", handlers.GenerateEnrollmentToken, handlers.RequirePermission("tokens", "write"))
 	tokens.POST("/:id/revoke", handlers.RevokeEnrollmentToken, handlers.RequirePermission("tokens", "write"))
+	tokens.DELETE("/:id", handlers.DeleteEnrollmentToken, handlers.RequirePermission("tokens", "write"))
 
 	// ── Agent build (deployment) ─────────────────────────────────────────
 	protected.POST("/agent/build", handlers.BuildAgent, handlers.RequirePermission("agents", "write"))

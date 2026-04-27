@@ -15,7 +15,7 @@ import {
     Radio,
     ArrowUpRight,
 } from 'lucide-react';
-import { agentsApi, reliabilityApi, authApi, type ReliabilityHealthResponse } from '../api/client';
+import { agentsApi, reliabilityApi, type ReliabilityHealthResponse } from '../api/client';
 import { formatDateTime } from '../utils/agentDisplay';
 import InsightHero from '../components/InsightHero';
 
@@ -40,7 +40,7 @@ function reliabilityHeadline(data: ReliabilityHealthResponse | null): {
 }
 
 export default function EssentialPlatform() {
-    const user = authApi.getCurrentUser();
+    // user removed as it's not used in UI anymore
 
     useEffect(() => {
         document.title = 'Essential Platform | EDR';
@@ -98,23 +98,8 @@ export default function EssentialPlatform() {
                         lead={
                             <>
                                 <p>
-                                    Figures below are read from <code className="font-mono text-[11px]">connection-manager</code> (
-                                    <code className="font-mono text-[11px]">/api/v1/agents/stats</code>,{' '}
-                                    <code className="font-mono text-[11px]">/api/v1/reliability</code>). They refresh with this page and focus — not a substitute for the full{' '}
-                                    <Link to="/dashboards/service" className="text-cyan-600 dark:text-cyan-400 font-semibold hover:underline">
-                                        Security Posture
-                                    </Link>{' '}
-                                    dashboards or{' '}
-                                    <Link to="/system/reliability-health" className="text-cyan-600 dark:text-cyan-400 font-semibold hover:underline">
-                                        Reliability Health
-                                    </Link>
-                                    .
+                                    This dashboard provides a real-time, consolidated view of your active deployment and infrastructure health. Use this snapshot to instantly monitor overall system performance, operational status, and platform reliability before diving into detailed security posture analytics.
                                 </p>
-                                {user ? (
-                                    <p className="text-xs text-slate-500 dark:text-slate-500 mt-3">
-                                        Session: <span className="font-medium text-slate-700 dark:text-slate-300">{user.username}</span> ({user.role})
-                                    </p>
-                                ) : null}
                             </>
                         }
                         actions={

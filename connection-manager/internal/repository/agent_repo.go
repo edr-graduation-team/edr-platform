@@ -42,6 +42,7 @@ const agentSelectColumns = `
 	COALESCE(memory_used_mb, 0), COALESCE(health_score, 0.0),
 	COALESCE(ip_addresses, '[]'),
 	COALESCE(is_isolated, false),
+	COALESCE(sysmon_installed, false), COALESCE(sysmon_running, false),
 	current_cert_id, cert_expires_at,
 	COALESCE(tags, '{}'), COALESCE(metadata, '{}'),
 	created_at, updated_at`
@@ -117,6 +118,8 @@ func (r *PostgresAgentRepository) GetByID(ctx context.Context, id uuid.UUID) (*m
 		&agent.HealthScore,
 		&agent.IPAddresses,
 		&agent.IsIsolated,
+		&agent.SysmonInstalled,
+		&agent.SysmonRunning,
 		&agent.CurrentCertID,
 		&agent.CertExpiresAt,
 		&agent.Tags,
@@ -163,6 +166,8 @@ func (r *PostgresAgentRepository) GetByHostname(ctx context.Context, hostname st
 		&agent.HealthScore,
 		&agent.IPAddresses,
 		&agent.IsIsolated,
+		&agent.SysmonInstalled,
+		&agent.SysmonRunning,
 		&agent.CurrentCertID,
 		&agent.CertExpiresAt,
 		&agent.Tags,
@@ -267,7 +272,8 @@ func (r *PostgresAgentRepository) AgentExists(ctx context.Context, id uuid.UUID)
 func (r *PostgresAgentRepository) UpdateMetrics(ctx context.Context, id uuid.UUID,
 	cpuUsage float64, memoryUsedMB int64, memoryTotalMB int64, queueDepth int,
 	eventsGenerated, eventsSent, eventsDropped int64,
-	agentVersion string, ipAddresses []string, cpuCount int, healthScore float64) error {
+	agentVersion string, ipAddresses []string, cpuCount int, healthScore float64,
+	sysmonInstalled, sysmonRunning bool) error {
 
 	// Marshal ip_addresses to JSON for JSONB column
 	var ipJSON []byte
@@ -289,13 +295,15 @@ func (r *PostgresAgentRepository) UpdateMetrics(ctx context.Context, id uuid.UUI
 			ip_addresses = $10::jsonb,
 			cpu_count = CASE WHEN $11 = 0 THEN cpu_count ELSE $11 END,
 			health_score = CASE WHEN $12 < 0 THEN health_score ELSE $12 END,
+			sysmon_installed = $14, sysmon_running = $15,
 			last_seen = $13, updated_at = $13
 		WHERE id = $1`
 
 	now := time.Now()
 	result, err := r.pool.Exec(ctx, query, id, cpuUsage, memoryUsedMB, memoryTotalMB, queueDepth,
 		eventsGenerated, eventsSent, eventsDropped,
-		agentVersion, string(ipJSON), cpuCount, healthScore, now)
+		agentVersion, string(ipJSON), cpuCount, healthScore, now,
+		sysmonInstalled, sysmonRunning)
 
 	if err != nil {
 		return fmt.Errorf("failed to update agent metrics: %w", err)
@@ -399,6 +407,8 @@ func (r *PostgresAgentRepository) List(ctx context.Context, filter AgentFilter) 
 			&agent.HealthScore,
 			&agent.IPAddresses,
 			&agent.IsIsolated,
+			&agent.SysmonInstalled,
+			&agent.SysmonRunning,
 			&agent.CurrentCertID,
 			&agent.CertExpiresAt,
 			&agent.Tags,
@@ -479,6 +489,8 @@ func (r *PostgresAgentRepository) GetAgentsNeedingCertRenewal(ctx context.Contex
 			&agent.HealthScore,
 			&agent.IPAddresses,
 			&agent.IsIsolated,
+			&agent.SysmonInstalled,
+			&agent.SysmonRunning,
 			&agent.CurrentCertID,
 			&agent.CertExpiresAt,
 			&agent.Tags,

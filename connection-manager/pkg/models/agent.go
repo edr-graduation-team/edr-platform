@@ -38,6 +38,10 @@ type Agent struct {
 	IPAddresses []string `db:"ip_addresses" json:"ip_addresses"`
 	IsIsolated  bool     `db:"is_isolated" json:"is_isolated"` // Smart network isolation active
 
+	// Sysmon telemetry (populated from agent heartbeat)
+	SysmonInstalled bool `db:"sysmon_installed" json:"sysmon_installed"` // Sysmon64 service is registered on the endpoint
+	SysmonRunning   bool `db:"sysmon_running" json:"sysmon_running"`     // Sysmon64 service is in RUNNING state
+
 	// Certificate
 	CurrentCertID *uuid.UUID `db:"current_cert_id" json:"current_cert_id"`
 	CertExpiresAt *time.Time `db:"cert_expires_at" json:"cert_expires_at"`

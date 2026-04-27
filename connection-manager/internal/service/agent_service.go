@@ -85,6 +85,8 @@ type AgentMetrics struct {
 	IPAddresses     []string
 	CpuCount        int
 	HealthScore     float64
+	SysmonInstalled bool
+	SysmonRunning   bool
 }
 
 // RegistrationStatusApproved is the status string for approved (cert-issued) registration.
@@ -403,6 +405,8 @@ func (s *agentServiceImpl) UpdateMetrics(ctx context.Context, id uuid.UUID, metr
 		metrics.IPAddresses,
 		metrics.CpuCount,
 		metrics.HealthScore,
+		metrics.SysmonInstalled,
+		metrics.SysmonRunning,
 	)
 }
 

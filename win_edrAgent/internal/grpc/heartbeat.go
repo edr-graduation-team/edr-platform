@@ -4,6 +4,8 @@ package grpcclient
 import (
 	"context"
 	"net"
+	"os/exec"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -73,6 +75,10 @@ type HeartbeatRequest struct {
 	// Telemetry enrichment — dropped events visibility for SOC
 	EventsDropped uint64   `json:"events_dropped"`
 	IPAddresses   []string `json:"ip_addresses,omitempty"`
+
+	// Sysmon telemetry
+	SysmonInstalled bool `json:"sysmon_installed"`
+	SysmonRunning   bool `json:"sysmon_running"`
 }
 
 // HeartbeatResponse represents server response.
@@ -195,16 +201,20 @@ func (h *Heartbeat) buildRequest() *HeartbeatRequest {
 	currentStatus := h.status
 	h.statusMu.RUnlock()
 
+	sysmonInstalled, sysmonRunning := checkSysmonStatus()
+
 	req := &HeartbeatRequest{
-		AgentID:       h.cfg.Agent.ID,
-		Timestamp:     time.Now().UTC(),
-		Status:        currentStatus,
-		Version:       "1.0.0", // TODO: Get from build
-		Hostname:      h.cfg.Agent.Hostname,
-		MemoryUsedMB:  usedMB,
-		MemoryTotalMB: totalMB,
-		IPAddresses:   getLocalIPAddresses(),
-		CPUCount:      cpuCount,
+		AgentID:         h.cfg.Agent.ID,
+		Timestamp:       time.Now().UTC(),
+		Status:          currentStatus,
+		Version:         "1.0.0", // TODO: Get from build
+		Hostname:        h.cfg.Agent.Hostname,
+		MemoryUsedMB:    usedMB,
+		MemoryTotalMB:   totalMB,
+		IPAddresses:     getLocalIPAddresses(),
+		CPUCount:        cpuCount,
+		SysmonInstalled: sysmonInstalled,
+		SysmonRunning:   sysmonRunning,
 	}
 
 	// Get metrics from collectors
@@ -388,4 +398,22 @@ type HeartbeatStats struct {
 	HeartbeatsSent uint64
 	LastHeartbeat  time.Time
 	CurrentStatus  HeartbeatStatus
+}
+
+// checkSysmonStatus queries the Windows service control manager to determine
+// whether Sysmon64 is installed and currently running.
+// Returns (installed, running). Both are false on any query error.
+func checkSysmonStatus() (installed bool, running bool) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "sc", "query", "Sysmon64")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return false, false
+	}
+	s := strings.ToUpper(string(out))
+	installed = strings.Contains(s, "SERVICE_NAME")
+	running = installed && strings.Contains(s, "RUNNING")
+	return installed, running
 }

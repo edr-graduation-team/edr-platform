@@ -135,7 +135,7 @@ export default function UserProfile() {
     return (
         <div className="space-y-6 w-full min-w-0 animate-slide-up-fade">
             <InsightHero
-                variant="dark"
+                
                 accent="indigo"
                 icon={Fingerprint}
                 eyebrow="System hub"

@@ -354,7 +354,8 @@ function AppRoutes() {
             <Route path="/management/app-control" element={<ProtectedRoute><ManagementAppControlPage /></ProtectedRoute>} />
             <Route path="/management/application-control" element={<ProtectedRoute><ManagementAppControlPage /></ProtectedRoute>} />
             <Route path="/management/staff" element={<ProtectedRoute><ManagementStaffPage /></ProtectedRoute>} />
-            <Route path="/management/account" element={<ProtectedRoute><ManagementAccountPage /></ProtectedRoute>} />
+            <Route path="/system/account" element={<ProtectedRoute><ManagementAccountPage /></ProtectedRoute>} />
+             <Route path="/management/account" element={<Navigate to="/system/account" replace />} />
             <Route path="/management/users" element={<Navigate to="/management/agent-profiles" replace />} />
             <Route path="/management/licenses" element={<ProtectedRoute><ManagementLicensesPage /></ProtectedRoute>} />
             <Route path="/management/billing" element={<ProtectedRoute><ManagementBillingPage /></ProtectedRoute>} />

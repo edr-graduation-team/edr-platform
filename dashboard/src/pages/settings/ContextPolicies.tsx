@@ -1,8 +1,9 @@
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Plus, Save, Trash2 } from 'lucide-react';
+import { Plus, Save, Trash2, ShieldAlert, Key, Globe, LayoutList, Server, Shield } from 'lucide-react';
 import { agentsApi, alertsApi, contextPoliciesApi, type ContextPolicy } from '../../api/client';
 import { useToast } from '../../components/Toast';
+import InsightHero from '../../components/InsightHero';
 
 type EditablePolicy = Omit<ContextPolicy, 'id' | 'created_at' | 'updated_at'> & { id?: number };
 
@@ -36,380 +37,317 @@ export default function ContextPolicies() {
         queryFn: contextPoliciesApi.list,
         refetchInterval: 15000,
     });
-    const { data: agentsData, isLoading: isAgentsLoading, refetch: refetchAgents } = useQuery({
+
+    const { data: agentsData } = useQuery({
         queryKey: ['contextPolicyAgents'],
         queryFn: () => agentsApi.list({ limit: 500, offset: 0, sort_by: 'hostname', sort_order: 'asc' }),
         staleTime: 30000,
     });
-    const { data: endpointUsersData, isLoading: isEndpointUsersLoading, refetch: refetchEndpointUsers } = useQuery({
-        queryKey: ['contextPolicyEndpointUsers'],
-        queryFn: () => alertsApi.list({ limit: 500, offset: 0, sort: 'timestamp', order: 'desc' }),
-        staleTime: 30000,
+
+    // alertsApi.list returns { alerts: Alert[], total: number }
+    const { data: alertsData } = useQuery({
+        queryKey: ['contextPolicyAlerts'],
+        queryFn: () => alertsApi.list({ limit: 200, offset: 0, sort: 'timestamp', order: 'desc' }),
+        staleTime: 60000,
     });
 
-    const items = data?.data ?? [];
-    const agentOptions = useMemo(
-        () => (agentsData?.data ?? []).map(a => ({ value: a.id, label: `${a.hostname} (${a.id})` })),
-        [agentsData]
-    );
-    const userOptions = useMemo(() => {
-        const hostnameByAgentId = new Map((agentsData?.data ?? []).map(a => [a.id, a.hostname] as const));
-        const entries = (endpointUsersData?.alerts ?? [])
-            .map((a) => {
-                const user = a.context_snapshot?.user_name?.trim();
-                if (!user) return null;
-                const host = (hostnameByAgentId.get(a.agent_id) || a.agent_id || 'unknown-host').trim();
-                return {
-                    value: user,
-                    label: `${host}/${user}`,
-                };
-            })
-            .filter((v): v is { value: string; label: string } => Boolean(v));
+    const items: ContextPolicy[] = data?.data ?? [];
 
-        // Deduplicate by user value (scope_value remains user account), keep first recent host/user label.
-        const seen = new Set<string>();
-        const unique: { value: string; label: string }[] = [];
-        for (const e of entries) {
-            if (seen.has(e.value)) continue;
-            seen.add(e.value);
-            unique.push(e);
-        }
-        return unique;
-    }, [endpointUsersData, agentsData]);
+    // Extract unique usernames from alerts context
+    const endpointUsers = useMemo(() => {
+        const alerts = alertsData?.alerts ?? [];
+        const users = new Set<string>();
+        alerts.forEach((a: any) => {
+            const username = a.endpoint_context?.username || a.username;
+            if (username && username !== 'unknown') users.add(username);
+        });
+        return Array.from(users).sort();
+    }, [alertsData]);
 
-    const matchingScope = useMemo(
-        () => items.find(i => i.scope_type === draft.scope_type && i.scope_value === (draft.scope_type === 'global' ? '*' : draft.scope_value.trim())),
-        [items, draft.scope_type, draft.scope_value]
-    );
-
-    const createMutation = useMutation({
-        mutationFn: (payload: EditablePolicy) => contextPoliciesApi.create(payload),
+    const mutationCreate = useMutation({
+        mutationFn: contextPoliciesApi.create,
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['contextPolicies'] });
             setDraft(NEW_POLICY);
             setTrustedNetworksText('');
             setValidationError('');
-            showToast('Context policy saved successfully', 'success');
+            showToast('Policy created successfully', 'success');
         },
-        onError: (err: unknown) => {
-            const msg = err instanceof Error ? err.message : 'Failed to save context policy';
-            showToast(msg, 'error');
-        },
+        onError: (err: any) => showToast(err.message || 'Failed to create policy', 'error'),
     });
 
-    const updateMutation = useMutation({
-        mutationFn: ({ id, payload }: { id: number; payload: EditablePolicy }) => contextPoliciesApi.update(id, payload),
+    const mutationUpdate = useMutation({
+        mutationFn: ({ id, policy }: { id: number; policy: Omit<ContextPolicy, 'id' | 'created_at' | 'updated_at'> }) =>
+            contextPoliciesApi.update(id, policy),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['contextPolicies'] });
-            showToast('Context policy updated', 'success');
+            setDraft(NEW_POLICY);
+            setTrustedNetworksText('');
+            setValidationError('');
+            showToast('Policy updated successfully', 'success');
         },
-        onError: (err: unknown) => {
-            const msg = err instanceof Error ? err.message : 'Failed to update context policy';
-            showToast(msg, 'error');
-        },
+        onError: (err: any) => showToast(err.message || 'Failed to update policy', 'error'),
     });
 
-    const deleteMutation = useMutation({
-        mutationFn: (id: number) => contextPoliciesApi.remove(id),
+    const mutationDelete = useMutation({
+        mutationFn: contextPoliciesApi.remove,
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['contextPolicies'] });
-            showToast('Context policy deleted', 'success');
+            showToast('Policy deleted', 'success');
         },
-        onError: (err: unknown) => {
-            const msg = err instanceof Error ? err.message : 'Failed to delete context policy';
-            showToast(msg, 'error');
-        },
+        onError: (err: any) => showToast(err.message || 'Failed to delete policy', 'error'),
     });
 
-    const globalExists = useMemo(
-        () => items.some(i => i.scope_type === 'global' && i.scope_value === '*'),
-        [items]
+    const handleSave = () => {
+        setValidationError('');
+        if (!draft.name.trim()) return setValidationError('Name is required.');
+        if (!draft.scope_value.trim() && draft.scope_type !== 'global') return setValidationError('Scope target is required.');
+
+        const parsedNetworks = parseTrustedNetworks(trustedNetworksText);
+        const invalidNetworks = parsedNetworks.filter(net => !CIDR_PATTERN.test(net));
+        if (invalidNetworks.length > 0) return setValidationError(`Invalid CIDR: ${invalidNetworks.join(', ')}`);
+
+        const policyData: Omit<ContextPolicy, 'id' | 'created_at' | 'updated_at'> = {
+            name: draft.name,
+            scope_type: draft.scope_type,
+            scope_value: draft.scope_value,
+            enabled: draft.enabled,
+            user_role_weight: draft.user_role_weight,
+            device_criticality_weight: draft.device_criticality_weight,
+            network_anomaly_factor: draft.network_anomaly_factor,
+            trusted_networks: parsedNetworks,
+            notes: draft.notes,
+        };
+
+        if (draft.id) mutationUpdate.mutate({ id: draft.id, policy: policyData });
+        else mutationCreate.mutate(policyData);
+    };
+
+    const handleEdit = (p: ContextPolicy) => {
+        setDraft(p);
+        setTrustedNetworksText((p.trusted_networks || []).join(', '));
+        setValidationError('');
+    };
+
+    const handleDelete = (id: number) => {
+        if (window.confirm('Delete this policy?')) mutationDelete.mutate(id);
+    };
+
+    if (error) return (
+        <div className="p-4 text-rose-500 bg-rose-50 dark:bg-rose-950/20 rounded-xl border border-rose-200 dark:border-rose-900">
+            Failed to load context policies.
+        </div>
     );
 
-    const hasPendingMutation = createMutation.isPending || updateMutation.isPending || deleteMutation.isPending;
-
-    const validateDraft = (input: EditablePolicy, trustedNetworksRaw: string): string | null => {
-        if (!input.name.trim()) return 'Policy name is required.';
-        const scopeValue = input.scope_type === 'global' ? '*' : input.scope_value.trim();
-        if (!scopeValue) return 'Scope value is required.';
-        if (input.scope_type === 'agent' && !agentOptions.some(o => o.value === scopeValue)) {
-            return 'Please select a valid agent from the dropdown.';
-        }
-        if (input.scope_type === 'user' && !userOptions.some(o => o.value === scopeValue)) {
-            return 'Please select a valid user from the dropdown.';
-        }
-        if (input.user_role_weight <= 0 || input.device_criticality_weight <= 0 || input.network_anomaly_factor <= 0) {
-            return 'All weights/factors must be greater than 0.';
-        }
-        const cidrs = parseTrustedNetworks(trustedNetworksRaw);
-        if (cidrs.some(c => !CIDR_PATTERN.test(c))) {
-            return 'Trusted networks must be valid CIDR values (example: 10.10.0.0/16).';
-        }
-        return null;
-    };
-
-    const handleCreatePolicy = () => {
-        const errMsg = validateDraft(draft, trustedNetworksText);
-        if (errMsg) {
-            setValidationError(errMsg);
-            showToast(errMsg, 'warning');
-            return;
-        }
-        setValidationError('');
-        const payload: EditablePolicy = {
-            ...draft,
-            name: draft.name.trim(),
-            scope_value: draft.scope_type === 'global' ? '*' : draft.scope_value.trim(),
-            trusted_networks: parseTrustedNetworks(trustedNetworksText),
-            notes: (draft.notes || '').trim(),
-        };
-        createMutation.mutate(payload);
-    };
-
     return (
-        <div className="space-y-6">
-            <div>
-                <h2 className="text-xl font-bold text-slate-900 dark:text-white">Context Policies</h2>
-                <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-                    Hybrid context-aware controls. System infers context automatically, and these policies tune risk weighting by global, agent, and user scope.
-                </p>
-            </div>
+        <div className="space-y-6 w-full min-w-0 animate-slide-up-fade">
+            <InsightHero
+                icon={ShieldAlert}
+                accent="cyan"
+                eyebrow="System Configuration"
+                title="Context Policies"
+                lead={<>Manage contextual trust policies that define Risk Scores dynamically across the fleet. Assign rules based on agents, users, or global scope.</>}
+            />
 
-            <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-4 space-y-3">
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
-                    <label className="space-y-1">
-                        <div className="text-xs font-semibold text-slate-600 dark:text-slate-300 uppercase tracking-wide">Policy Name</div>
-                        <input
-                            className="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
-                            placeholder="Example: Finance Laptops - High Sensitivity"
-                            value={draft.name}
-                            onChange={(e) => setDraft({ ...draft, name: e.target.value })}
-                        />
-                    </label>
+            <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
 
-                    <label className="space-y-1">
-                        <div className="text-xs font-semibold text-slate-600 dark:text-slate-300 uppercase tracking-wide">Scope Type</div>
-                        <select
-                            className="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
-                            value={draft.scope_type}
-                            onChange={(e) => {
-                                const nextScope = e.target.value as EditablePolicy['scope_type'];
-                                setDraft(prev => ({
-                                    ...prev,
-                                    scope_type: nextScope,
-                                    scope_value: nextScope === 'global' ? '*' : (prev.scope_value === '*' ? '' : prev.scope_value),
-                                }));
-                            }}
-                        >
-                            <option value="global">global</option>
-                            <option value="agent">agent</option>
-                            <option value="user">user</option>
-                        </select>
-                    </label>
+                {/* FORM PANEL */}
+                <div className="xl:col-span-1">
+                    <div className="bg-white/95 dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800 backdrop-blur-md rounded-2xl p-5 shadow-sm">
+                        <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2 mb-4">
+                            <LayoutList className="w-4 h-4 text-cyan-500" />
+                            {draft.id ? 'Edit Policy' : 'Create New Policy'}
+                        </h3>
 
-                    <label className="space-y-1">
-                        <div className="text-xs font-semibold text-slate-600 dark:text-slate-300 uppercase tracking-wide">Scope Value</div>
-                        {draft.scope_type === 'global' ? (
-                            <input
-                                className="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
-                                placeholder="Example: *"
-                                value="*"
-                                disabled
-                                readOnly
-                            />
-                        ) : (
-                            <select
-                                className="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
-                                value={draft.scope_value}
-                                disabled={draft.scope_type === 'agent' ? isAgentsLoading : isEndpointUsersLoading}
-                                onChange={(e) => setDraft({ ...draft, scope_value: e.target.value })}
-                            >
-                                <option value="">
-                                    {draft.scope_type === 'agent'
-                                        ? (isAgentsLoading ? 'Loading agents...' : 'Select agent...')
-                                        : (isEndpointUsersLoading ? 'Loading endpoint users...' : 'Select endpoint user...')}
-                                </option>
-                                {(draft.scope_type === 'agent' ? agentOptions : userOptions).map((opt) => (
-                                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                        {validationError && (
+                            <div className="mb-4 p-3 rounded-xl bg-rose-50 dark:bg-rose-900/20 text-rose-600 dark:text-rose-400 text-xs font-medium border border-rose-100 dark:border-rose-900/50">
+                                {validationError}
+                            </div>
+                        )}
+
+                        <div className="space-y-4">
+                            <div>
+                                <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1.5">Policy Name</label>
+                                <input className="input w-full" value={draft.name} onChange={e => setDraft(d => ({ ...d, name: e.target.value }))} placeholder="e.g. Exec Laptop Trust" />
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-3">
+                                <div>
+                                    <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1.5">Scope Type</label>
+                                    <select className="input w-full" value={draft.scope_type} onChange={e => setDraft(d => ({ ...d, scope_type: e.target.value as any, scope_value: '' }))}>
+                                        <option value="global">Global</option>
+                                        <option value="agent">Agent</option>
+                                        <option value="user">User</option>
+                                    </select>
+                                </div>
+                                {draft.scope_type !== 'global' && (
+                                    <div>
+                                        <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1.5">Target</label>
+                                        {draft.scope_type === 'agent' ? (
+                                            <select className="input w-full" value={draft.scope_value} onChange={e => setDraft(d => ({ ...d, scope_value: e.target.value }))}>
+                                                <option value="">Select Agent…</option>
+                                                {(agentsData?.data ?? []).map(a => <option key={a.id} value={a.id}>{a.hostname}</option>)}
+                                            </select>
+                                        ) : (
+                                            <select className="input w-full" value={draft.scope_value} onChange={e => setDraft(d => ({ ...d, scope_value: e.target.value }))}>
+                                                <option value="">Select User…</option>
+                                                {endpointUsers.map(u => <option key={u} value={u}>{u}</option>)}
+                                            </select>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
+
+                            <div className="grid grid-cols-3 gap-3 pt-1">
+                                {[
+                                    { label: 'Role Weight', field: 'user_role_weight' as const },
+                                    { label: 'Criticality', field: 'device_criticality_weight' as const },
+                                    { label: 'Net Factor', field: 'network_anomaly_factor' as const },
+                                ].map(({ label, field }) => (
+                                    <div key={field}>
+                                        <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-500 mb-1">{label}</label>
+                                        <input
+                                            type="number" step="0.1" min="0" max="10"
+                                            className="input w-full font-mono text-sm"
+                                            value={draft[field]}
+                                            onChange={e => setDraft(d => ({ ...d, [field]: parseFloat(e.target.value) || 1.0 }))}
+                                        />
+                                    </div>
                                 ))}
-                            </select>
-                        )}
-                        {draft.scope_type === 'agent' && (
-                            <div className="mt-2 flex items-center justify-between text-xs text-slate-500 dark:text-slate-400">
-                                <span>{agentOptions.length === 0 && !isAgentsLoading ? 'No agents found yet.' : `${agentOptions.length} agents available`}</span>
-                                <button
-                                    type="button"
-                                    className="underline hover:text-slate-700 dark:hover:text-slate-200"
-                                    onClick={() => refetchAgents()}
-                                >
-                                    Refresh agents
-                                </button>
                             </div>
-                        )}
-                        {draft.scope_type === 'user' && (
-                            <div className="mt-2 flex items-center justify-between text-xs text-slate-500 dark:text-slate-400">
-                                <span>{userOptions.length === 0 && !isEndpointUsersLoading ? 'No endpoint users found yet.' : `${userOptions.length} endpoint users available`}</span>
-                                <button
-                                    type="button"
-                                    className="underline hover:text-slate-700 dark:hover:text-slate-200"
-                                    onClick={() => refetchEndpointUsers()}
-                                >
-                                    Refresh endpoint users
-                                </button>
-                            </div>
-                        )}
-                    </label>
 
-                    <label className="space-y-1">
-                        <div className="text-xs font-semibold text-slate-600 dark:text-slate-300 uppercase tracking-wide">Policy Status</div>
-                        <div className="h-[42px] px-3 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 flex items-center">
-                            <label className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-200">
-                                <input
-                                    type="checkbox"
-                                    checked={draft.enabled}
-                                    onChange={(e) => setDraft({ ...draft, enabled: e.target.checked })}
+                            <div className="pt-1">
+                                <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1.5">
+                                    Trusted Networks <span className="normal-case font-normal">(CIDR, comma-separated)</span>
+                                </label>
+                                <textarea
+                                    className="input w-full font-mono text-xs min-h-[56px]"
+                                    placeholder="192.168.1.0/24, 10.0.0.0/8"
+                                    value={trustedNetworksText}
+                                    onChange={e => setTrustedNetworksText(e.target.value)}
                                 />
-                                Enabled
-                            </label>
-                        </div>
-                    </label>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                    <label className="space-y-1">
-                        <div className="text-xs font-semibold text-slate-600 dark:text-slate-300 uppercase tracking-wide">User Role Weight</div>
-                        <input
-                            type="number"
-                            step="0.1"
-                            min="0.1"
-                            className="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
-                            placeholder="Example: 1.2 (1.0 neutral)"
-                            value={draft.user_role_weight}
-                            onChange={(e) => setDraft({ ...draft, user_role_weight: Number(e.target.value) })}
-                        />
-                    </label>
-
-                    <label className="space-y-1">
-                        <div className="text-xs font-semibold text-slate-600 dark:text-slate-300 uppercase tracking-wide">Device Criticality Weight</div>
-                        <input
-                            type="number"
-                            step="0.1"
-                            min="0.1"
-                            className="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
-                            placeholder="Example: 1.4 for critical servers"
-                            value={draft.device_criticality_weight}
-                            onChange={(e) => setDraft({ ...draft, device_criticality_weight: Number(e.target.value) })}
-                        />
-                    </label>
-
-                    <label className="space-y-1">
-                        <div className="text-xs font-semibold text-slate-600 dark:text-slate-300 uppercase tracking-wide">Network Anomaly Factor</div>
-                        <input
-                            type="number"
-                            step="0.1"
-                            min="0.1"
-                            className="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
-                            placeholder="Example: 1.1 outside trusted network"
-                            value={draft.network_anomaly_factor}
-                            onChange={(e) => setDraft({ ...draft, network_anomaly_factor: Number(e.target.value) })}
-                        />
-                    </label>
-                </div>
-
-                <label className="space-y-1 block">
-                    <div className="text-xs font-semibold text-slate-600 dark:text-slate-300 uppercase tracking-wide">Trusted Networks (CIDR)</div>
-                    <input
-                        className="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
-                        placeholder="Example: 10.0.0.0/8, 192.168.1.0/24, 172.16.0.0/12"
-                        value={trustedNetworksText}
-                        onChange={(e) => {
-                            setTrustedNetworksText(e.target.value);
-                            setDraft({
-                                ...draft,
-                                trusted_networks: parseTrustedNetworks(e.target.value),
-                            });
-                        }}
-                    />
-                </label>
-
-                <label className="space-y-1 block">
-                    <div className="text-xs font-semibold text-slate-600 dark:text-slate-300 uppercase tracking-wide">Notes</div>
-                    <input
-                        className="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900"
-                        placeholder="Example: Owner=SOC, reason=Tier-0 protection, review=monthly"
-                        value={draft.notes || ''}
-                        onChange={(e) => setDraft({ ...draft, notes: e.target.value })}
-                    />
-                </label>
-                <button
-                    onClick={handleCreatePolicy}
-                    className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-500 disabled:opacity-50"
-                    disabled={hasPendingMutation || !draft.name || !(draft.scope_type === 'global' ? '*' : draft.scope_value.trim())}
-                >
-                    <Plus size={16} /> Add Policy
-                </button>
-                {matchingScope && (
-                    <div className="text-xs text-blue-600 dark:text-blue-400">
-                        Note: a policy already exists for `{matchingScope.scope_type}:{matchingScope.scope_value}`. Saving will replace it (upsert semantics).
-                    </div>
-                )}
-                {validationError && (
-                    <div className="text-xs text-red-600 dark:text-red-400">
-                        {validationError}
-                    </div>
-                )}
-                {!globalExists && (
-                    <div className="text-xs text-amber-600 dark:text-amber-400">
-                        Warning: global baseline policy is missing. Create one with scope `global` and scope value `*`.
-                    </div>
-                )}
-            </div>
-
-            <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-4">
-                {isLoading ? (
-                    <div className="text-sm text-slate-500">Loading context policies...</div>
-                ) : error ? (
-                    <div className="text-sm text-red-500">Failed to load context policies.</div>
-                ) : (
-                    <div className="space-y-2">
-                        {items.map((item) => (
-                            <div key={item.id} className="flex items-center justify-between gap-3 p-3 rounded-lg border border-slate-200 dark:border-slate-700">
-                                <div className="min-w-0">
-                                    <div className="text-sm font-semibold text-slate-900 dark:text-white truncate">
-                                        {item.name} <span className="text-xs font-normal text-slate-500">({item.scope_type}:{item.scope_value})</span>
-                                    </div>
-                                    <div className="text-xs text-slate-500 mt-1">
-                                        W(user/dev/net): {item.user_role_weight.toFixed(2)} / {item.device_criticality_weight.toFixed(2)} / {item.network_anomaly_factor.toFixed(2)}
-                                    </div>
-                                </div>
-                                <div className="flex items-center gap-2">
-                                    <button
-                                        onClick={() => updateMutation.mutate({
-                                            id: item.id,
-                                            payload: { ...item, enabled: !item.enabled },
-                                        })}
-                                        className="px-3 py-1.5 text-xs rounded-md border border-slate-300 dark:border-slate-700"
-                                    >
-                                        <Save size={14} className="inline mr-1" /> {item.enabled ? 'Disable' : 'Enable'}
-                                    </button>
-                                    <button
-                                        onClick={() => deleteMutation.mutate(item.id)}
-                                        className="px-3 py-1.5 text-xs rounded-md border border-red-300 text-red-600 dark:border-red-700"
-                                        disabled={item.scope_type === 'global' && item.scope_value === '*'}
-                                        title={item.scope_type === 'global' && item.scope_value === '*' ? 'Keep global baseline policy in place' : undefined}
-                                    >
-                                        <Trash2 size={14} className="inline mr-1" /> Delete
-                                    </button>
-                                </div>
                             </div>
-                        ))}
-                        {items.length === 0 && (
-                            <div className="text-sm text-slate-500">No context policies found.</div>
-                        )}
+
+                            <div>
+                                <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1.5">Notes</label>
+                                <input className="input w-full text-xs" value={draft.notes || ''} onChange={e => setDraft(d => ({ ...d, notes: e.target.value }))} placeholder="Optional notes" />
+                            </div>
+
+                            <label className="flex items-center gap-2 select-none cursor-pointer">
+                                <input type="checkbox" className="rounded" checked={draft.enabled} onChange={e => setDraft(d => ({ ...d, enabled: e.target.checked }))} />
+                                <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Policy Enabled</span>
+                            </label>
+
+                            <div className="flex justify-end gap-2 pt-4 border-t border-slate-100 dark:border-slate-800 mt-4">
+                                {draft.id && (
+                                    <button type="button" className="btn text-xs" onClick={() => { setDraft(NEW_POLICY); setTrustedNetworksText(''); setValidationError(''); }}>
+                                        Cancel
+                                    </button>
+                                )}
+                                <button
+                                    type="button"
+                                    className="btn btn-primary text-xs flex items-center gap-2"
+                                    disabled={mutationCreate.isPending || mutationUpdate.isPending}
+                                    onClick={handleSave}
+                                >
+                                    {draft.id ? <Save className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
+                                    {draft.id ? 'Save Changes' : 'Create Policy'}
+                                </button>
+                            </div>
+                        </div>
                     </div>
-                )}
+                </div>
+
+                {/* LIST PANEL */}
+                <div className="xl:col-span-2">
+                    <div className="bg-white/95 dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800 backdrop-blur-md rounded-2xl shadow-sm overflow-hidden">
+                        <div className="px-5 py-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
+                            <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2">
+                                <Shield className="w-4 h-4 text-indigo-500" />
+                                Active Policies
+                            </h3>
+                            <span className="text-xs font-semibold text-slate-500 bg-slate-100 dark:bg-slate-800 px-2.5 py-1 rounded-full">
+                                {items.length} {items.length === 1 ? 'rule' : 'rules'}
+                            </span>
+                        </div>
+
+                        <div className="overflow-x-auto">
+                            <table className="w-full text-left text-sm">
+                                <thead className="bg-slate-50/80 dark:bg-slate-900/50 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider border-b border-slate-200 dark:border-slate-800">
+                                    <tr>
+                                        <th className="px-5 py-3">Policy</th>
+                                        <th className="px-5 py-3">Scope</th>
+                                        <th className="px-5 py-3">Weights</th>
+                                        <th className="px-5 py-3">Status</th>
+                                        <th className="px-5 py-3 text-right">Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                                    {isLoading ? (
+                                        <tr><td colSpan={5} className="px-5 py-8 text-center text-slate-400 text-sm">Loading policies…</td></tr>
+                                    ) : items.length === 0 ? (
+                                        <tr><td colSpan={5} className="px-5 py-8 text-center text-slate-400 text-sm">No context policies defined yet.</td></tr>
+                                    ) : items.map(p => (
+                                        <tr key={p.id} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/30 transition-colors group">
+                                            <td className="px-5 py-4">
+                                                <div className="font-semibold text-slate-800 dark:text-slate-100">{p.name}</div>
+                                                {p.notes && <div className="text-[10px] text-slate-500 mt-0.5 max-w-[180px] truncate">{p.notes}</div>}
+                                            </td>
+                                            <td className="px-5 py-4">
+                                                <div className="flex items-center gap-1.5">
+                                                    {p.scope_type === 'global'
+                                                        ? <Globe className="w-3.5 h-3.5 text-indigo-500" />
+                                                        : p.scope_type === 'agent'
+                                                            ? <Server className="w-3.5 h-3.5 text-cyan-500" />
+                                                            : <Key className="w-3.5 h-3.5 text-amber-500" />}
+                                                    <span className="capitalize text-xs font-medium text-slate-700 dark:text-slate-300">{p.scope_type}</span>
+                                                </div>
+                                                {p.scope_type !== 'global' && (
+                                                    <div className="text-[10px] font-mono text-slate-500 mt-0.5 max-w-[150px] truncate">{p.scope_value}</div>
+                                                )}
+                                            </td>
+                                            <td className="px-5 py-4">
+                                                <div className="flex flex-col gap-0.5 text-[10px] font-mono text-slate-500">
+                                                    <span>Role: <span className="text-slate-700 dark:text-slate-300 font-medium">{p.user_role_weight}×</span></span>
+                                                    <span>Crit: <span className="text-slate-700 dark:text-slate-300 font-medium">{p.device_criticality_weight}×</span></span>
+                                                    <span>Net:  <span className="text-slate-700 dark:text-slate-300 font-medium">{p.network_anomaly_factor}×</span></span>
+                                                </div>
+                                            </td>
+                                            <td className="px-5 py-4">
+                                                <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border ${p.enabled
+                                                    ? 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800/50'
+                                                    : 'bg-slate-100 dark:bg-slate-800 text-slate-500 border-slate-200 dark:border-slate-700'}`}>
+                                                    {p.enabled ? 'Active' : 'Disabled'}
+                                                </span>
+                                            </td>
+                                            <td className="px-5 py-4 text-right">
+                                                <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                    <button
+                                                        onClick={() => handleEdit(p)}
+                                                        className="p-1.5 text-slate-400 hover:text-cyan-600 dark:hover:text-cyan-400 hover:bg-cyan-50 dark:hover:bg-cyan-900/30 rounded-lg transition-colors"
+                                                        title="Edit"
+                                                    >
+                                                        <Save className="w-4 h-4" />
+                                                    </button>
+                                                    <button
+                                                        onClick={() => handleDelete(p.id)}
+                                                        className="p-1.5 text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-900/30 rounded-lg transition-colors"
+                                                        title="Delete"
+                                                        disabled={mutationDelete.isPending}
+                                                    >
+                                                        <Trash2 className="w-4 h-4" />
+                                                    </button>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
             </div>
         </div>
     );
 }
-

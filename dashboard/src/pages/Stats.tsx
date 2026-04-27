@@ -4,6 +4,7 @@ import { useState, useMemo } from 'react';
 import {
     PieChart, Pie, Cell,
     AreaChart, Area,
+    BarChart, Bar, CartesianGrid,
     XAxis, YAxis,
     Tooltip, ResponsiveContainer
 } from 'recharts';
@@ -195,7 +196,7 @@ export default function Stats() {
         return cells;
     }, [heatmapData]);
 
-    const heatmapMax = useMemo(() => Math.max(...heatmapCells.map(c => c.count), 1), [heatmapCells]);
+
 
     // Top targeted endpoints from by_agent
     const topEndpoints = useMemo(() => {
@@ -228,7 +229,7 @@ export default function Stats() {
         <div>
             <div className="flex justify-between items-center mb-8">
                 <div className="flex flex-col">
-                    <h2 className="text-xl font-bold text-slate-900 dark:text-white">Reports & Statistics</h2>
+                    <h2 className="text-xl font-bold text-slate-900 dark:text-white">Statistics</h2>
                     <p className="text-sm font-medium text-slate-500 dark:text-slate-400 mt-1">
                         Historical trends and exports from the telemetry engine.
                     </p>
@@ -450,46 +451,27 @@ export default function Stats() {
 
             {/* Heatmap + Top Endpoints Row */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
-                {/* Alert Heatmap Calendar */}
+                {/* Alert Volume Bar Chart */}
                 <div className="lg:col-span-2 card border border-slate-200 dark:border-slate-700/60 shadow-lg bg-white dark:bg-slate-800/90 rounded-xl">
                     <h3 className="text-base font-bold text-slate-800 dark:text-white mb-4 flex items-center gap-2">
-                        <Activity className="w-4 h-4 text-cyan-400" /> 30-Day Alert Heatmap
+                        <Activity className="w-4 h-4 text-cyan-400" /> 30-Day Alert Volume
                     </h3>
-                    <div className="grid gap-1.5" style={{ gridTemplateColumns: 'repeat(10, 1fr)' }}>
-                        {heatmapCells.map((cell) => {
-                            const intensity = cell.count === 0 ? 0 : Math.max(0.15, cell.count / heatmapMax);
-                            const bg = cell.count === 0
-                                ? 'rgba(30,48,72,0.3)'
-                                : intensity < 0.3 ? 'rgba(59,130,246,0.4)'
-                                : intensity < 0.6 ? 'rgba(245,158,11,0.6)'
-                                : intensity < 0.85 ? 'rgba(249,115,22,0.75)'
-                                : 'rgba(244,63,94,0.9)';
-                            return (
-                                <div
-                                    key={cell.date}
-                                    title={`${cell.label}: ${cell.count} alerts`}
-                                    className="heatmap-cell aspect-square rounded"
-                                    style={{ background: bg }}
+                    {heatmapCells.length === 0 ? (
+                        <div className="h-[200px] flex items-center justify-center text-slate-500 text-sm">No volume data</div>
+                    ) : (
+                        <ResponsiveContainer width="100%" height={200}>
+                            <BarChart data={heatmapCells} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(148,163,184,0.1)" />
+                                <XAxis dataKey="label" tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
+                                <YAxis tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
+                                <Tooltip
+                                    contentStyle={{ background: 'rgba(15,23,42,0.95)', border: '1px solid rgba(30,48,72,0.8)', borderRadius: '10px', color: 'white', fontSize: '12px' }}
+                                    cursor={{ fill: 'rgba(148,163,184,0.1)' }}
                                 />
-                            );
-                        })}
-                    </div>
-                    <div className="flex justify-between items-center mt-3">
-                        <span className="text-[10px] text-slate-400">30 days ago</span>
-                        <div className="flex items-center gap-2 text-[10px] text-slate-400">
-                            <span>Scale:</span>
-                            {[0, 0.3, 0.6, 0.85, 1].map((t, i) => (
-                                <span key={i} className="w-3 h-3 rounded-sm inline-block" style={{
-                                    background: t === 0 ? 'rgba(30,48,72,0.3)'
-                                        : t < 0.3 ? 'rgba(59,130,246,0.4)'
-                                        : t < 0.6 ? 'rgba(245,158,11,0.6)'
-                                        : t < 0.85 ? 'rgba(249,115,22,0.75)'
-                                        : 'rgba(244,63,94,0.9)'
-                                }} />
-                            ))}
-                            <span>Today</span>
-                        </div>
-                    </div>
+                                <Bar dataKey="count" fill="#38bdf8" radius={[4, 4, 0, 0]} />
+                            </BarChart>
+                        </ResponsiveContainer>
+                    )}
                 </div>
 
                 {/* Top Targeted Endpoints */}

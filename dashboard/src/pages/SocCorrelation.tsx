@@ -340,7 +340,7 @@ export default function SocCorrelation() {
     return (
         <div className="space-y-6 animate-slide-up-fade w-full min-w-0">
             <InsightHero
-                variant="dark"
+                
                 accent="cyan"
                 icon={GitBranch}
                 eyebrow="SOC correlation workspace"

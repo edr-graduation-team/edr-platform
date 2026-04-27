@@ -54,7 +54,7 @@ import {
     formatRelativeTime,
     getEffectiveStatus,
     isDecommissioned,
-    STALE_THRESHOLD_MS,
+
 } from '../../utils/agentDisplay';
 
 const CHART_TOOLTIP: React.CSSProperties = {
@@ -70,7 +70,7 @@ const OS_FALLBACK = '#64748b';
 const COMPLIANCE_AGENT_PAGE = 1000;
 const COMPLIANCE_MAX_PAGES = 100;
 
-/** Full sorted fleet for compliance (paginated GET /api/v1/agents until has_more is false). */
+/** Full sorted fleet for compliance (paginated Agents Search API until has_more is false). */
 async function fetchEntireAgentFleetForCompliance(): Promise<{ agents: Agent[]; truncated: boolean }> {
     const all: Agent[] = [];
     let offset = 0;
@@ -94,7 +94,6 @@ async function fetchEntireAgentFleetForCompliance(): Promise<{ agents: Agent[]; 
     return { agents: all, truncated };
 }
 
-const CERT_EXPIRING_SOON_MS = 14 * 24 * 60 * 60 * 1000;
 
 type ComplianceReasonCode =
     | 'offline'
@@ -104,38 +103,99 @@ type ComplianceReasonCode =
     | 'cert_expired'
     | 'cert_expiring';
 
-function evalEndpointCompliance(a: Agent): { compliant: boolean; reasons: string[]; codes: ComplianceReasonCode[] } {
+type ComplianceStatus = 'compliant' | 'non-compliant' | 'pending_remediation';
+type ComplianceSeverity = 'Critical' | 'High' | 'Medium' | 'Low';
+
+interface ComplianceCheck {
+    id: string; // e.g., POL-001
+    category: 'Policy' | 'Security';
+    name: string;
+    passed: boolean;
+    reason?: string;
+    severity?: ComplianceSeverity;
+    code: ComplianceReasonCode;
+}
+
+function evalEndpointCompliance(a: Agent): {
+    status: ComplianceStatus;
+    checks: ComplianceCheck[];
+    reasons: string[];
+    codes: ComplianceReasonCode[];
+} {
+    const checks: ComplianceCheck[] = [];
     const reasons: string[] = [];
     const codes: ComplianceReasonCode[] = [];
+    let status: ComplianceStatus = 'compliant';
+    let hasNonCompliant = false;
+    let hasPending = false;
+
+    // Policy Compliance
     const eff = getEffectiveStatus(a);
     if (eff !== 'online' && eff !== 'degraded') {
+        checks.push({ id: 'POL-001', category: 'Policy', name: 'Agent Connectivity', passed: false, reason: 'Agent not online (effective status)', code: 'offline', severity: 'Critical' });
         reasons.push('Agent not online (effective status)');
         codes.push('offline');
+        hasNonCompliant = true;
+    } else {
+        checks.push({ id: 'POL-001', category: 'Policy', name: 'Agent Connectivity', passed: true, code: 'offline' });
     }
-    if ((a.health_score ?? 0) < 80) {
-        reasons.push('Health score below 80%');
-        codes.push('health');
-    }
-    if (a.is_isolated) {
-        reasons.push('Host is network-isolated');
-        codes.push('isolated');
-    }
+
     if (!a.current_cert_id) {
+        checks.push({ id: 'POL-002', category: 'Policy', name: 'mTLS Certificate Presence', passed: false, reason: 'Missing active mTLS certificate', code: 'no_cert', severity: 'Critical' });
         reasons.push('Missing active mTLS certificate');
         codes.push('no_cert');
+        hasNonCompliant = true;
+    } else {
+        checks.push({ id: 'POL-002', category: 'Policy', name: 'mTLS Certificate Presence', passed: true, code: 'no_cert' });
     }
+
     const certExpiry = a.cert_expires_at ? new Date(a.cert_expires_at) : null;
     if (certExpiry && !Number.isNaN(certExpiry.getTime())) {
         const t = certExpiry.getTime();
         if (t < Date.now()) {
+            checks.push({ id: 'POL-003', category: 'Policy', name: 'mTLS Certificate Validity', passed: false, reason: 'mTLS certificate expired', code: 'cert_expired', severity: 'Critical' });
             reasons.push('mTLS certificate expired');
             codes.push('cert_expired');
-        } else if (t < Date.now() + CERT_EXPIRING_SOON_MS) {
+            hasNonCompliant = true;
+        } else if (t < Date.now() + 14 * 24 * 60 * 60 * 1000) {
+            checks.push({ id: 'POL-003', category: 'Policy', name: 'mTLS Certificate Validity', passed: false, reason: 'mTLS certificate expires within 14 days', code: 'cert_expiring', severity: 'Medium' });
             reasons.push('mTLS certificate expires within 14 days');
             codes.push('cert_expiring');
+            hasNonCompliant = true;
+        } else {
+            checks.push({ id: 'POL-003', category: 'Policy', name: 'mTLS Certificate Validity', passed: true, code: 'cert_expiring' });
         }
+    } else if (a.current_cert_id) {
+        checks.push({ id: 'POL-003', category: 'Policy', name: 'mTLS Certificate Validity', passed: true, code: 'cert_expiring' });
     }
-    return { compliant: reasons.length === 0, reasons, codes };
+
+    // Security Posture
+    if ((a.health_score ?? 0) < 80) {
+        checks.push({ id: 'SEC-001', category: 'Security', name: 'Minimum Health Score', passed: false, reason: 'Health score below 80%', code: 'health', severity: 'High' });
+        reasons.push('Health score below 80%');
+        codes.push('health');
+        hasNonCompliant = true;
+    } else {
+        checks.push({ id: 'SEC-001', category: 'Security', name: 'Minimum Health Score', passed: true, code: 'health' });
+    }
+
+    // Isolate is now Pending_Remediation
+    if (a.is_isolated) {
+        checks.push({ id: 'SEC-002', category: 'Security', name: 'Network Isolation Status', passed: false, reason: 'Host is network-isolated', code: 'isolated', severity: 'Low' });
+        reasons.push('Host is network-isolated (Pending Remediation)');
+        codes.push('isolated');
+        hasPending = true;
+    } else {
+        checks.push({ id: 'SEC-002', category: 'Security', name: 'Network Isolation Status', passed: true, code: 'isolated' });
+    }
+
+    if (hasNonCompliant) {
+        status = 'non-compliant';
+    } else if (hasPending) {
+        status = 'pending_remediation';
+    }
+
+    return { status, checks, reasons, codes };
 }
 
 /** Live data from connection-manager + sigma (self-hosted). */
@@ -346,7 +406,7 @@ export function DashboardEndpointPage() {
                 <Link className="font-semibold underline" to="/management/devices">
                     Device Management
                 </Link>{' '}
-                after verifying the connection-manager API.
+                and try again. If the issue persists, contact your system administrator.
             </div>
         );
     }
@@ -372,17 +432,16 @@ export function DashboardEndpointPage() {
     return (
         <div className="space-y-6 animate-slide-up-fade w-full min-w-0">
             <InsightHero
-                variant="dark"
+                
                 accent="emerald"
                 icon={BarChart3}
-                eyebrow="Executive fleet"
+                eyebrow="Fleet Overview"
                 title="Endpoint Summary"
                 lead={
                     <>
-                        One screen for <strong className="text-white">leadership-grade posture</strong>: registry totals from{' '}
-                        <code className="text-[11px] text-emerald-200/95 bg-white/10 px-1 rounded">/agents/stats</code>, sampled{' '}
-                        <strong className="text-white">live connectivity</strong> using the same last_seen rule as Devices, and a{' '}
-                        <strong className="text-white">curated risk excerpt</strong> from endpoint-risk — without replacing the deep grids elsewhere.
+                        A high-level overview of your entire fleet: <strong className="text-white">total registered endpoints</strong>,{' '}
+                        <strong className="text-white">real-time connectivity status</strong>, operating system distribution,{' '}
+                        and the <strong className="text-white">highest-risk devices</strong> requiring immediate attention.
                     </>
                 }
             />
@@ -391,82 +450,82 @@ export function DashboardEndpointPage() {
                 <div className="rounded-xl border border-slate-200 dark:border-slate-700/60 bg-white/90 dark:bg-slate-800/80 p-4 shadow-sm">
                     <div className="text-xs font-semibold uppercase text-slate-500 dark:text-slate-400 flex items-center gap-2">
                         <Layers className="w-4 h-4 text-cyan-500" />
-                        vs Service Summary
+                        Security Posture
                     </div>
                     <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">
                         <Link className="text-cyan-600 dark:text-cyan-400 font-medium hover:underline" to="/dashboards/service">
-                            Service Summary
+                            Security Posture
                         </Link>{' '}
-                        tracks commands + Sigma totals + reliability. This page stays on <strong>endpoints only</strong>.
+                        provides an overall security health view including detection rules, alerts, and system reliability.
                     </p>
                 </div>
                 <div className="rounded-xl border border-slate-200 dark:border-slate-700/60 bg-white/90 dark:bg-slate-800/80 p-4 shadow-sm">
                     <div className="text-xs font-semibold uppercase text-slate-500 dark:text-slate-400 flex items-center gap-2">
                         <TrendingUp className="w-4 h-4 text-amber-500" />
-                        vs Endpoint Risk
+                        Risk Analysis
                     </div>
                     <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">
                         <Link className="text-cyan-600 dark:text-cyan-400 font-medium hover:underline" to="/endpoint-risk">
                             Endpoint Risk
                         </Link>{' '}
-                        is the full ranked board. Here you only see a <strong>top-10 executive excerpt</strong> sorted by peak score.
+                        shows the complete risk ranking for all devices. This page shows the <strong>top 10 highest-risk endpoints</strong>.
                     </p>
                 </div>
                 <div className="rounded-xl border border-slate-200 dark:border-slate-700/60 bg-white/90 dark:bg-slate-800/80 p-4 shadow-sm">
                     <div className="text-xs font-semibold uppercase text-slate-500 dark:text-slate-400 flex items-center gap-2">
                         <Shield className="w-4 h-4 text-violet-500" />
-                        vs Compliance
+                        Compliance
                     </div>
                     <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">
                         <Link className="text-cyan-600 dark:text-cyan-400 font-medium hover:underline" to="/dashboards/endpoint-compliance">
                             Endpoint Compliance
                         </Link>{' '}
-                        evaluates rule-based pass/fail per host. This dashboard highlights drift and risk signals instead.
+                        evaluates each device against security policies. This dashboard focuses on fleet health and version drift.
                     </p>
                 </div>
                 <div className="rounded-xl border border-slate-200 dark:border-slate-700/60 bg-white/90 dark:bg-slate-800/80 p-4 shadow-sm">
                     <div className="text-xs font-semibold uppercase text-slate-500 dark:text-slate-400 flex items-center gap-2">
                         <Wifi className="w-4 h-4 text-sky-500" />
-                        vs Fleet connectivity
+                        Network Health
                     </div>
                     <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">
                         <Link className="text-cyan-600 dark:text-cyan-400 font-medium hover:underline" to="/management/network">
-                            Fleet connectivity
+                            Fleet Connectivity
                         </Link>{' '}
-                        is the SOC table for queues, drops, and IP inventory. Summary here stays compact and chart-led.
+                        provides detailed network monitoring per device. This page shows a condensed connectivity overview.
                     </p>
                 </div>
             </div>
 
             {riskQ.isError && (
                 <div className="rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 px-4 py-2.5 text-xs text-amber-900 dark:text-amber-200">
-                    Endpoint risk excerpt unavailable — confirm <code className="text-[10px]">alerts:read</code> for <code className="text-[10px]">/alerts/endpoint-risk</code>.
+                    Risk data is temporarily unavailable. Please check your connection and permissions.
                 </div>
             )}
 
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
                 <StatCard title="Total Endpoints" value={String(s.total)} icon={Server} subtext={`${s.pending} pending · ${s.suspended} suspended`} />
-                <StatCard title="Registry online" value={String(s.online)} icon={Activity} color="emerald" subtext={`Avg health ${Math.round(s.avg_health)}%`} />
+                <StatCard title="Online Endpoints" value={String(s.online)} icon={Activity} color="emerald" subtext={`Avg health ${Math.round(s.avg_health)}%`} />
                 <StatCard title="Offline / Degraded" value={`${s.offline} / ${s.degraded}`} icon={AlertTriangle} color="amber" />
-                <StatCard title="Hosts w/ open alerts" value={String(withOpenAlerts)} icon={Shield} color="red" subtext={`${riskRows.length} in risk index`} />
+                <StatCard title="Hosts with Active Alerts" value={String(withOpenAlerts)} icon={Shield} color="red" subtext={`${riskRows.length} devices monitored`} />
             </div>
 
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
                 <StatCard
-                    title="Live online (sample)"
+                    title="Currently Online"
                     value={agentsQ.isLoading ? '…' : String(liveSample.effOnline)}
                     icon={Fingerprint}
                     color="emerald"
-                    subtext={`First ${liveSample.n} hosts by hostname`}
+                    subtext="Based on live heartbeat data"
                 />
                 <StatCard
-                    title="Stale heartbeat"
+                    title="Stale Connection"
                     value={agentsQ.isLoading ? '…' : String(liveSample.stale)}
                     icon={Radio}
                     color="amber"
-                    subtext={`>${Math.round(STALE_THRESHOLD_MS / 1000)}s vs registry online/degraded`}
+                    subtext="Registered but not responding"
                 />
-                <StatCard title="Isolated (sample)" value={agentsQ.isLoading ? '…' : String(liveSample.isolated)} icon={AlertTriangle} color="red" />
+                <StatCard title="Isolated Devices" value={agentsQ.isLoading ? '…' : String(liveSample.isolated)} icon={AlertTriangle} color="red" />
                 <StatCard
                     title="Telemetry pressure"
                     value={agentsQ.isLoading ? '…' : `${liveSample.dropSum} drops`}
@@ -561,7 +620,7 @@ export function DashboardEndpointPage() {
                 <div className="rounded-xl border border-amber-200/80 dark:border-amber-900/40 bg-amber-50/60 dark:bg-amber-950/20 p-4 shadow-sm">
                     <h3 className="text-sm font-bold text-amber-950 dark:text-amber-100">Version drift (sample)</h3>
                     <p className="text-xs text-amber-900/80 dark:text-amber-200/90 mt-1">
-                        Dominant fleet version from registry: <code className="text-[11px]">{dominantVersion}</code>. The following hosts in the first {liveSample.n} rows differ — plan upgrades via{' '}
+                        Most common agent version in the fleet: <code className="text-[11px]">{dominantVersion}</code>. The following hosts in the first {liveSample.n} rows differ — schedule updates via{' '}
                         <Link className="font-semibold underline" to="/management/agent-deploy">
                             Agent Deployment
                         </Link>
@@ -583,9 +642,9 @@ export function DashboardEndpointPage() {
             {sortedRisk.length > 0 && (
                 <div className="rounded-xl border border-slate-200 dark:border-slate-700/60 bg-white/95 dark:bg-slate-800/90 backdrop-blur-sm p-5 shadow-sm">
                     <h3 className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-1 flex items-center gap-2">
-                        <AlertTriangle className="w-3.5 h-3.5 text-rose-500" /> Risk excerpt (peak score)
+                        <AlertTriangle className="w-3.5 h-3.5 text-rose-500" /> Highest Risk Endpoints
                     </h3>
-                    <p className="text-[11px] text-slate-500 dark:text-slate-400 mb-3">Top 10 from live endpoint-risk API — not the full triage grid.</p>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 mb-3">Top 10 endpoints ranked by highest risk score. View the full analysis in the Endpoint Risk page.</p>
                     <div className="overflow-x-auto">
                         <table className="min-w-full text-sm">
                             <thead>
@@ -659,8 +718,10 @@ export function DashboardAuditRedirect() {
     return <Navigate to="/audit" replace />;
 }
 
+
+
 export function DashboardEndpointCompliancePage() {
-    useEffect(() => { document.title = 'Endpoint Compliance — EDR Platform'; }, []);
+    useEffect(() => { document.title = 'Endpoint Compliance | EDR Platform'; }, []);
 
     const statsQ = useQuery({
         queryKey: ['agents', 'stats', 'compliance-context'],
@@ -679,14 +740,13 @@ export function DashboardEndpointCompliancePage() {
     });
 
     const [searchTerm, setSearchTerm] = useState('');
-    const [statusFilter, setStatusFilter] = useState<'all' | 'compliant' | 'non-compliant'>('all');
+    const [statusFilter, setStatusFilter] = useState<'all' | 'compliant' | 'non-compliant' | 'pending'>('all');
     const [sortCol, setSortCol] = useState<'hostname' | 'health' | 'status' | 'cert'>('hostname');
     const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
     const [page, setPage] = useState(0);
     const PAGE_SIZE = 20;
 
     const allRows = fleetQ.data?.agents ?? [];
-    const truncated = fleetQ.data?.truncated ?? false;
     const decommissioned = useMemo(() => allRows.filter(isDecommissioned), [allRows]);
     const activeRows = useMemo(() => allRows.filter((a) => !isDecommissioned(a)), [allRows]);
 
@@ -694,29 +754,29 @@ export function DashboardEndpointCompliancePage() {
         () =>
             activeRows.map((a) => {
                 const eff = getEffectiveStatus(a);
-                const { compliant, reasons, codes } = evalEndpointCompliance(a);
-                return { agent: a, eff, compliant, reasons, codes };
+                const { status, checks, reasons, codes } = evalEndpointCompliance(a);
+                return { agent: a, eff, status, checks, reasons, codes };
             }),
         [activeRows]
     );
 
-    const compliantCount = evaluatedActive.filter((e) => e.compliant).length;
-    const nonCompliantCount = evaluatedActive.length - compliantCount;
-    const isolatedActive = activeRows.filter((a) => a.is_isolated).length;
+    const compliantCount = evaluatedActive.filter((e) => e.status === 'compliant').length;
+    const pendingCount = evaluatedActive.filter((e) => e.status === 'pending_remediation').length;
+    const nonCompliantCount = evaluatedActive.filter((e) => e.status === 'non-compliant').length;
 
     const violationBars = useMemo(() => {
-        const labels: { code: ComplianceReasonCode; label: string; fill: string }[] = [
-            { code: 'offline', label: 'Not online (effective)', fill: '#64748b' },
-            { code: 'health', label: 'Health < 80%', fill: '#f59e0b' },
-            { code: 'isolated', label: 'Isolated', fill: '#ef4444' },
-            { code: 'no_cert', label: 'No mTLS cert', fill: '#a855f7' },
-            { code: 'cert_expired', label: 'Cert expired', fill: '#dc2626' },
-            { code: 'cert_expiring', label: 'Cert ≤14d', fill: '#f97316' },
+        const labels: { code: ComplianceReasonCode; label: string; fill: string; severity: ComplianceSeverity }[] = [
+            { code: 'offline', label: 'Not online', fill: '#ef4444', severity: 'Critical' },
+            { code: 'health', label: 'Health < 80%', fill: '#f97316', severity: 'High' },
+            { code: 'isolated', label: 'Isolated (Pending)', fill: '#eab308', severity: 'Medium' },
+            { code: 'no_cert', label: 'No mTLS cert', fill: '#a855f7', severity: 'Critical' },
+            { code: 'cert_expired', label: 'Cert expired', fill: '#dc2626', severity: 'Critical' },
+            { code: 'cert_expiring', label: 'Cert ≤14d', fill: '#f59e0b', severity: 'Medium' },
         ];
         return labels
             .map((L) => ({
                 ...L,
-                count: evaluatedActive.filter((e) => !e.compliant && e.codes.includes(L.code)).length,
+                count: evaluatedActive.filter((e) => e.status !== 'compliant' && e.codes.includes(L.code)).length,
             }))
             .filter((d) => d.count > 0);
     }, [evaluatedActive]);
@@ -729,8 +789,9 @@ export function DashboardEndpointCompliancePage() {
         };
         return evaluatedActive
             .filter((e) => {
-                if (statusFilter === 'compliant' && !e.compliant) return false;
-                if (statusFilter === 'non-compliant' && e.compliant) return false;
+                if (statusFilter === 'compliant' && e.status !== 'compliant') return false;
+                if (statusFilter === 'non-compliant' && e.status !== 'non-compliant') return false;
+                if (statusFilter === 'pending' && e.status !== 'pending_remediation') return false;
                 if (searchTerm && !e.agent.hostname.toLowerCase().includes(searchTerm.toLowerCase())) return false;
                 return true;
             })
@@ -738,19 +799,26 @@ export function DashboardEndpointCompliancePage() {
                 let cmp = 0;
                 if (sortCol === 'hostname') cmp = a.agent.hostname.localeCompare(b.agent.hostname);
                 else if (sortCol === 'health') cmp = (a.agent.health_score ?? 0) - (b.agent.health_score ?? 0);
-                else if (sortCol === 'status') cmp = (a.compliant ? 0 : 1) - (b.compliant ? 0 : 1);
+                else if (sortCol === 'status') {
+                    const weight = { 'compliant': 0, 'pending_remediation': 1, 'non-compliant': 2 };
+                    cmp = weight[a.status] - weight[b.status];
+                }
                 else if (sortCol === 'cert') cmp = certTs(a.agent) - certTs(b.agent);
                 return sortDir === 'asc' ? cmp : -cmp;
             });
     }, [evaluatedActive, searchTerm, sortCol, sortDir, statusFilter]);
 
-    const pieData = [
-        { name: 'Compliant', value: compliantCount, color: '#10b981' },
-        { name: 'Non-compliant', value: nonCompliantCount, color: '#f59e0b' },
-    ].filter((d) => d.value > 0);
-
     const denom = evaluatedActive.length || 1;
     const pctCompliant = Math.round((compliantCount / denom) * 100);
+
+    // @ts-ignore
+    const _pieData = [
+        { name: 'Compliant', value: compliantCount, color: '#10b981' },
+        { name: 'Pending Remediation', value: pendingCount, color: '#eab308' },
+        { name: 'Non-compliant', value: nonCompliantCount, color: '#ef4444' },
+    ].filter((d) => d.value > 0);
+
+
 
     if (fleetQ.isLoading) {
         return (
@@ -769,13 +837,12 @@ export function DashboardEndpointCompliancePage() {
     if (fleetQ.isError || !fleetQ.data) {
         return (
             <div className="rounded-xl border border-rose-200 dark:border-rose-900/50 bg-rose-50/80 dark:bg-rose-950/20 p-6 text-sm text-rose-900 dark:text-rose-200">
-                Could not load agents for compliance. Check connection-manager and <code className="text-xs">endpoints:read</code>.
+                Could not load agents for compliance. Check system connectivity and <code className="text-xs">endpoints:read</code> permissions.
             </div>
         );
     }
 
     const registryTotal = statsQ.data?.total ?? allRows.length;
-
     const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
     const safePage = Math.min(page, totalPages - 1);
     const pageRows = filtered.slice(safePage * PAGE_SIZE, (safePage + 1) * PAGE_SIZE);
@@ -794,179 +861,53 @@ export function DashboardEndpointCompliancePage() {
         return sortDir === 'asc' ? <ChevronUp className="w-3 h-3 inline" /> : <ChevronDown className="w-3 h-3 inline" />;
     };
 
-    const statsMismatch =
-        statsQ.data && !truncated && statsQ.data.total !== allRows.length
-            ? `Registry reports ${statsQ.data.total} agents; list returned ${allRows.length}.`
-            : null;
-
     return (
         <div className="space-y-6 animate-slide-up-fade w-full min-w-0">
             <InsightHero
-                variant="dark"
+                
                 accent="indigo"
                 icon={ListChecks}
-                eyebrow="Policy posture"
+                eyebrow="Security Compliance"
                 title="Endpoint Compliance"
                 lead={
                     <>
-                        Pass/fail per <strong className="text-white">active enrolled host</strong> using the same{' '}
-                        <code className="text-[11px] text-indigo-200/95 bg-white/10 px-1 rounded">last_seen</code> rule as Device Management, health from the registry, isolation flag,
-                        and mTLS material from{' '}
-                        <code className="text-[11px] text-indigo-200/95 bg-white/10 px-1 rounded">GET /api/v1/agents</code> (full fleet loaded in pages of {COMPLIANCE_AGENT_PAGE}).
-                        Decommissioned agents are listed for audit but <strong className="text-white">excluded from the compliance ratio</strong>.
+                        Evaluates each <strong className="text-white">active device</strong> against security policies including connectivity status, certificate validity, 
+                        and system health. Devices under <strong className="text-white">network isolation</strong> are classified as{' '}
+                        <strong className="text-white">Pending Remediation</strong> for targeted follow-up.
                     </>
                 }
             />
 
-            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                <div className="rounded-xl border border-slate-200 dark:border-slate-700/60 bg-white/90 dark:bg-slate-800/80 p-4 shadow-sm">
-                    <div className="text-xs font-semibold uppercase text-slate-500 dark:text-slate-400 flex items-center gap-2">
-                        <BarChart3 className="w-4 h-4 text-cyan-500" />
-                        vs Endpoint Summary
-                    </div>
-                    <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">
-                        <Link className="text-cyan-600 dark:text-cyan-400 font-medium hover:underline" to="/dashboards/endpoint">
-                            Endpoint Summary
-                        </Link>{' '}
-                        is charts + risk excerpt. Here the grid is <strong>binary compliance</strong> with explicit failure reasons.
-                    </p>
-                </div>
-                <div className="rounded-xl border border-slate-200 dark:border-slate-700/60 bg-white/90 dark:bg-slate-800/80 p-4 shadow-sm">
-                    <div className="text-xs font-semibold uppercase text-slate-500 dark:text-slate-400 flex items-center gap-2">
-                        <Server className="w-4 h-4 text-slate-500" />
-                        vs Device Management
-                    </div>
-                    <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">
-                        <Link className="text-cyan-600 dark:text-cyan-400 font-medium hover:underline" to="/management/devices">
-                            Devices
-                        </Link>{' '}
-                        is the operational console (filters, bulk actions). This page answers <strong>who fails which control</strong>.
-                    </p>
-                </div>
-                <div className="rounded-xl border border-slate-200 dark:border-slate-700/60 bg-white/90 dark:bg-slate-800/80 p-4 shadow-sm">
-                    <div className="text-xs font-semibold uppercase text-slate-500 dark:text-slate-400 flex items-center gap-2">
-                        <TrendingUp className="w-4 h-4 text-amber-500" />
-                        vs Endpoint Risk
-                    </div>
-                    <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">
-                        <Link className="text-cyan-600 dark:text-cyan-400 font-medium hover:underline" to="/endpoint-risk">
-                            Endpoint Risk
-                        </Link>{' '}
-                        ranks Sigma-driven exposure. Compliance is <strong>control-state</strong> (connectivity, health, cert, isolation) — orthogonal to alert volume.
-                    </p>
-                </div>
-                <div className="rounded-xl border border-slate-200 dark:border-slate-700/60 bg-white/90 dark:bg-slate-800/80 p-4 shadow-sm">
-                    <div className="text-xs font-semibold uppercase text-slate-500 dark:text-slate-400 flex items-center gap-2">
-                        <Wifi className="w-4 h-4 text-sky-500" />
-                        vs Fleet connectivity
-                    </div>
-                    <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">
-                        <Link className="text-cyan-600 dark:text-cyan-400 font-medium hover:underline" to="/management/network">
-                            Fleet connectivity
-                        </Link>{' '}
-                        focuses on queues, drops, and IP inventory. Here we only use connectivity as <strong>one compliance gate</strong>.
-                    </p>
-                </div>
-            </div>
-
-            {truncated && (
-                <div className="rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 px-4 py-2.5 text-xs text-amber-900 dark:text-amber-200">
-                    Fleet list stopped at {COMPLIANCE_AGENT_PAGE * COMPLIANCE_MAX_PAGES} agents (safety cap). Increase cap or filter server-side if you exceed this bound.
-                </div>
-            )}
-            {statsQ.isError && (
-                <div className="rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 px-4 py-2.5 text-xs text-amber-900 dark:text-amber-200">
-                    <code className="text-[10px]">GET /api/v1/agents/stats</code> failed — registry total uses loaded list size ({allRows.length}) until stats succeed.
-                </div>
-            )}
-            {statsMismatch && (
-                <div className="rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 px-4 py-2.5 text-xs text-amber-900 dark:text-amber-200">
-                    {statsMismatch}
-                </div>
-            )}
-
-            <div className="rounded-xl border border-slate-200 dark:border-slate-700/60 bg-white/95 dark:bg-slate-800/90 p-4 shadow-sm">
-                <h3 className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-3 flex items-center gap-2">
-                    <ClipboardList className="w-3.5 h-3.5 text-indigo-500" />
-                    In-scope controls (all must pass)
-                </h3>
-                <ul className="grid sm:grid-cols-2 gap-2 text-sm text-slate-600 dark:text-slate-300">
-                    <li className="flex gap-2">
-                        <span className="text-emerald-500 font-bold">✓</span>
-                        Effective agent status is <code className="text-[11px]">online</code> or <code className="text-[11px]">degraded</code> with{' '}
-                        <code className="text-[11px]">last_seen</code> within {Math.round(STALE_THRESHOLD_MS / 1000)}s (same as Devices).
-                    </li>
-                    <li className="flex gap-2">
-                        <span className="text-emerald-500 font-bold">✓</span>
-                        Registry <code className="text-[11px]">health_score</code> ≥ 80%.
-                    </li>
-                    <li className="flex gap-2">
-                        <span className="text-emerald-500 font-bold">✓</span>
-                        Not network-isolated (<code className="text-[11px]">is_isolated</code> = false) — isolation is treated as out-of-standard posture for this dashboard.
-                    </li>
-                    <li className="flex gap-2">
-                        <span className="text-emerald-500 font-bold">✓</span>
-                        Active mTLS enrollment: <code className="text-[11px]">current_cert_id</code> present, certificate not expired, and not expiring within 14 days.
-                    </li>
-                </ul>
-            </div>
-
             <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
-                <StatCard title="Registry total" value={String(registryTotal)} icon={Database} subtext="From /agents/stats" />
-                <StatCard title="Loaded for review" value={String(allRows.length)} icon={Server} subtext={truncated ? 'Truncated' : 'Full list'} />
-                <StatCard title="Active (in ratio)" value={String(evaluatedActive.length)} icon={Fingerprint} subtext={`${decommissioned.length} decommissioned excluded`} />
+                <StatCard title="Total Endpoints" value={String(registryTotal)} icon={Database} subtext="All registered devices" />
+                <StatCard title="Active Endpoints" value={String(evaluatedActive.length)} icon={Fingerprint} subtext={`${decommissioned.length} decommissioned excluded`} />
                 <StatCard title="Compliant" value={String(compliantCount)} icon={Shield} color="emerald" subtext={`${pctCompliant}% of active`} />
-                <StatCard title="Non-compliant" value={String(nonCompliantCount)} icon={AlertTriangle} color="amber" subtext={`Isolated (active): ${isolatedActive}`} />
+                <StatCard title="Pending Remediation" value={String(pendingCount)} icon={AlertTriangle} color="amber" subtext="Isolated devices" />
+                <StatCard title="Non-compliant" value={String(nonCompliantCount)} icon={Activity}  subtext="Critical failures" />
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-                <div className="rounded-xl border border-slate-200 dark:border-slate-700/60 bg-white/95 dark:bg-slate-800/90 backdrop-blur-sm p-4 shadow-sm flex flex-col items-center justify-center">
-                    <h3 className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-2 self-start">Active compliance ratio</h3>
-                    {pieData.length === 0 ? (
-                        <span className="text-sm text-slate-500 py-6">No active hosts</span>
-                    ) : (
-                        <ResponsiveContainer width="100%" height={130}>
-                            <PieChart>
-                                <Pie
-                                    data={pieData}
-                                    dataKey="value"
-                                    nameKey="name"
-                                    cx="50%"
-                                    cy="50%"
-                                    innerRadius={36}
-                                    outerRadius={56}
-                                    paddingAngle={3}
-                                    strokeWidth={0}
-                                >
-                                    {pieData.map((d, i) => (
-                                        <Cell key={i} fill={d.color} />
-                                    ))}
-                                </Pie>
-                                <Tooltip
-                                    contentStyle={CHART_TOOLTIP}
-                                    formatter={(v: number | undefined, name: string | undefined) => [`${v ?? 0} hosts`, name ?? '']}
-                                />
-                            </PieChart>
-                        </ResponsiveContainer>
-                    )}
-                    <div className="flex flex-wrap gap-3 text-[11px] font-medium text-slate-500 dark:text-slate-400">
-                        <span className="flex items-center gap-1">
-                            <span className="w-2 h-2 rounded-full bg-emerald-500" />
-                            Compliant ({pctCompliant}%)
-                        </span>
-                        <span className="flex items-center gap-1">
-                            <span className="w-2 h-2 rounded-full bg-amber-500" />
-                            Non-compliant
-                        </span>
+                <div className="rounded-xl border border-slate-200 dark:border-slate-700/60 bg-white/95 dark:bg-slate-800/90 backdrop-blur-sm p-4 shadow-sm flex flex-col items-center justify-center min-h-[180px]">
+                    <h3 className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-4">Compliance Rate</h3>
+                    <div className="relative w-28 h-28">
+                        <svg viewBox="0 0 36 36" className="w-full h-full -rotate-90">
+                            <circle cx="18" cy="18" r="15.9" fill="none" stroke="currentColor" className="text-slate-200 dark:text-slate-700" strokeWidth="3" />
+                            <circle cx="18" cy="18" r="15.9" fill="none" stroke={pctCompliant >= 80 ? '#10b981' : pctCompliant >= 50 ? '#eab308' : '#ef4444'} strokeWidth="3" strokeDasharray={`${pctCompliant} ${100 - pctCompliant}`} strokeLinecap="round" />
+                        </svg>
+                        <div className="absolute inset-0 flex items-center justify-center">
+                            <span className="text-2xl font-bold text-slate-800 dark:text-slate-100">{pctCompliant}%</span>
+                        </div>
                     </div>
+                    <p className="text-xs text-slate-500 mt-3 text-center">{compliantCount} of {evaluatedActive.length} active devices are compliant</p>
                 </div>
+
                 <div className="lg:col-span-2 rounded-xl border border-slate-200 dark:border-slate-700/60 bg-white/95 dark:bg-slate-800/90 backdrop-blur-sm p-4 shadow-sm">
                     <h3 className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-2 flex items-center gap-2">
                         <Activity className="w-3.5 h-3.5 text-cyan-500" />
-                        Violation mix (non-compliant hosts; one row may count in multiple bars)
+                        Violation mix & Severity (Impact Analysis)
                     </h3>
                     {violationBars.length === 0 ? (
-                        <div className="flex items-center justify-center h-32 text-sm text-slate-500">No open violations — fleet is compliant on loaded data.</div>
+                        <div className="flex items-center justify-center h-32 text-sm text-slate-500">No open violations — fleet is compliant.</div>
                     ) : (
                         <ResponsiveContainer width="100%" height={140}>
                             <BarChart data={violationBars} layout="vertical" margin={{ left: 4, right: 16, top: 4, bottom: 4 }}>
@@ -975,7 +916,7 @@ export function DashboardEndpointCompliancePage() {
                                 <YAxis type="category" dataKey="label" width={130} tick={{ fontSize: 10, fill: '#94a3b8' }} />
                                 <Tooltip
                                     contentStyle={CHART_TOOLTIP}
-                                    formatter={(v: number | undefined) => [`${v ?? 0} hosts`, 'Count']}
+                                    formatter={(v: number | undefined, _n: string | undefined, props: any) => [`${v} hosts (${props?.payload?.severity ?? 'Unknown'})`, 'Count']}
                                 />
                                 <Bar dataKey="count" radius={[0, 4, 4, 0]} maxBarSize={22} name="Hosts">
                                     {violationBars.map((e, i) => (
@@ -1005,13 +946,14 @@ export function DashboardEndpointCompliancePage() {
                 <select
                     value={statusFilter}
                     onChange={(e) => {
-                        setStatusFilter(e.target.value as 'all' | 'compliant' | 'non-compliant');
+                        setStatusFilter(e.target.value as any);
                         setPage(0);
                     }}
                     className="px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-sm text-slate-900 dark:text-white"
                 >
                     <option value="all">All active</option>
                     <option value="compliant">Compliant</option>
+                    <option value="pending">Pending Remediation</option>
                     <option value="non-compliant">Non-compliant</option>
                 </select>
                 <span className="text-xs text-slate-500 ml-auto">
@@ -1029,7 +971,7 @@ export function DashboardEndpointCompliancePage() {
                             <th className="px-3 py-2.5 cursor-pointer select-none" onClick={() => toggleSort('status')}>
                                 Compliance <SortIcon col="status" />
                             </th>
-                            <th className="px-3 py-2.5">Effective status</th>
+                            <th className="px-3 py-2.5">Evaluated Policies</th>
                             <th className="px-3 py-2.5 cursor-pointer select-none" onClick={() => toggleSort('health')}>
                                 Health <SortIcon col="health" />
                             </th>
@@ -1037,36 +979,59 @@ export function DashboardEndpointCompliancePage() {
                                 mTLS expiry <SortIcon col="cert" />
                             </th>
                             <th className="px-3 py-2.5">Last seen</th>
-                            <th className="px-3 py-2.5">Reasons</th>
                         </tr>
                     </thead>
-                    <tbody>
-                        {pageRows.map(({ agent: a, eff, compliant: ok, reasons }) => (
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60">
+                        {pageRows.map(({ agent: a, status, checks }) => (
                             <tr
                                 key={a.id}
-                                className="border-t border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/60 transition-colors"
+                                className="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors"
                             >
-                                <td className="px-3 py-2.5">
+                                <td className="px-3 py-3 align-top">
                                     <Link
-                                        className="text-cyan-600 dark:text-cyan-400 font-medium hover:underline"
+                                        className="text-cyan-600 dark:text-cyan-400 font-medium hover:underline block"
                                         to={`/management/devices/${encodeURIComponent(a.id)}`}
                                     >
                                         {a.hostname}
                                     </Link>
+                                    <span className="text-[10px] text-slate-500 font-mono mt-1 block">{a.id.slice(0, 12)}...</span>
                                 </td>
-                                <td className="px-3 py-2.5">
-                                    {ok ? (
-                                        <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full">
-                                            Compliant
+                                <td className="px-3 py-3 align-top">
+                                    {status === 'compliant' ? (
+                                        <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full inline-flex items-center gap-1">
+                                            <Shield className="w-3 h-3" /> Compliant
+                                        </span>
+                                    ) : status === 'pending_remediation' ? (
+                                        <span className="text-xs font-bold text-amber-600 dark:text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-full inline-flex items-center gap-1">
+                                            <AlertTriangle className="w-3 h-3" /> Pending Remediation
                                         </span>
                                     ) : (
-                                        <span className="text-xs font-bold text-amber-600 dark:text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-full">
-                                            Non-compliant
+                                        <span className="text-xs font-bold text-rose-600 dark:text-rose-400 bg-rose-500/10 px-2 py-0.5 rounded-full inline-flex items-center gap-1">
+                                            <Activity className="w-3 h-3" /> Non-compliant
                                         </span>
                                     )}
                                 </td>
-                                <td className="px-3 py-2.5 text-xs font-mono text-slate-600 dark:text-slate-300">{eff}</td>
-                                <td className="px-3 py-2.5">
+                                <td className="px-3 py-3">
+                                    <div className="space-y-1.5 max-w-sm">
+                                        {checks.map(chk => (
+                                            <div key={chk.id} className="flex items-start gap-2 text-xs">
+                                                <span className={`mt-0.5 shrink-0 ${chk.passed ? 'text-emerald-500' : chk.severity === 'Critical' ? 'text-rose-500' : 'text-amber-500'}`}>
+                                                    {chk.passed ? '✓' : '✗'}
+                                                </span>
+                                                <div>
+                                                    <span className="font-semibold text-slate-700 dark:text-slate-200">{chk.id}</span>
+                                                    <span className="text-slate-500 dark:text-slate-400"> — {chk.name}</span>
+                                                    {!chk.passed && (
+                                                        <div className="text-[10px] mt-0.5 text-slate-500">
+                                                            {chk.reason} ({chk.severity})
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </td>
+                                <td className="px-3 py-3 align-top">
                                     <span
                                         className={`text-xs font-mono font-semibold ${
                                             (a.health_score ?? 0) >= 80 ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'
@@ -1075,21 +1040,18 @@ export function DashboardEndpointCompliancePage() {
                                         {Math.round(a.health_score ?? 0)}%
                                     </span>
                                 </td>
-                                <td className="px-3 py-2.5 text-xs text-slate-600 dark:text-slate-300">
+                                <td className="px-3 py-3 align-top text-xs text-slate-600 dark:text-slate-300">
                                     <span className="inline-flex items-center gap-1">
                                         <KeyRound className="w-3 h-3 text-slate-400 shrink-0" />
                                         {a.cert_expires_at ? formatDate(a.cert_expires_at) : '—'}
                                     </span>
                                 </td>
-                                <td className="px-3 py-2.5 text-xs text-slate-500">{formatRelativeTime(a.last_seen)}</td>
-                                <td className="px-3 py-2.5 text-xs text-slate-500 dark:text-slate-400 max-w-md" title={reasons.join(' · ')}>
-                                    {reasons.length ? reasons.join(' · ') : '—'}
-                                </td>
+                                <td className="px-3 py-3 align-top text-xs text-slate-500">{formatRelativeTime(a.last_seen)}</td>
                             </tr>
                         ))}
                         {pageRows.length === 0 && (
                             <tr>
-                                <td colSpan={7} className="px-3 py-8 text-center text-sm text-slate-500">
+                                <td colSpan={6} className="px-3 py-8 text-center text-sm text-slate-500">
                                     No matching active endpoints.
                                 </td>
                             </tr>
@@ -1097,25 +1059,7 @@ export function DashboardEndpointCompliancePage() {
                     </tbody>
                 </table>
             </div>
-
-            {decommissioned.length > 0 && (
-                <details className="rounded-xl border border-slate-200 dark:border-slate-700/60 bg-slate-50/80 dark:bg-slate-900/40 px-4 py-3 text-sm">
-                    <summary className="cursor-pointer font-medium text-slate-700 dark:text-slate-200">
-                        Decommissioned hosts ({decommissioned.length}) — excluded from ratio
-                    </summary>
-                    <ul className="mt-2 space-y-1 text-xs text-slate-600 dark:text-slate-400 max-h-40 overflow-y-auto">
-                        {decommissioned.map((a) => (
-                            <li key={a.id}>
-                                <Link className="text-cyan-600 dark:text-cyan-400 hover:underline" to={`/management/devices/${encodeURIComponent(a.id)}`}>
-                                    {a.hostname}
-                                </Link>{' '}
-                                <span className="font-mono text-slate-500">({a.status})</span>
-                            </li>
-                        ))}
-                    </ul>
-                </details>
-            )}
-
+            
             {totalPages > 1 && (
                 <div className="flex items-center justify-between text-xs text-slate-500">
                     <span>
@@ -1141,9 +1085,7 @@ export function DashboardEndpointCompliancePage() {
             )}
         </div>
     );
-}
-
-export function DashboardCtemPage() {
+}export function DashboardCtemPage() {
     return (
         <div className="space-y-6">
             <GenericParityView

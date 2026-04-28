@@ -1,0 +1,151 @@
+title: "Atomic Red Team - T1082/T1016/T1033/T1057/T1049 Discovery Techniques"
+id: edr-atomic-t1082-001
+status: stable
+level: medium
+description: |
+  Detects system and network discovery commands tested by Atomic Red Team.
+  Covers T1082 (System Information Discovery), T1016 (System Network Configuration),
+  T1033 (System Owner/User Discovery), T1057 (Process Discovery),
+  T1049 (System Network Connections), T1083 (File and Directory Discovery),
+  T1087 (Account Discovery), T1069 (Permission Groups Discovery).
+  Triggers only when 3+ recon commands execute within the same process tree
+  or when run from suspicious parents, reducing noise from normal admin activity.
+author: EDR Detection Engineering
+date: 2026/04/28
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  # ── Suspicious parent launching recon ───────────────────────────────
+  selection_suspicious_parent:
+    ParentImage|endswith:
+      - '\powershell.exe'
+      - '\pwsh.exe'
+      - '\cmd.exe'
+      - '\wscript.exe'
+      - '\cscript.exe'
+      - '\mshta.exe'
+      - '\rundll32.exe'
+  # ── T1082 System Information ────────────────────────────────────────
+  selection_sysinfo:
+    Image|endswith:
+      - '\systeminfo.exe'
+      - '\hostname.exe'
+  # ── T1016 Network Configuration ────────────────────────────────────
+  selection_netconfig:
+    Image|endswith:
+      - '\ipconfig.exe'
+      - '\nslookup.exe'
+      - '\route.exe'
+      - '\arp.exe'
+    CommandLine|contains:
+      - '/all'
+      - '-a'
+      - 'print'
+  selection_netconfig_cmd:
+    Image|endswith: '\netsh.exe'
+    CommandLine|contains:
+      - 'interface'
+      - 'show'
+      - 'wlan show'
+  # ── T1033 User/Owner Discovery ─────────────────────────────────────
+  selection_whoami:
+    Image|endswith: '\whoami.exe'
+  selection_quser:
+    Image|endswith:
+      - '\quser.exe'
+      - '\query.exe'
+    CommandLine|contains: 'user'
+  # ── T1057 Process Discovery ────────────────────────────────────────
+  selection_tasklist:
+    Image|endswith: '\tasklist.exe'
+  selection_wmic_process:
+    Image|endswith: '\wmic.exe'
+    CommandLine|contains:
+      - 'process'
+      - 'list'
+  # ── T1049 Network Connections ──────────────────────────────────────
+  selection_netstat:
+    Image|endswith: '\netstat.exe'
+  # ── T1083 File and Directory Discovery ─────────────────────────────
+  selection_dir_enum:
+    Image|endswith:
+      - '\tree.exe'
+    CommandLine|contains:
+      - '/f'
+      - '/a'
+  selection_dir_cmd:
+    Image|endswith: '\cmd.exe'
+    CommandLine|contains:
+      - 'dir Users'
+      - 'dir Documents'
+      - 'dir Desktop'
+      - 'dir AppData'
+      - 'dir ProgramData'
+      - 'dir *password*'
+      - 'dir *.kdbx'
+      - 'type *password*'
+      - 'type *.kdbx'
+      - 'type *.key'
+  # ── T1087 Account Discovery ────────────────────────────────────────
+  selection_account_enum:
+    Image|endswith:
+      - '\net.exe'
+      - '\net1.exe'
+    CommandLine|contains:
+      - 'user'
+      - 'localgroup'
+      - 'group'
+      - 'accounts'
+  # ── T1069 Permission Groups Discovery ──────────────────────────────
+  selection_group_enum:
+    Image|endswith:
+      - '\net.exe'
+      - '\net1.exe'
+    CommandLine|contains:
+      - 'group "Domain Admins"'
+      - 'group "Enterprise Admins"'
+      - 'localgroup Administrators'
+  # ── Domain trust enumeration ───────────────────────────────────────
+  selection_domain_trust:
+    Image|endswith: '\nltest.exe'
+    CommandLine|contains:
+      - '/domain_trusts'
+      - '/dclist'
+      - '/dsgetdc'
+  selection_ps_domain:
+    Image|endswith:
+      - '\powershell.exe'
+      - '\pwsh.exe'
+    CommandLine|contains:
+      - 'Get-ADDomain'
+      - 'Get-ADForest'
+      - 'Get-ADTrust'
+      - 'Get-DomainTrust'
+      - 'Get-NetDomain'
+      - 'Get-DomainController'
+  condition: >
+    selection_suspicious_parent and
+    (selection_sysinfo or selection_netconfig or selection_netconfig_cmd
+    or selection_whoami or selection_quser or selection_tasklist
+    or selection_wmic_process or selection_netstat or selection_dir_enum
+    or selection_dir_cmd or selection_account_enum or selection_group_enum
+    or selection_domain_trust or selection_ps_domain)
+falsepositives:
+  - IT inventory scripts running from PowerShell
+  - Legitimate system health-check automation
+  - Help desk diagnostic tools
+tags:
+  - attack.discovery
+  - attack.t1082
+  - attack.t1016
+  - attack.t1033
+  - attack.t1057
+  - attack.t1049
+  - attack.t1083
+  - attack.t1087
+  - attack.t1069
+references:
+  - https://attack.mitre.org/techniques/T1082/
+  - https://github.com/redcanaryco/atomic-red-team/blob/master/atomics/T1082/T1082.md
+  - https://github.com/redcanaryco/atomic-red-team/blob/master/atomics/T1016/T1016.md

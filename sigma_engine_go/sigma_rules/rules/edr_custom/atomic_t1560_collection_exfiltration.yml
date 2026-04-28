@@ -1,0 +1,150 @@
+title: "Atomic Red Team - T1560/T1005/T1041/T1048 Collection and Exfiltration"
+id: edr-atomic-t1560-001
+status: stable
+level: high
+description: |
+  Detects data collection, staging, and exfiltration techniques tested by
+  Atomic Red Team. Covers T1560 (Archive Collected Data), T1560.001 (Archive
+  via Utility), T1005 (Data from Local System), T1041 (Exfiltration Over C2),
+  T1048 (Exfiltration Over Alternative Protocol), T1567 (Exfiltration Over
+  Web Service). Focuses on suspicious archive creation, clipboard harvesting,
+  and data staging patterns.
+author: EDR Detection Engineering
+date: 2026/04/28
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  # ── T1560.001 Archive via Utility ──────────────────────────────────
+  selection_archive_sensitive:
+    Image|endswith:
+      - '\7z.exe'
+      - '\7za.exe'
+      - '\rar.exe'
+      - '\WinRAR.exe'
+      - '\zip.exe'
+    CommandLine|contains:
+      - 'Users'
+      - 'Documents'
+      - 'Desktop'
+      - 'AppData'
+      - 'password'
+      - '.kdbx'
+      - '.pst'
+      - '.ost'
+      - 'ntds'
+      - 'SAM'
+      - 'SYSTEM'
+      - 'SECURITY'
+  selection_makecab:
+    Image|endswith: '\makecab.exe'
+  selection_tar:
+    Image|endswith: '\tar.exe'
+  selection_ps_compress:
+    Image|endswith:
+      - '\powershell.exe'
+      - '\pwsh.exe'
+    CommandLine|contains:
+      - 'Compress-Archive'
+      - 'IO.Compression.ZipFile'
+      - 'IO.Compression.GZipStream'
+      - 'CreateFromDirectory'
+  # ── T1005 Data from Local System (sensitive file access) ───────────
+  selection_sensitive_copy:
+    Image|endswith:
+      - '\xcopy.exe'
+      - '\robocopy.exe'
+    CommandLine|contains:
+      - '.kdbx'
+      - '.pst'
+      - '.ost'
+      - 'ntds.dit'
+      - 'NTUSER.DAT'
+      - 'SAM'
+      - 'SECURITY'
+      - 'password'
+      - 'credential'
+  selection_ps_sensitive:
+    Image|endswith:
+      - '\powershell.exe'
+      - '\pwsh.exe'
+    CommandLine|contains:
+      - 'Get-ChildItem.*password'
+      - 'Get-ChildItem.*credential'
+      - 'Get-ChildItem.*.kdbx'
+      - 'Select-String.*password'
+      - 'findstr.*password'
+  # ── Clipboard harvesting ───────────────────────────────────────────
+  selection_clipboard:
+    CommandLine|contains:
+      - 'Get-Clipboard'
+      - 'clip.exe'
+      - 'System.Windows.Forms.Clipboard'
+      - 'powershell.*clip'
+  # ── T1048 Exfiltration Over Alternative Protocol ───────────────────
+  selection_exfil_dns:
+    Image|endswith: '\nslookup.exe'
+    CommandLine|re: '.*[a-f0-9]{16,}\.'
+  selection_exfil_ftp:
+    Image|endswith: '\ftp.exe'
+    CommandLine|contains:
+      - 'put'
+      - 'send'
+      - 'open'
+  selection_exfil_tftp:
+    Image|endswith: '\tftp.exe'
+    CommandLine|contains:
+      - 'put'
+  # ── T1567 Exfiltration Over Web Service ────────────────────────────
+  selection_exfil_web:
+    Image|endswith:
+      - '\powershell.exe'
+      - '\pwsh.exe'
+      - '\curl.exe'
+    CommandLine|contains:
+      - 'Invoke-RestMethod'
+      - 'Invoke-WebRequest'
+      - 'POST'
+      - '-Method Post'
+      - 'uploadfile'
+      - 'pastebin.com'
+      - 'transfer.sh'
+      - 'file.io'
+      - 'anonfiles'
+      - 'webhook'
+      - 'discord.com/api/webhooks'
+  # ── Screen capture ─────────────────────────────────────────────────
+  selection_screenshot:
+    CommandLine|contains:
+      - 'CopyFromScreen'
+      - 'System.Drawing.Bitmap'
+      - 'Graphics.FromImage'
+      - 'screenshot'
+      - 'Screen.PrimaryScreen'
+  filter_backup:
+    ParentImage|endswith:
+      - '\veeam'
+      - '\backup'
+      - '\robocopy.exe'
+  condition: >
+    (selection_archive_sensitive or selection_makecab or selection_tar
+    or selection_ps_compress or selection_sensitive_copy or selection_ps_sensitive
+    or selection_clipboard or selection_exfil_dns or selection_exfil_ftp
+    or selection_exfil_tftp or selection_exfil_web or selection_screenshot)
+    and not filter_backup
+falsepositives:
+  - Legitimate backup archiving by IT tools
+  - Authorised data migration or transfer scripts
+tags:
+  - attack.collection
+  - attack.exfiltration
+  - attack.t1560
+  - attack.t1560.001
+  - attack.t1005
+  - attack.t1041
+  - attack.t1048
+  - attack.t1567
+references:
+  - https://attack.mitre.org/techniques/T1560/
+  - https://attack.mitre.org/techniques/T1048/
+  - https://github.com/redcanaryco/atomic-red-team/blob/master/atomics/T1560.001/T1560.001.md

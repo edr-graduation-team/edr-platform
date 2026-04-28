@@ -322,7 +322,6 @@ func kernelPathToWin32(p string) string {
 	return p
 }
 
-
 func wcharToGo(p *C.WCHAR, max int) string {
 	if p == nil {
 		return ""
@@ -356,7 +355,7 @@ func wcharToGo(p *C.WCHAR, max int) string {
 // exclusions and is applied AFTER event creation in the filter pipeline.
 var trustedOSProcess = map[string]bool{
 	// Session managers / kernel (PID 0-4 already skipped)
-	"conhost.exe": true,
+	"conhost.exe":  true,
 	"wmiprvse.exe": true,
 
 	// Shell / Desktop infrastructure (fire hundreds of times/minute)
@@ -371,7 +370,7 @@ var trustedOSProcess = map[string]bool{
 	"searchfilterhost.exe":   true,
 
 	// Audio / Media
-	"audiodg.exe":    true,
+	"audiodg.exe":     true,
 	"fontdrvhost.exe": true,
 
 	// Peripheral / device infrastructure
@@ -380,10 +379,10 @@ var trustedOSProcess = map[string]bool{
 	"sihost.exe":  true, // Shell Infrastructure Host
 
 	// Windows Update telemetry (periodic, no detection value)
-	"compattelrunner.exe":      true,
-	"musnotification.exe":      true,
-	"microsoftedgeupdate.exe":  true,
-	"wuauclt.exe":              true,
+	"compattelrunner.exe":     true,
+	"musnotification.exe":     true,
+	"microsoftedgeupdate.exe": true,
+	"wuauclt.exe":             true,
 }
 
 // isSelfOrChildProcess returns true if the process is the EDR agent itself
@@ -464,20 +463,20 @@ func (c *ETWCollector) processStart(pid, ppid uint32, eventImg, eventCmd string)
 	sigStatus, sigIssuer := SignatureTrustClass(exePath)
 
 	evt := event.NewEvent(event.EventTypeProcess, event.SeverityLow, map[string]interface{}{
-		"action":           "process_creation",
-		"pid":              pid,
-		"ppid":             ppid,
-		"name":             name,
-		"executable":       exePath,
-		"command_line":     cmdLine,
+		"action":            "process_creation",
+		"pid":               pid,
+		"ppid":              ppid,
+		"name":              name,
+		"executable":        exePath,
+		"command_line":      cmdLine,
 		"parent_executable": parentImage,
-		"parent_name":      baseName(parentImage),
-		"user_sid":         userSid,
-		"user_name":        userName,
-		"is_elevated":      isElevated,
-		"integrity_level":  integrity,
-		"signature_status": sigStatus,
-		"signature_issuer": sigIssuer,
+		"parent_name":       baseName(parentImage),
+		"user_sid":          userSid,
+		"user_name":         userName,
+		"is_elevated":       isElevated,
+		"integrity_level":   integrity,
+		"signature_status":  sigStatus,
+		"signature_issuer":  sigIssuer,
 	})
 	// Apply configurable process filtering BEFORE local autonomous response.
 	// This ensures server-pushed allow exceptions (exclude_process) prevent
@@ -497,7 +496,7 @@ func (c *ETWCollector) processStart(pid, ppid uint32, eventImg, eventCmd string)
 			return
 		}
 	}
-	c.send(evt)
+	c.sendPriority(evt)
 	c.logger.Infof("[ETW] Process START: pid=%d ppid=%d name=%s cmd=%s",
 		pid, ppid, name, truncStr(cmdLine, 80))
 }
@@ -519,7 +518,7 @@ func (c *ETWCollector) processEnd(pid, ppid uint32, eventImg string) {
 	if c.filter != nil && c.filter.ShouldFilter(evt) {
 		return
 	}
-	c.send(evt)
+	c.sendPriority(evt)
 }
 
 // =====================================================================
@@ -603,8 +602,8 @@ func getImagePath(pid uint32) string {
 }
 
 var (
-	ntdll    = windows.NewLazyDLL("ntdll.dll")
-	ntqip    = ntdll.NewProc("NtQueryInformationProcess")
+	ntdll = windows.NewLazyDLL("ntdll.dll")
+	ntqip = ntdll.NewProc("NtQueryInformationProcess")
 )
 
 func getCmdLine(pid uint32) string {
@@ -711,6 +710,19 @@ func (c *ETWCollector) send(evt *event.Event) {
 	}
 }
 
+// sendPriority sends a high-value event (process creation, registry) with a
+// blocking timeout instead of dropping immediately. This prevents the flood of
+// file I/O events from silently drowning out security-critical process telemetry.
+func (c *ETWCollector) sendPriority(evt *event.Event) {
+	select {
+	case c.eventChan <- evt:
+		c.collected.Add(1)
+	case <-time.After(2 * time.Second):
+		c.dropped.Add(1)
+		c.logger.Warnf("[ETW] Priority event DROPPED after 2s timeout (channel full): type=%s", evt.Type)
+	}
+}
+
 func baseName(p string) string {
 	if i := strings.LastIndex(p, `\`); i >= 0 {
 		return p[i+1:]
@@ -738,7 +750,7 @@ func containsAny(s string, subs ...string) bool {
 }
 
 // Public API for agent
-func (c *ETWCollector) IsRunning() bool          { return c.running.Load() }
+func (c *ETWCollector) IsRunning() bool { return c.running.Load() }
 func (c *ETWCollector) Stats() ETWStats {
 	return ETWStats{c.running.Load(), c.collected.Load(), c.dropped.Load(), c.errors.Load()}
 }

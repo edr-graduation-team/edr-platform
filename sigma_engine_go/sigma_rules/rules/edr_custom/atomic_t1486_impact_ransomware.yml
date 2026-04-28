@@ -1,0 +1,130 @@
+title: "Atomic Red Team - T1486/T1489/T1490 Impact Techniques"
+id: edr-atomic-t1486-001
+status: stable
+level: critical
+description: |
+  Detects ransomware and destructive impact techniques tested by Atomic Red Team.
+  Covers T1486 (Data Encrypted for Impact), T1489 (Service Stop),
+  T1490 (Inhibit System Recovery). Hardened for production with exclusions
+  for legitimate Windows maintenance.
+author: EDR Detection Engineering
+date: 2026/04/28
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  # ── T1490 Inhibit System Recovery ───────────────────────────────────
+  selection_vssadmin_delete:
+    Image|endswith: '\vssadmin.exe'
+    CommandLine|contains:
+      - 'delete shadows'
+      - 'resize shadowstorage'
+  selection_wmic_shadowcopy:
+    Image|endswith: '\wmic.exe'
+    CommandLine|contains:
+      - 'shadowcopy'
+      - 'delete'
+  selection_bcdedit_recovery:
+    Image|endswith: '\bcdedit.exe'
+    CommandLine|contains:
+      - 'recoveryenabled'
+      - 'no'
+  selection_bcdedit_safeboot:
+    Image|endswith: '\bcdedit.exe'
+    CommandLine|contains:
+      - 'safeboot'
+  selection_wbadmin_delete:
+    Image|endswith: '\wbadmin.exe'
+    CommandLine|contains:
+      - 'delete'
+      - 'catalog'
+      - 'systemstatebackup'
+  selection_bootstatuspolicy:
+    Image|endswith: '\bcdedit.exe'
+    CommandLine|contains:
+      - 'bootstatuspolicy'
+      - 'ignoreallfailures'
+  selection_ps_recovery:
+    Image|endswith:
+      - '\powershell.exe'
+      - '\pwsh.exe'
+    CommandLine|contains:
+      - 'Get-WmiObject Win32_ShadowCopy'
+      - 'Delete()'
+      - 'Win32_ShadowCopy'
+  # ── T1489 Service Stop ─────────────────────────────────────────────
+  selection_stop_critical:
+    Image|endswith:
+      - '\sc.exe'
+      - '\net.exe'
+      - '\net1.exe'
+    CommandLine|contains:
+      - 'stop MSSQLSERVER'
+      - 'stop SQLSERVERAGENT'
+      - 'stop MSSQLFDLauncher'
+      - 'stop MSSQL$'
+      - 'stop mysql'
+      - 'stop OracleService'
+      - 'stop MongoDB'
+      - 'stop postgresql'
+      - 'stop vss'
+      - 'stop sql'
+      - 'stop exchange'
+      - 'stop backup'
+      - 'stop veeam'
+  # ── T1486 Encryption indicators ────────────────────────────────────
+  selection_cipher_encrypt:
+    Image|endswith: '\cipher.exe'
+    CommandLine|contains:
+      - '/e'
+  selection_gpg_encrypt:
+    CommandLine|contains:
+      - 'gpg'
+      - '--symmetric'
+      - '--cipher-algo'
+      - '--batch'
+  selection_openssl_encrypt:
+    CommandLine|contains:
+      - 'openssl'
+      - 'enc'
+      - '-aes'
+  # ── Rename/move file extensions (bulk) ─────────────────────────────
+  selection_rename_ext:
+    Image|endswith:
+      - '\cmd.exe'
+      - '\powershell.exe'
+    CommandLine|contains:
+      - 'rename'
+      - '.encrypted'
+      - '.locked'
+      - '.crypt'
+      - '.enc'
+      - 'ren *.'
+  filter_legit:
+    ParentImage|endswith:
+      - '\TiWorker.exe'
+      - '\TrustedInstaller.exe'
+  filter_backup_tool:
+    ParentImage|endswith:
+      - '\veeam'
+      - '\backup'
+  condition: >
+    (selection_vssadmin_delete or selection_wmic_shadowcopy
+    or selection_bcdedit_recovery or selection_bcdedit_safeboot
+    or selection_wbadmin_delete or selection_bootstatuspolicy
+    or selection_ps_recovery or selection_stop_critical
+    or selection_cipher_encrypt or selection_gpg_encrypt
+    or selection_openssl_encrypt or selection_rename_ext)
+    and not (filter_legit or filter_backup_tool)
+falsepositives:
+  - Legitimate backup rotation scripts removing old shadow copies
+  - DBA stopping SQL services for maintenance
+tags:
+  - attack.impact
+  - attack.t1486
+  - attack.t1489
+  - attack.t1490
+references:
+  - https://attack.mitre.org/techniques/T1486/
+  - https://attack.mitre.org/techniques/T1490/
+  - https://github.com/redcanaryco/atomic-red-team/blob/master/atomics/T1490/T1490.md

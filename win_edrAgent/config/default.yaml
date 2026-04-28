@@ -23,11 +23,11 @@ agent:
   # Hostname (auto-detected if empty)
   hostname: ""
   # Number of events per batch
-  batch_size: 50
+  batch_size: 200
   # Maximum time between batches
   batch_interval: 1s
   # Event buffer size (in-memory queue)
-  buffer_size: 5000
+  buffer_size: 50000
   # Compression algorithm (snappy, gzip, none)
   compression: "snappy"
 

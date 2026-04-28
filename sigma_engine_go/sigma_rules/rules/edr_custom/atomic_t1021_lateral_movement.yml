@@ -1,0 +1,117 @@
+title: "Atomic Red Team - T1021 Remote Services Lateral Movement"
+id: edr-atomic-t1021-001
+status: stable
+level: high
+description: |
+  Detects lateral movement via remote services tested by Atomic Red Team.
+  Covers T1021.001 (RDP), T1021.002 (SMB/Windows Admin Shares),
+  T1021.003 (DCOM), T1021.004 (SSH), T1021.006 (Windows Remote Management).
+  Also covers T1047 (WMI) and T1570 (Lateral Tool Transfer).
+author: EDR Detection Engineering
+date: 2026/04/28
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  # ── T1021.002 SMB/Admin Shares ──────────────────────────────────────
+  selection_net_share:
+    Image|endswith:
+      - '\net.exe'
+      - '\net1.exe'
+    CommandLine|contains:
+      - 'use \\\\' 
+      - 'use \\\\'
+      - '\\C$'
+      - '\\ADMIN$'
+      - '\\IPC$'
+  # ── T1021.003 DCOM execution ────────────────────────────────────────
+  selection_dcom:
+    CommandLine|contains:
+      - 'MMC20.Application'
+      - 'ShellWindows'
+      - 'ShellBrowserWindow'
+      - 'Excel.Application'
+      - 'Outlook.Application'
+      - '{9BA05972-F6A8-11CF-A442-00A0C90A8F39}'
+  # ── T1021.006 WinRM / PSRemoting ───────────────────────────────────
+  selection_winrm:
+    Image|endswith:
+      - '\powershell.exe'
+      - '\pwsh.exe'
+    CommandLine|contains:
+      - 'Enter-PSSession'
+      - 'Invoke-Command'
+      - 'New-PSSession'
+      - '-ComputerName'
+      - 'Enable-PSRemoting'
+  selection_winrs:
+    Image|endswith: '\winrs.exe'
+  # ── T1047 WMI remote execution ─────────────────────────────────────
+  selection_wmic_remote:
+    Image|endswith: '\wmic.exe'
+    CommandLine|contains:
+      - '/node:'
+      - 'process call create'
+  selection_ps_wmi_remote:
+    Image|endswith:
+      - '\powershell.exe'
+      - '\pwsh.exe'
+    CommandLine|contains:
+      - 'Invoke-WmiMethod'
+      - 'Invoke-CimMethod'
+      - 'Win32_Process'
+      - '-ComputerName'
+      - 'Create'
+  # ── T1570 Lateral Tool Transfer ────────────────────────────────────
+  selection_copy_remote:
+    Image|endswith:
+      - '\xcopy.exe'
+      - '\robocopy.exe'
+      - '\copy.exe'
+    CommandLine|contains:
+      - '\\\\'
+  selection_ps_copy_remote:
+    Image|endswith:
+      - '\powershell.exe'
+      - '\pwsh.exe'
+    CommandLine|contains:
+      - 'Copy-Item'
+      - '\\\\' 
+  # ── PsExec and similar remote exec tools ───────────────────────────
+  selection_psexec:
+    Image|endswith:
+      - '\PsExec.exe'
+      - '\PsExec64.exe'
+    CommandLine|contains:
+      - '\\\\'
+  selection_psexec_svc:
+    Image|endswith: '\PSEXESVC.exe'
+  filter_sccm:
+    ParentImage|endswith:
+      - '\ccmexec.exe'
+      - '\svchost.exe'
+  filter_backup:
+    ParentImage|endswith:
+      - '\veeam'
+      - '\DPMAgentRelay.exe'
+  condition: >
+    (selection_net_share or selection_dcom or selection_winrm or selection_winrs
+    or selection_wmic_remote or selection_ps_wmi_remote or selection_copy_remote
+    or selection_ps_copy_remote or selection_psexec or selection_psexec_svc)
+    and not (filter_sccm or filter_backup)
+falsepositives:
+  - Legitimate IT administration via WinRM/PSRemoting
+  - Authorised use of PsExec by sysadmins
+  - Network backup and replication tools
+tags:
+  - attack.lateral_movement
+  - attack.t1021
+  - attack.t1021.002
+  - attack.t1021.003
+  - attack.t1021.006
+  - attack.t1047
+  - attack.t1570
+references:
+  - https://attack.mitre.org/techniques/T1021/
+  - https://github.com/redcanaryco/atomic-red-team/blob/master/atomics/T1021.002/T1021.002.md
+  - https://github.com/redcanaryco/atomic-red-team/blob/master/atomics/T1021.006/T1021.006.md

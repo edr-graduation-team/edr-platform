@@ -1,0 +1,193 @@
+title: "Atomic Red Team - PowerShell Advanced Detection (Script Block Logging)"
+id: edr-atomic-ps-scriptblock-001
+status: stable
+level: high
+description: |
+  Detects advanced PowerShell attack techniques via Script Block Logging (EID 4104)
+  and process creation telemetry. Covers AMSI bypass, obfuscation, constrained
+  language mode bypass, reflective loading, and living-off-the-land PowerShell abuse.
+  These patterns are heavily used by Atomic Red Team tests across multiple techniques
+  and represent the most common evasion vectors in real-world attacks.
+  
+  Script Block Logging captures the DEOBFUSCATED script content, making it the
+  single most valuable data source for detecting PowerShell-based attacks that
+  use encoding, string concatenation, or variable substitution to evade
+  command-line based detections.
+author: EDR Detection Engineering
+date: 2026/04/28
+logsource:
+  category: ps_script
+  product: windows
+  definition: 'Requires PowerShell Script Block Logging (EID 4104) enabled via GPO: Administrative Templates > Windows Components > Windows PowerShell > Turn on PowerShell Script Block Logging'
+detection:
+  # ── AMSI Bypass Techniques ─────────────────────────────────────────
+  selection_amsi_bypass:
+    ScriptBlockText|contains:
+      - 'AmsiInitFailed'
+      - 'amsiContext'
+      - 'AmsiUtils'
+      - 'amsi.dll'
+      - 'AmsiScanBuffer'
+      - 'AmsiScanString'
+      - 'Disable-Amsi'
+      - 'Bypass-Amsi'
+      - 'amsiInitFailed'
+      - 'Runtime.InteropServices'
+      - 'SetField.*NonPublic.*amsi'
+      - 'Reflection.Assembly.*amsi'
+  # ── ETW Patching / Tracing Evasion ─────────────────────────────────
+  selection_etw_patch:
+    ScriptBlockText|contains:
+      - 'EtwEventWrite'
+      - 'ntdll.*EtwEventWrite'
+      - 'NtTraceEvent'
+      - 'Reflection.*GetMethod.*Invoke'
+      - 'System.Management.Automation.Tracing'
+  # ── Reflective PE / Assembly Loading ───────────────────────────────
+  selection_reflective_load:
+    ScriptBlockText|contains:
+      - '[Reflection.Assembly]::Load'
+      - 'Reflection.Assembly.Load'
+      - 'AppDomain.*Load'
+      - 'Unsafe.AsPointer'
+      - 'Marshal.Copy'
+      - 'VirtualAlloc'
+      - 'VirtualProtect'
+      - 'ReadProcessMemory'
+      - 'WriteProcessMemory'
+      - 'CreateThread'
+      - 'kernel32.dll'
+      - 'ntdll.dll'
+      - 'Invoke-ReflectivePEInjection'
+      - 'PE.Load'
+  # ── Credential Harvesting via PowerShell ───────────────────────────
+  selection_cred_harvest:
+    ScriptBlockText|contains:
+      - 'Get-Credential'
+      - 'PromptForCredential'
+      - 'SecureString'
+      - 'NetworkCredential'
+      - 'Mimikatz'
+      - 'Invoke-Mimikatz'
+      - 'DumpCreds'
+      - 'DumpCerts'
+      - 'sekurlsa'
+      - 'kerberos::list'
+      - 'Invoke-NinjaCopy'
+      - 'Invoke-TokenManipulation'
+      - 'Get-GPPPassword'
+      - 'Get-VaultCredential'
+      - 'Get-CachedGPPPassword'
+  # ── Obfuscation Patterns ───────────────────────────────────────────
+  selection_obfuscation:
+    ScriptBlockText|contains:
+      - '-join[char[]'
+      - 'char]*-join'
+      - '-bxor'
+      - '-bor'
+      - '-band'
+      - 'FromBase64String'
+      - 'ToBase64String'
+      - 'Invoke-Obfuscation'
+      - 'Out-EncodedCommand'
+      - 'SecureStringToBSTR'
+      - 'MemoryStream'
+      - 'DeflateStream'
+      - 'GZipStream'
+      - 'IO.Compression'
+      - 'New-Object IO.StreamReader'
+      - 'Invoke-CradleCrafter'
+  # ── PowerShell Empire / Covenant / Cobalt Strike ───────────────────
+  selection_c2_frameworks:
+    ScriptBlockText|contains:
+      - 'Invoke-Empire'
+      - 'Invoke-Shellcode'
+      - 'Invoke-BloodHound'
+      - 'SharpHound'
+      - 'Rubeus'
+      - 'Seatbelt'
+      - 'PowerView'
+      - 'Invoke-ShareFinder'
+      - 'Invoke-FileFinder'
+      - 'Invoke-UserHunter'
+      - 'Invoke-Kerberoast'
+      - 'Invoke-ASREPRoast'
+      - 'PowerUp'
+      - 'Invoke-AllChecks'
+      - 'Find-LocalAdminAccess'
+      - 'Get-NetComputer'
+      - 'Get-NetUser'
+      - 'Get-NetGroup'
+      - 'Invoke-ACLScanner'
+  # ── Constrained Language Mode Bypass ───────────────────────────────
+  selection_clm_bypass:
+    ScriptBlockText|contains:
+      - 'FullLanguage'
+      - 'LanguageMode'
+      - '__PSLockdownPolicy'
+      - 'SystemPolicy.*GetSystemLockdownPolicy'
+      - 'WDAC'
+      - 'ConstrainedLanguage'
+  # ── Suspicious .NET Compilation / Add-Type ─────────────────────────
+  selection_dotnet_compile:
+    ScriptBlockText|contains:
+      - 'Add-Type'
+      - 'DllImport'
+      - 'TypeDefinition'
+      - 'CompilerParameters'
+      - 'GenerateInMemory'
+      - 'CSharpCodeProvider'
+      - 'Microsoft.CSharp'
+  # ── WMI abuse via PowerShell ───────────────────────────────────────
+  selection_wmi_abuse:
+    ScriptBlockText|contains:
+      - 'Invoke-WmiMethod'
+      - 'Set-WmiInstance'
+      - 'Win32_Process.*Create'
+      - 'EventSubscription'
+      - '__EventFilter'
+      - 'CommandLineEventConsumer'
+      - 'ActiveScriptEventConsumer'
+  # ── Registry persistence via PowerShell ────────────────────────────
+  selection_reg_persist:
+    ScriptBlockText|contains:
+      - 'Set-ItemProperty.*CurrentVersion\\Run'
+      - 'New-ItemProperty.*CurrentVersion\\Run'
+      - 'HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run'
+      - 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run'
+  # ── False positive reduction ────────────────────────────────────────
+  filter_azure_modules:
+    ScriptBlockText|contains:
+      - 'Microsoft.Azure'
+      - 'Az.Accounts'
+      - 'AzureRM'
+  filter_dsc:
+    ScriptBlockText|contains:
+      - 'DesiredStateConfiguration'
+      - 'Configuration '
+      - 'DscResource'
+  condition: >
+    (selection_amsi_bypass or selection_etw_patch or selection_reflective_load
+    or selection_cred_harvest or selection_obfuscation or selection_c2_frameworks
+    or selection_clm_bypass or selection_dotnet_compile or selection_wmi_abuse
+    or selection_reg_persist)
+    and not (filter_azure_modules or filter_dsc)
+falsepositives:
+  - Legitimate security assessment tools (if authorised)
+  - Azure/DSC PowerShell modules using Add-Type for .NET interop
+  - Development environments compiling inline C# code
+tags:
+  - attack.execution
+  - attack.defense_evasion
+  - attack.credential_access
+  - attack.t1059.001
+  - attack.t1562.001
+  - attack.t1027
+  - attack.t1620
+  - attack.t1003
+references:
+  - https://attack.mitre.org/techniques/T1059/001/
+  - https://attack.mitre.org/techniques/T1562/001/
+  - https://attack.mitre.org/techniques/T1027/
+  - https://github.com/redcanaryco/atomic-red-team/blob/master/atomics/T1059.001/T1059.001.md
+  - https://github.com/redcanaryco/atomic-red-team/blob/master/atomics/T1562.001/T1562.001.md

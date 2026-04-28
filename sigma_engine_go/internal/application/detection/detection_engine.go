@@ -430,7 +430,8 @@ func (e *SigmaDetectionEngine) evaluateRule(
 	// Step 4: Build result
 	confidence := e.calculateConfidence(rule, event, matchedFields)
 	if confidence < e.quality.MinConfidence {
-		// Confidence gate: keep detection quality high and reduce alert flood.
+		logger.Debugf("Confidence gate DROP: rule=%s confidence=%.3f < min=%.3f matchedFields=%d",
+			rule.ID, confidence, e.quality.MinConfidence, len(matchedFields))
 		return nil
 	}
 	matchedSelections := getMatchedSelectionNames(selectionResults)
@@ -484,21 +485,43 @@ func (e *SigmaDetectionEngine) calculateConfidence(
 	baseConf := getLevelConfidence(rule.Level)
 
 	// Field match factor: more fields = higher confidence.
-	// FIX ISSUE-06: Count UNIQUE field names across non-filter selections.
-	// Previously, totalFields summed across all selections including duplicates,
-	// which deflated the ratio when multiple selections referenced the same field
-	// (e.g., both 'selection_process' and 'selection_alt' check CommandLine).
-	// Now we deduplicate via map key to get the true unique field count.
+	// FIX ISSUE-07: Only count fields from selections that actually MATCHED.
+	// For OR-based conditions (selection_A or selection_B or ...), only one
+	// selection needs to match. Previously, totalFields counted fields across
+	// ALL non-filter selections, which severely deflated fieldFactor when a
+	// rule had many OR'd selections with different field names. For example,
+	// a rule with 5 OR'd selections (3 unique fields total) where one selection
+	// with 1 field matched → fieldFactor was 1/3 = 0.33, dropping confidence
+	// below the 0.6 gate and silently suppressing the alert.
+	//
+	// The fix: compute totalFields from only the selections whose fields appear
+	// in matchedFields (i.e., selections that the evaluator marked as matched).
 	fieldCount := len(matchedFields)
-	uniqueFields := make(map[string]bool)
+	relevantFields := make(map[string]bool)
 	for selName, selection := range rule.Detection.Selections {
-		if !isFilterSelection(selName) {
+		if isFilterSelection(selName) {
+			continue
+		}
+		// Check if this selection contributed any field to matchedFields
+		contributed := false
+		for _, f := range selection.Fields {
+			if _, ok := matchedFields[f.FieldName]; ok {
+				contributed = true
+				break
+			}
+		}
+		if contributed {
 			for _, f := range selection.Fields {
-				uniqueFields[f.FieldName] = true
+				relevantFields[f.FieldName] = true
 			}
 		}
 	}
-	totalFields := len(uniqueFields)
+	totalFields := len(relevantFields)
+	if totalFields == 0 {
+		// No matched selection contributed fields — use fieldCount to avoid
+		// division by zero (keyword selections may not populate matchedFields).
+		totalFields = max(fieldCount, 1)
+	}
 
 	fieldFactor := 1.0
 	if totalFields > 0 {
@@ -597,13 +620,13 @@ func (e *SigmaDetectionEngine) getStringField(event *domain.LogEvent, fieldName 
 // Whitelisting is evaluated before rule matching to reduce false positives and CPU load.
 //
 // NOTE (RC-2 fix): User and ParentImage whitelisting have been removed.
-// - User whitelist (e.g. "NT AUTHORITY\SYSTEM") was far too broad: it silently
-//   dropped the vast majority of Windows process events before Sigma rules could
-//   evaluate them, creating massive detection blind spots.
-// - ParentImage whitelist (e.g. explorer.exe, services.exe) suppressed events
-//   for legitimate attacker parent processes (many tools are spawned by explorer
-//   or services). Sigma rules themselves contain fine-grained filter selections
-//   that handle false positive suppression per-rule.
+//   - User whitelist (e.g. "NT AUTHORITY\SYSTEM") was far too broad: it silently
+//     dropped the vast majority of Windows process events before Sigma rules could
+//     evaluate them, creating massive detection blind spots.
+//   - ParentImage whitelist (e.g. explorer.exe, services.exe) suppressed events
+//     for legitimate attacker parent processes (many tools are spawned by explorer
+//     or services). Sigma rules themselves contain fine-grained filter selections
+//     that handle false positive suppression per-rule.
 func (e *SigmaDetectionEngine) isWhitelistedEvent(event *domain.LogEvent) bool {
 	if !e.quality.Filtering.Enabled || event == nil {
 		return false

@@ -1,0 +1,88 @@
+title: "Atomic Red Team - T1053 Scheduled Task/Job"
+id: edr-atomic-t1053-001
+status: stable
+level: high
+description: |
+  Detects creation and modification of scheduled tasks for persistence, tested
+  by Atomic Red Team. Covers T1053.005 (Scheduled Task) and T1053.003 (Cron
+  via WSL). Hardened to exclude legitimate Windows Update and SCCM tasks.
+author: EDR Detection Engineering
+date: 2026/04/28
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  # ── schtasks.exe creation ───────────────────────────────────────────
+  selection_schtasks_create:
+    Image|endswith: '\schtasks.exe'
+    CommandLine|contains:
+      - '/create'
+      - '/change'
+  # ── Suspicious task payloads ────────────────────────────────────────
+  selection_schtasks_payload:
+    Image|endswith: '\schtasks.exe'
+    CommandLine|contains:
+      - 'powershell'
+      - 'cmd.exe'
+      - 'mshta'
+      - 'wscript'
+      - 'cscript'
+      - 'rundll32'
+      - 'regsvr32'
+      - 'certutil'
+      - '.bat'
+      - '.ps1'
+      - '.vbs'
+      - 'AppData'
+      - 'Temp'
+      - 'ProgramData'
+  # ── at.exe legacy scheduling ────────────────────────────────────────
+  selection_at:
+    Image|endswith: '\at.exe'
+  # ── PowerShell scheduled task creation ─────────────────────────────
+  selection_ps_schtask:
+    Image|endswith:
+      - '\powershell.exe'
+      - '\pwsh.exe'
+    CommandLine|contains:
+      - 'New-ScheduledTask'
+      - 'Register-ScheduledTask'
+      - 'Set-ScheduledTask'
+      - 'ScheduledTasks'
+      - 'New-ScheduledTaskAction'
+      - 'New-ScheduledTaskTrigger'
+  # ── COM object task creation (schtasks bypass) ─────────────────────
+  selection_com_schtask:
+    CommandLine|contains:
+      - 'Schedule.Service'
+      - 'ITaskService'
+  filter_windows_update:
+    CommandLine|contains:
+      - 'Microsoft\Windows\UpdateOrchestrator'
+      - 'Microsoft\Windows\WindowsUpdate'
+      - 'Microsoft\Windows\SoftwareProtectionPlatform'
+  filter_defender:
+    CommandLine|contains:
+      - 'Windows Defender'
+      - 'MpCmdRun'
+  filter_sccm:
+    ParentImage|endswith:
+      - '\ccmexec.exe'
+      - '\TiWorker.exe'
+  condition: >
+    ((selection_schtasks_create and selection_schtasks_payload)
+    or selection_at
+    or selection_ps_schtask
+    or selection_com_schtask)
+    and not (filter_windows_update or filter_defender or filter_sccm)
+falsepositives:
+  - IT automation creating scheduled tasks via GPO or SCCM
+  - Enterprise monitoring tools registering heartbeat tasks
+tags:
+  - attack.persistence
+  - attack.execution
+  - attack.t1053
+  - attack.t1053.005
+references:
+  - https://attack.mitre.org/techniques/T1053/005/
+  - https://github.com/redcanaryco/atomic-red-team/blob/master/atomics/T1053.005/T1053.005.md

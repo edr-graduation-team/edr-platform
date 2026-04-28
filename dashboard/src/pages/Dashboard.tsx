@@ -1,5 +1,5 @@
-import { useQuery } from '@tanstack/react-query';
-import React, { useEffect, useState, useMemo, useCallback } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import React, { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import {
     AlertTriangle, Activity, Monitor,
@@ -545,20 +545,22 @@ const SystemActionLog = React.memo(function SystemActionLog({ alerts, agents }: 
 // ─── Main Dashboard ──────────────────────────────────────────
 export default function Dashboard() {
     const navigate = useNavigate();
+    const queryClient = useQueryClient();
     const [liveAlerts, setLiveAlerts] = useState<Alert[]>([]);
     const [drawerAlert, setDrawerAlert] = useState<Alert | null>(null);
+    const statsInvalidateTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     const { data: alertStats, isLoading: statsLoading } = useQuery({
         queryKey: ['alertStats'],
         queryFn: statsApi.alerts,
-        refetchInterval: 10000,
+        refetchInterval: 1000,
     });
 
     const { data: agentStats } = useQuery({
         queryKey: ['agentStats'],
         queryFn: agentsApi.stats,
         retry: false,
-        refetchInterval: 10000,
+        refetchInterval: 5000,
     });
 
     const { data: agentListData } = useQuery({
@@ -573,7 +575,7 @@ export default function Dashboard() {
         queryFn: () => alertsApi.list({ limit: 100 }),
         // Fallback polling in case WebSocket stream is unavailable (proxy/ws misconfig).
         // Keep this reasonably low so the dashboard still feels "near real-time".
-        refetchInterval: 5000,
+        refetchInterval: 1000,
     });
 
     // ── Sparkline data from timeline (7 points) ──────────────
@@ -613,9 +615,25 @@ export default function Dashboard() {
     useEffect(() => {
         const stream = createAlertStream((alert) => {
             setLiveAlerts((prev) => [alert, ...prev.slice(0, 99)]);
+
+            // ── Real-time KPI invalidation ─────────────────────────
+            // Debounce: batch rapid WebSocket arrivals into a single
+            // stats refetch (150ms window) to avoid API hammering.
+            if (statsInvalidateTimer.current) {
+                clearTimeout(statsInvalidateTimer.current);
+            }
+            statsInvalidateTimer.current = setTimeout(() => {
+                queryClient.invalidateQueries({ queryKey: ['alertStats'] });
+                queryClient.invalidateQueries({ queryKey: ['recentAlerts'] });
+            }, 150);
         }, { severity: ['critical', 'high', 'medium', 'low'] });
-        return () => stream.close();
-    }, []);
+        return () => {
+            stream.close();
+            if (statsInvalidateTimer.current) {
+                clearTimeout(statsInvalidateTimer.current);
+            }
+        };
+    }, [queryClient]);
 
     const handleAlertClick = useCallback((alert: Alert) => setDrawerAlert(alert), []);
     const handleCloseDrawer = useCallback(() => setDrawerAlert(null), []);

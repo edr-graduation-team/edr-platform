@@ -1,0 +1,130 @@
+title: "Atomic Red Team - T1546 Event Triggered Execution"
+id: edr-atomic-t1546-001
+status: stable
+level: critical
+description: |
+  Detects event-triggered execution persistence tested by Atomic Red Team.
+  Covers T1546.003 (WMI Event Subscription), T1546.001 (Change Default File
+  Association), T1546.002 (Screensaver), T1546.008 (Accessibility Features),
+  T1546.011 (Application Shimming), T1546.015 (COM Hijacking).
+  WMI Event Subscriptions are the highest-fidelity indicator — extremely rare
+  in legitimate environments and a hallmark of advanced persistence.
+author: EDR Detection Engineering
+date: 2026/04/28
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  # ── T1546.003 WMI Event Subscription ───────────────────────────────
+  selection_wmic_subscription:
+    Image|endswith: '\wmic.exe'
+    CommandLine|contains:
+      - '__EventFilter'
+      - '__EventConsumer'
+      - '__FilterToConsumerBinding'
+      - 'ActiveScriptEventConsumer'
+      - 'CommandLineEventConsumer'
+  selection_ps_wmi_subscription:
+    Image|endswith:
+      - '\powershell.exe'
+      - '\pwsh.exe'
+    CommandLine|contains:
+      - 'Set-WmiInstance'
+      - '__EventFilter'
+      - '__EventConsumer'
+      - '__FilterToConsumerBinding'
+      - 'ActiveScriptEventConsumer'
+      - 'CommandLineEventConsumer'
+      - 'Register-WmiEvent'
+      - 'Register-CimIndicationEvent'
+  selection_mofcomp:
+    Image|endswith: '\mofcomp.exe'
+  # ── T1546.001 Change Default File Association ──────────────────────
+  selection_assoc:
+    Image|endswith: '\cmd.exe'
+    CommandLine|contains:
+      - 'assoc'
+      - 'ftype'
+  selection_reg_fileassoc:
+    Image|endswith: '\reg.exe'
+    CommandLine|contains:
+      - 'Classes\\'
+      - 'shell\\open\\command'
+  # ── T1546.002 Screensaver Persistence ──────────────────────────────
+  selection_screensaver_path:
+    Image|endswith: '\reg.exe'
+    CommandLine|contains:
+      - 'Control Panel\\Desktop'
+  selection_screensaver_key:
+    CommandLine|contains:
+      - 'SCRNSAVE.EXE'
+      - 'ScreenSaveActive'
+      - 'ScreenSaverIsSecure'
+      - 'ScreenSaveTimeout'
+  # ── T1546.008 Accessibility Features (Sticky Keys / Utilman) ──────
+  selection_accessibility_ifeo:
+    Image|endswith: '\reg.exe'
+    CommandLine|contains:
+      - 'Image File Execution Options'
+  selection_accessibility_target:
+    CommandLine|contains:
+      - 'sethc.exe'
+      - 'utilman.exe'
+      - 'osk.exe'
+      - 'narrator.exe'
+      - 'magnify.exe'
+      - 'DisplaySwitch.exe'
+      - 'AtBroker.exe'
+  selection_accessibility_copy:
+    Image|endswith:
+      - '\cmd.exe'
+      - '\powershell.exe'
+    CommandLine|contains:
+      - 'copy'
+      - 'sethc.exe'
+      - 'utilman.exe'
+  # ── T1546.011 Application Shimming ─────────────────────────────────
+  selection_sdbinst:
+    Image|endswith: '\sdbinst.exe'
+  # ── T1546.015 COM Object Hijacking ────────────────────────────────
+  selection_com_hijack:
+    Image|endswith: '\reg.exe'
+    CommandLine|contains:
+      - 'InprocServer32'
+      - 'LocalServer32'
+      - 'TreatAs'
+      - 'CLSID'
+  selection_com_hijack_action:
+    CommandLine|contains:
+      - 'add'
+  filter_trusted:
+    ParentImage|endswith:
+      - '\msiexec.exe'
+      - '\TiWorker.exe'
+      - '\TrustedInstaller.exe'
+      - '\DllHost.exe'
+  condition: >
+    (selection_wmic_subscription or selection_ps_wmi_subscription
+    or selection_mofcomp or selection_assoc or selection_reg_fileassoc
+    or (selection_screensaver_path and selection_screensaver_key)
+    or (selection_accessibility_ifeo and selection_accessibility_target)
+    or selection_accessibility_copy or selection_sdbinst
+    or (selection_com_hijack and selection_com_hijack_action))
+    and not filter_trusted
+falsepositives:
+  - Legitimate COM registration during software installation
+  - Application compatibility shim deployment by IT
+tags:
+  - attack.persistence
+  - attack.privilege_escalation
+  - attack.t1546
+  - attack.t1546.001
+  - attack.t1546.002
+  - attack.t1546.003
+  - attack.t1546.008
+  - attack.t1546.011
+  - attack.t1546.015
+references:
+  - https://attack.mitre.org/techniques/T1546/
+  - https://github.com/redcanaryco/atomic-red-team/blob/master/atomics/T1546.003/T1546.003.md
+  - https://github.com/redcanaryco/atomic-red-team/blob/master/atomics/T1546.008/T1546.008.md

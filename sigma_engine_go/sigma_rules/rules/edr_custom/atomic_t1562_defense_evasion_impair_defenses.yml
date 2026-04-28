@@ -1,0 +1,146 @@
+title: "Atomic Red Team - T1562 Impair Defenses"
+id: edr-atomic-t1562-001
+status: stable
+level: critical
+description: |
+  Detects attempts to disable or tamper with security tools and logging,
+  tested by Atomic Red Team. Covers T1562.001 (Disable or Modify Tools),
+  T1562.002 (Disable Windows Event Logging), T1562.004 (Disable or Modify
+  System Firewall), T1562.006 (Indicator Blocking).
+author: EDR Detection Engineering
+date: 2026/04/28
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  # ── T1562.001 Disable Security Tools ────────────────────────────────
+  selection_disable_defender:
+    CommandLine|contains:
+      - 'Set-MpPreference -DisableRealtimeMonitoring $true'
+      - 'Set-MpPreference -DisableBehaviorMonitoring $true'
+      - 'Set-MpPreference -DisableBlockAtFirstSeen $true'
+      - 'Set-MpPreference -DisableIOAVProtection $true'
+      - 'Set-MpPreference -DisableScriptScanning $true'
+      - 'Set-MpPreference -DisableIntrusionPreventionSystem $true'
+      - 'Set-MpPreference -SubmitSamplesConsent 2'
+      - 'Set-MpPreference -MAPSReporting 0'
+      - 'Add-MpPreference -ExclusionPath'
+      - 'Add-MpPreference -ExclusionProcess'
+      - 'Add-MpPreference -ExclusionExtension'
+  selection_sc_stop_security:
+    Image|endswith: '\sc.exe'
+    CommandLine|contains:
+      - 'stop WinDefend'
+      - 'stop wscsvc'
+      - 'stop SecurityHealthService'
+      - 'stop Sense'
+      - 'stop WdNisSvc'
+      - 'stop WdNisDrv'
+      - 'stop WdFilter'
+      - 'stop MpsSvc'
+      - 'stop EventLog'
+      - 'delete WinDefend'
+      - 'delete Sense'
+      - 'config WinDefend'
+      - 'disabled WinDefend'
+      - 'disabled MpsSvc'
+  selection_taskkill_security:
+    Image|endswith: '\taskkill.exe'
+    CommandLine|contains:
+      - 'MsMpEng'
+      - 'MpCmdRun'
+      - 'SecurityHealthSystray'
+      - 'SenseIR'
+      - 'MsSense'
+  selection_net_stop_security:
+    Image|endswith:
+      - '\net.exe'
+      - '\net1.exe'
+    CommandLine|contains:
+      - 'stop WinDefend'
+      - 'stop wscsvc'
+      - 'stop EventLog'
+      - 'stop Sense'
+      - 'stop MpsSvc'
+  # ── T1562.002 Disable Windows Event Logging ────────────────────────
+  selection_disable_logging:
+    CommandLine|contains:
+      - 'auditpol /set /category:* /success:disable'
+      - 'auditpol /set /category:* /failure:disable'
+      - 'auditpol /clear'
+      - 'auditpol /remove'
+  selection_disable_sysmon:
+    Image|endswith:
+      - '\fltMC.exe'
+    CommandLine|contains:
+      - 'unload'
+      - 'SysmonDrv'
+      - 'sysmon'
+  selection_reg_disable_logging:
+    Image|endswith: '\reg.exe'
+    CommandLine|contains:
+      - 'ScriptBlockLogging 0'
+      - 'EnableScriptBlockLogging 0'
+      - 'ModuleLogging 0'
+      - 'EnableModuleLogging 0'
+      - 'ScriptBlockLogging /d 0'
+      - 'EnableScriptBlockLogging /d 0'
+      - 'ModuleLogging /d 0'
+      - 'EnableModuleLogging /d 0'
+  # ── T1562.004 Disable System Firewall ──────────────────────────────
+  selection_netsh_firewall:
+    Image|endswith: '\netsh.exe'
+    CommandLine|contains:
+      - 'firewall set opmode'
+      - 'advfirewall set allprofiles state off'
+      - 'advfirewall set currentprofile state off'
+      - 'advfirewall set domainprofile state off'
+      - 'advfirewall set privateprofile state off'
+      - 'advfirewall set publicprofile state off'
+      - 'firewall delete'
+      - 'advfirewall firewall delete'
+      - 'firewall set opmode disable'
+  selection_ps_firewall:
+    Image|endswith:
+      - '\powershell.exe'
+      - '\pwsh.exe'
+    CommandLine|contains:
+      - 'Set-NetFirewallProfile'
+      - 'Disable-NetFirewallRule'
+      - '-Enabled False'
+  # ── T1562.006 Indicator Blocking (ETW tampering) ───────────────────
+  selection_etw_tamper:
+    CommandLine|contains:
+      - 'logman stop'
+      - 'logman delete'
+      - 'Set-EtwTraceProvider'
+      - 'Remove-EtwTraceProvider'
+      - 'Microsoft-Windows-Threat-Intelligence'
+  # ── AMSI bypass ────────────────────────────────────────────────────
+  selection_amsi_bypass:
+    CommandLine|contains:
+      - 'AmsiInitFailed'
+      - 'amsiContext'
+      - 'AmsiUtils'
+      - 'amsi.dll'
+      - 'SetField.*NonPublic.*amsi'
+  condition: >
+    selection_disable_defender or selection_sc_stop_security
+    or selection_taskkill_security or selection_net_stop_security
+    or selection_disable_logging or selection_disable_sysmon
+    or selection_reg_disable_logging or selection_netsh_firewall
+    or selection_ps_firewall or selection_etw_tamper or selection_amsi_bypass
+falsepositives:
+  - Legitimate GPO changes to firewall rules
+  - Security tool maintenance windows
+tags:
+  - attack.defense_evasion
+  - attack.t1562
+  - attack.t1562.001
+  - attack.t1562.002
+  - attack.t1562.004
+  - attack.t1562.006
+references:
+  - https://attack.mitre.org/techniques/T1562/
+  - https://github.com/redcanaryco/atomic-red-team/blob/master/atomics/T1562.001/T1562.001.md
+  - https://github.com/redcanaryco/atomic-red-team/blob/master/atomics/T1562.004/T1562.004.md

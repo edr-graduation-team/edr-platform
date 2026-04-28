@@ -1,0 +1,95 @@
+title: "Atomic Red Team - T1547 Boot/Logon Autostart Execution"
+id: edr-atomic-t1547-001
+status: stable
+level: high
+description: |
+  Detects persistence via boot/logon autostart locations tested by Atomic Red Team.
+  Covers T1547.001 (Registry Run Keys / Startup Folder), T1547.004 (Winlogon),
+  T1547.005 (Security Support Provider), T1547.009 (Shortcut Modification).
+author: EDR Detection Engineering
+date: 2026/04/28
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  # ── T1547.001 Registry Run Keys ─────────────────────────────────────
+  selection_reg_run:
+    Image|endswith: '\reg.exe'
+    CommandLine|contains:
+      - 'add'
+  selection_reg_run_target:
+    CommandLine|contains:
+      - 'CurrentVersion\Run'
+      - 'CurrentVersion\RunOnce'
+      - 'CurrentVersion\RunServices'
+      - 'CurrentVersion\RunServicesOnce'
+      - 'CurrentVersion\Explorer\User Shell Folders'
+      - 'CurrentVersion\Explorer\Shell Folders'
+  # ── T1547.004 Winlogon Helper DLL ──────────────────────────────────
+  selection_winlogon:
+    Image|endswith: '\reg.exe'
+    CommandLine|contains|all:
+      - 'Winlogon'
+  selection_winlogon_key:
+    CommandLine|contains:
+      - 'Shell'
+      - 'Userinit'
+      - 'Notify'
+  # ── T1547.005 Security Support Provider ────────────────────────────
+  selection_ssp:
+    Image|endswith: '\reg.exe'
+    CommandLine|contains:
+      - 'SecurityProviders'
+      - 'Security Packages'
+  # ── T1547.009 Startup Folder Drop ──────────────────────────────────
+  selection_startup_copy:
+    Image|endswith:
+      - '\cmd.exe'
+      - '\powershell.exe'
+      - '\xcopy.exe'
+      - '\copy.exe'
+    CommandLine|contains:
+      - 'Startup'
+      - 'Start Menu\Programs\Startup'
+  # ── T1547.001 sc.exe service persistence ───────────────────────────
+  selection_sc_create:
+    Image|endswith: '\sc.exe'
+    CommandLine|contains:
+      - 'create'
+      - 'config'
+  selection_sc_create_persist:
+    CommandLine|contains:
+      - 'start= auto'
+      - 'binPath='
+  # ── False-positive reduction ────────────────────────────────────────
+  filter_installers:
+    ParentImage|endswith:
+      - '\msiexec.exe'
+      - '\setup.exe'
+      - '\TiWorker.exe'
+      - '\TrustedInstaller.exe'
+  filter_gpo:
+    ParentImage|endswith:
+      - '\gpscript.exe'
+      - '\svchost.exe'
+  condition: >
+    ((selection_reg_run and selection_reg_run_target)
+    or (selection_winlogon and selection_winlogon_key)
+    or selection_ssp
+    or selection_startup_copy
+    or (selection_sc_create and selection_sc_create_persist))
+    and not (filter_installers or filter_gpo)
+falsepositives:
+  - Legitimate software installation adding Run keys
+  - Group Policy applying startup scripts
+  - Enterprise software agents (AV, monitoring)
+tags:
+  - attack.persistence
+  - attack.t1547
+  - attack.t1547.001
+  - attack.t1547.004
+  - attack.t1547.005
+  - attack.t1547.009
+references:
+  - https://attack.mitre.org/techniques/T1547/
+  - https://github.com/redcanaryco/atomic-red-team/blob/master/atomics/T1547.001/T1547.001.md

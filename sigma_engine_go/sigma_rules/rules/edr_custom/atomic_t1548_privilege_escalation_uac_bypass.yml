@@ -1,0 +1,100 @@
+title: "Atomic Red Team - T1548 Abuse Elevation Control Mechanism"
+id: edr-atomic-t1548-001
+status: stable
+level: critical
+description: |
+  Detects UAC bypass and elevation control abuse tested by Atomic Red Team.
+  Covers T1548.002 (Bypass UAC) via fodhelper, eventvwr, sdclt, cmstp,
+  computerdefaults, and other well-known UAC bypass vectors.
+author: EDR Detection Engineering
+date: 2026/04/28
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  # ── Fodhelper UAC bypass ────────────────────────────────────────────
+  selection_fodhelper:
+    Image|endswith: '\fodhelper.exe'
+    ParentImage|endswith:
+      - '\cmd.exe'
+      - '\powershell.exe'
+      - '\pwsh.exe'
+  # ── Eventvwr UAC bypass ────────────────────────────────────────────
+  selection_eventvwr:
+    Image|endswith: '\eventvwr.exe'
+    ParentImage|endswith:
+      - '\cmd.exe'
+      - '\powershell.exe'
+      - '\pwsh.exe'
+  # ── Sdclt UAC bypass ──────────────────────────────────────────────
+  selection_sdclt:
+    Image|endswith: '\sdclt.exe'
+    ParentImage|endswith:
+      - '\cmd.exe'
+      - '\powershell.exe'
+      - '\pwsh.exe'
+  # ── ComputerDefaults UAC bypass ────────────────────────────────────
+  selection_compdefaults:
+    Image|endswith: '\computerdefaults.exe'
+    ParentImage|endswith:
+      - '\cmd.exe'
+      - '\powershell.exe'
+      - '\pwsh.exe'
+  # ── Registry key manipulation for UAC bypass ───────────────────────
+  selection_uac_reg:
+    Image|endswith: '\reg.exe'
+    CommandLine|contains:
+      - 'ms-settings\Shell\Open\command'
+      - 'mscfile\Shell\Open\command'
+      - 'Classes\Folder\shell'
+      - 'Classes\exefile\shell'
+      - 'Environment\windir'
+      - 'Environment\COR_PROFILER'
+  # ── DiskCleanup UAC bypass (Environment variable) ──────────────────
+  selection_diskcleanup:
+    Image|endswith: '\cleanmgr.exe'
+    ParentImage|endswith:
+      - '\cmd.exe'
+      - '\powershell.exe'
+  # ── SilentCleanup scheduled task UAC bypass ────────────────────────
+  selection_silentcleanup:
+    Image|endswith: '\schtasks.exe'
+    CommandLine|contains:
+      - 'SilentCleanup'
+  # ── WSReset UAC bypass ─────────────────────────────────────────────
+  selection_wsreset:
+    Image|endswith: '\wsreset.exe'
+    ParentImage|endswith:
+      - '\cmd.exe'
+      - '\powershell.exe'
+  # ── CMSTP UAC bypass ───────────────────────────────────────────────
+  selection_cmstp_uac:
+    Image|endswith: '\cmstp.exe'
+    CommandLine|contains:
+      - '/au'
+  # ── PowerShell UAC bypass attempts ─────────────────────────────────
+  selection_ps_uac:
+    Image|endswith:
+      - '\powershell.exe'
+      - '\pwsh.exe'
+    CommandLine|contains:
+      - 'Bypass-UAC'
+      - 'Invoke-BypassUAC'
+      - 'UACMe'
+      - 'FodhelperBypass'
+  condition: >
+    selection_fodhelper or selection_eventvwr or selection_sdclt
+    or selection_compdefaults or selection_uac_reg or selection_diskcleanup
+    or selection_silentcleanup or selection_wsreset or selection_cmstp_uac
+    or selection_ps_uac
+falsepositives:
+  - Extremely unlikely in production (these are specific attack patterns)
+tags:
+  - attack.privilege_escalation
+  - attack.defense_evasion
+  - attack.t1548
+  - attack.t1548.002
+references:
+  - https://attack.mitre.org/techniques/T1548/002/
+  - https://github.com/redcanaryco/atomic-red-team/blob/master/atomics/T1548.002/T1548.002.md
+  - https://github.com/hfiref0x/UACME

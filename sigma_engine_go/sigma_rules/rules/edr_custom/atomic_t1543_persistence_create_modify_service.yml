@@ -1,0 +1,103 @@
+title: "Atomic Red Team - T1543 Create or Modify System Process"
+id: edr-atomic-t1543-001
+status: stable
+level: high
+description: |
+  Detects creation or modification of Windows services for persistence,
+  tested by Atomic Red Team. Covers T1543.003 (Windows Service) including
+  service creation with suspicious binaries, service DLL hijacking,
+  and modification of existing services to load malicious code.
+author: EDR Detection Engineering
+date: 2026/04/28
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  # ── Suspicious service creation via sc.exe ─────────────────────────
+  selection_sc_create:
+    Image|endswith: '\sc.exe'
+    CommandLine|contains|all:
+      - 'create'
+      - 'binPath='
+  selection_sc_suspicious_path_action:
+    Image|endswith: '\sc.exe'
+    CommandLine|contains:
+      - 'create'
+  selection_sc_suspicious_path_target:
+    CommandLine|contains:
+      - 'AppData'
+      - 'Temp'
+      - 'ProgramData'
+      - 'Downloads'
+      - 'Users\Public'
+      - 'cmd.exe'
+      - 'powershell'
+      - 'mshta'
+      - 'rundll32'
+      - 'regsvr32'
+      - '.bat'
+      - '.ps1'
+      - '.vbs'
+  # ── Service config modification ────────────────────────────────────
+  selection_sc_config:
+    Image|endswith: '\sc.exe'
+    CommandLine|contains:
+      - 'config'
+      - 'binPath='
+  # ── Service failure recovery abuse ─────────────────────────────────
+  selection_sc_failure:
+    Image|endswith: '\sc.exe'
+    CommandLine|contains:
+      - 'failure'
+      - 'command='
+  # ── PowerShell service creation ────────────────────────────────────
+  selection_ps_service:
+    Image|endswith:
+      - '\powershell.exe'
+      - '\pwsh.exe'
+    CommandLine|contains:
+      - 'New-Service'
+      - 'Set-Service'
+      - 'sc.exe create'
+  # ── Registry-based service creation ────────────────────────────────
+  selection_reg_service:
+    Image|endswith: '\reg.exe'
+    CommandLine|contains:
+      - 'Services\\'
+      - 'ImagePath'
+      - 'add'
+  # ── WMI service creation ───────────────────────────────────────────
+  selection_wmic_service:
+    Image|endswith: '\wmic.exe'
+    CommandLine|contains:
+      - 'service'
+      - 'create'
+  filter_trusted_installers:
+    ParentImage|endswith:
+      - '\msiexec.exe'
+      - '\TiWorker.exe'
+      - '\TrustedInstaller.exe'
+      - '\ccmexec.exe'
+      - '\setup.exe'
+      - '\MsMpEng.exe'
+  filter_svchost:
+    ParentImage|endswith: '\services.exe'
+  condition: >
+    (selection_sc_create
+    or (selection_sc_suspicious_path_action and selection_sc_suspicious_path_target)
+    or selection_sc_config
+    or selection_sc_failure or selection_ps_service or selection_reg_service
+    or selection_wmic_service)
+    and not (filter_trusted_installers or filter_svchost)
+falsepositives:
+  - Legitimate software installation creating services
+  - Enterprise management tools (SCCM, Intune)
+  - Security product installation
+tags:
+  - attack.persistence
+  - attack.privilege_escalation
+  - attack.t1543
+  - attack.t1543.003
+references:
+  - https://attack.mitre.org/techniques/T1543/003/
+  - https://github.com/redcanaryco/atomic-red-team/blob/master/atomics/T1543.003/T1543.003.md

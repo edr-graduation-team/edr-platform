@@ -4,7 +4,8 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
     ArrowLeft, Activity, Terminal, Shield, HardDrive, Loader2,
     Server, Network, AlertTriangle, CheckCircle2, XCircle, Settings,
-    RefreshCw, ChevronLeft, ChevronRight, FileText, List, Package
+    RefreshCw, ChevronLeft, ChevronRight, FileText, List, Package,
+    ShieldAlert
 } from 'lucide-react';
 import {
     agentBuildApi,
@@ -47,7 +48,7 @@ const TAB_LABELS: { id: DetailTab; label: string; icon: React.FC<any> }[] = [
     { id: 'quarantine', label: 'Quarantine', icon: Shield },
     { id: 'activity', label: 'Activity', icon: List },
     { id: 'forensics', label: 'Forensic Logs', icon: FileText },
-    { id: 'network', label: 'Network', icon: Network },
+    { id: 'network', label: 'Auto-Proc Termination', icon: ShieldAlert },
     { id: 'configuration', label: 'Configuration', icon: Settings },
     { id: 'software', label: 'Software', icon: Package },
 ];
@@ -563,6 +564,7 @@ export default function EndpointDetail() {
                             alerts={alertsForAgent?.alerts || []}
                             alertsLoading={alertsLoading}
                             canViewAlerts={canViewAlerts}
+                            agentId={agentId}
                         />
                     )}
 
@@ -581,17 +583,16 @@ export default function EndpointDetail() {
                     )}
 
                     {tab === 'network' &&
-                        (canViewAlerts ? (
-                            <NetworkTab agentId={agentId} canViewAlerts={canViewAlerts} />
+                        (canViewResp ? (
+                            <AutoProcTerminationTab agentId={agentId} canViewAlerts={canViewAlerts} canExec={canExec} />
                         ) : (
                             <div className="flex flex-col items-center justify-center py-16 text-center">
                                 <div className="w-16 h-16 rounded-2xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center mb-4">
-                                    <Network className="w-8 h-8 text-slate-400" />
+                                    <ShieldAlert className="w-8 h-8 text-slate-400" />
                                 </div>
                                 <h3 className="text-lg font-bold text-slate-800 dark:text-slate-200 mb-2">Access Required</h3>
                                 <p className="text-sm text-slate-500 max-w-md">
-                                    You need additional permissions to view network data for this endpoint. 
-                                    Please contact your system administrator.
+                                    You need security permissions to view auto-response termination events.
                                 </p>
                             </div>
                         ))}
@@ -1412,7 +1413,9 @@ function ConfigurationTab({ agent }: { agent: Agent }) {
 
 const NETWORK_PAGE_SIZE = 25;
 
-function NetworkTab({ agentId, canViewAlerts }: { agentId: string; canViewAlerts: boolean }) {
+// @ts-ignore — legacy NetworkTab kept for reference; now replaced by AutoProcTerminationTab
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+function _NetworkTab({ agentId, canViewAlerts }: { agentId: string; canViewAlerts: boolean }) {
     const queryClient = useQueryClient();
     const [detailId, setDetailId] = useState<string | null>(null);
     const [rangeDays, setRangeDays] = useState<7 | 30 | 90>(30);
@@ -1606,6 +1609,299 @@ function NetworkTab({ agentId, canViewAlerts }: { agentId: string; canViewAlerts
             )}
 
             <EventDetailModal eventId={detailId} onClose={() => setDetailId(null)} fetchEnabled={canViewAlerts} />
+        </div>
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Auto-Proc Termination Tab (per-agent)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const AUTO_PROC_PAGE_SIZE = 25;
+
+const ACTION_BADGE: Record<string, { label: string; color: string; bg: string; icon: React.ElementType }> = {
+    auto_terminated:                    { label: 'Terminated',  color: '#22c55e', bg: 'rgba(34,197,94,0.12)',  icon: CheckCircle2 },
+    auto_terminate_failed:              { label: 'Failed',      color: '#ef4444', bg: 'rgba(239,68,68,0.12)',  icon: XCircle },
+    process_rule_matched_detect_only:   { label: 'Detect Only', color: '#f59e0b', bg: 'rgba(245,158,11,0.12)', icon: AlertTriangle },
+};
+
+function AutoProcTerminationTab({ agentId, canViewAlerts, canExec }: { agentId: string; canViewAlerts: boolean; canExec: boolean }) {
+    const queryClient = useQueryClient();
+    const { showToast } = useToast();
+    const [rangeDays, setRangeDays] = useState<7 | 30 | 90>(30);
+    const [page, setPage] = useState(1);
+    const [expandedId, setExpandedId] = useState<string | null>(null);
+    const [allowTarget, setAllowTarget] = useState<{ name: string; rule: string } | null>(null);
+    const [allowReason, setAllowReason] = useState('');
+
+    const { from, to } = useMemo(() => {
+        const toDate = new Date();
+        const fromDate = new Date(Date.now() - rangeDays * 24 * 60 * 60 * 1000);
+        return { from: fromDate.toISOString(), to: toDate.toISOString() };
+    }, [rangeDays]);
+
+    useEffect(() => { setPage(1); }, [rangeDays]);
+
+    const offset = (page - 1) * AUTO_PROC_PAGE_SIZE;
+
+    const q = useQuery({
+        queryKey: ['auto-proc-events', agentId, from, to, offset],
+        queryFn: () => eventsApi.search({
+            filters: [
+                { field: 'agent_id', operator: 'equals', value: agentId },
+                { field: 'data.autonomous', operator: 'equals', value: true },
+            ],
+            logic: 'AND',
+            time_range: { from, to },
+            limit: AUTO_PROC_PAGE_SIZE,
+            offset,
+        }),
+        enabled: !!agentId && canViewAlerts,
+        staleTime: 15_000,
+        refetchInterval: 30_000,
+        retry: 1,
+    });
+
+    const rows = q.data?.data ?? [];
+    const total = q.data?.pagination?.total ?? 0;
+    const totalPages = Math.max(1, Math.ceil(total / AUTO_PROC_PAGE_SIZE));
+
+    const exceptionMutation = useMutation({
+        mutationFn: (body: { process_name: string; reason?: string }) =>
+            agentsApi.addProcessException(agentId, body),
+        onSuccess: () => {
+            showToast('Process exception added — agent will allow this process', 'success');
+            setAllowTarget(null);
+            setAllowReason('');
+        },
+        onError: (e: Error) => showToast(e.message || 'Failed to add exception', 'error'),
+    });
+
+    const getActionBadge = (ev: CmEventSummary) => {
+        const raw = ev as any;
+        const action = raw.data?.action || raw.action || '';
+        return ACTION_BADGE[action] || ACTION_BADGE['process_rule_matched_detect_only'];
+    };
+
+    const getField = (ev: CmEventSummary, field: string): string => {
+        const raw = ev as any;
+        return String(raw.data?.[field] ?? raw[field] ?? '');
+    };
+
+    // Stats
+    const terminated = rows.filter(r => getField(r, 'action') === 'auto_terminated').length;
+    const detectOnly = rows.filter(r => getField(r, 'action') === 'process_rule_matched_detect_only').length;
+    const failed = rows.filter(r => getField(r, 'action') === 'auto_terminate_failed').length;
+
+    return (
+        <div className="space-y-4 text-sm animate-slide-up-fade">
+            {/* Header */}
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                <div>
+                    <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2 mb-1">
+                        <ShieldAlert className="w-4 h-4 text-cyan-500" /> Auto-Proc Termination
+                    </h3>
+                    <p className="text-slate-500 dark:text-slate-400 text-xs">
+                        Processes automatically terminated or detected by endpoint prevention rules.
+                    </p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2 shrink-0">
+                    <button
+                        type="button"
+                        onClick={() => queryClient.invalidateQueries({ queryKey: ['auto-proc-events', agentId] })}
+                        disabled={q.isFetching}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border border-slate-200 dark:border-slate-600 bg-white/70 dark:bg-slate-900/50 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-50"
+                    >
+                        <RefreshCw className={`w-3.5 h-3.5 ${q.isFetching ? 'animate-spin' : ''}`} /> Refresh
+                    </button>
+                </div>
+            </div>
+
+            {/* Mini KPIs */}
+            <div className="grid grid-cols-3 gap-3">
+                <div className="rounded-lg border border-emerald-200 dark:border-emerald-800/40 bg-emerald-50/50 dark:bg-emerald-900/10 p-3">
+                    <div className="text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider">Terminated</div>
+                    <div className="text-lg font-bold text-emerald-700 dark:text-emerald-300 mt-0.5">{terminated}</div>
+                </div>
+                <div className="rounded-lg border border-amber-200 dark:border-amber-800/40 bg-amber-50/50 dark:bg-amber-900/10 p-3">
+                    <div className="text-[10px] font-semibold text-amber-600 dark:text-amber-400 uppercase tracking-wider">Detect Only</div>
+                    <div className="text-lg font-bold text-amber-700 dark:text-amber-300 mt-0.5">{detectOnly}</div>
+                </div>
+                <div className="rounded-lg border border-rose-200 dark:border-rose-800/40 bg-rose-50/50 dark:bg-rose-900/10 p-3">
+                    <div className="text-[10px] font-semibold text-rose-600 dark:text-rose-400 uppercase tracking-wider">Failed</div>
+                    <div className="text-lg font-bold text-rose-700 dark:text-rose-300 mt-0.5">{failed}</div>
+                </div>
+            </div>
+
+            {/* Time range */}
+            <div className="flex flex-wrap items-center gap-2">
+                <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Time range</span>
+                {([7, 30, 90] as const).map((d) => (
+                    <button key={d} type="button" onClick={() => setRangeDays(d)}
+                        className={`px-2.5 py-1 rounded-md text-xs font-medium border transition-colors ${
+                            rangeDays === d
+                                ? 'border-cyan-500/60 bg-cyan-500/10 text-cyan-800 dark:text-cyan-200'
+                                : 'border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+                        }`}
+                    >Last {d} days</button>
+                ))}
+                <span className="ml-auto text-[10px] text-slate-400">{total} event{total !== 1 ? 's' : ''} in range</span>
+            </div>
+
+            {/* Table */}
+            {q.isLoading ? (
+                <div className="flex justify-center py-12"><Loader2 className="w-8 h-8 animate-spin text-cyan-500" /></div>
+            ) : rows.length === 0 ? (
+                <div className="rounded-lg border border-dashed border-slate-300 dark:border-slate-600 p-8 text-center">
+                    <ShieldAlert className="w-10 h-10 text-slate-300 dark:text-slate-600 mx-auto mb-3" />
+                    <p className="text-slate-500 font-medium">No auto-response events in this time range</p>
+                    <p className="text-xs text-slate-400 mt-1">Process termination events will appear here when the agent enforces prevention rules.</p>
+                </div>
+            ) : (
+                <>
+                <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-700">
+                    <table className="w-full text-left text-xs">
+                        <thead className="bg-slate-100 dark:bg-slate-800/80 text-slate-600 dark:text-slate-400 uppercase text-[10px]">
+                            <tr>
+                                <th className="p-2.5">Time</th>
+                                <th className="p-2.5">Action</th>
+                                <th className="p-2.5">Severity</th>
+                                <th className="p-2.5">Process</th>
+                                <th className="p-2.5">Rule</th>
+                                <th className="p-2.5">User</th>
+                                <th className="p-2.5 text-right">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {rows.map((ev) => {
+                                const badge = getActionBadge(ev);
+                                const BadgeIcon = badge.icon;
+                                const isExpanded = expandedId === ev.id;
+                                const processName = getField(ev, 'name') || getField(ev, 'process_name') || '—';
+                                const ruleName = getField(ev, 'matched_rule_title') || getField(ev, 'matched_rule_id') || '—';
+                                const userName = getField(ev, 'user_name') || '—';
+                                const severity = (ev as any).severity || getField(ev, 'severity') || 'medium';
+                                const sevColor = severity === 'critical' ? 'text-rose-600 dark:text-rose-400 bg-rose-500/10 border-rose-500/20'
+                                    : severity === 'high' ? 'text-orange-600 dark:text-orange-400 bg-orange-500/10 border-orange-500/20'
+                                    : 'text-amber-600 dark:text-amber-400 bg-amber-500/10 border-amber-500/20';
+
+                                return (
+                                    <React.Fragment key={ev.id}>
+                                        <tr
+                                            className="border-t border-slate-100 dark:border-slate-800 cursor-pointer hover:bg-slate-50/90 dark:hover:bg-slate-800/40 transition-colors"
+                                            onClick={() => setExpandedId(isExpanded ? null : ev.id)}
+                                        >
+                                            <td className="p-2.5 whitespace-nowrap text-slate-600 dark:text-slate-300">{new Date(ev.timestamp).toLocaleString()}</td>
+                                            <td className="p-2.5">
+                                                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '2px 8px', borderRadius: '9999px', fontSize: '10px', fontWeight: 600, color: badge.color, backgroundColor: badge.bg }}>
+                                                    <BadgeIcon style={{ width: 12, height: 12 }} /> {badge.label}
+                                                </span>
+                                            </td>
+                                            <td className="p-2.5">
+                                                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase border ${sevColor}`}>{severity}</span>
+                                            </td>
+                                            <td className="p-2.5 font-mono font-medium text-slate-800 dark:text-slate-200">{processName}</td>
+                                            <td className="p-2.5 text-slate-600 dark:text-slate-300 max-w-[180px] truncate" title={ruleName}>{ruleName}</td>
+                                            <td className="p-2.5 text-slate-500">{userName}</td>
+                                            <td className="p-2.5 text-right">
+                                                {canExec && getField(ev, 'action') !== 'process_rule_matched_detect_only' && (
+                                                    <button
+                                                        type="button"
+                                                        className="px-2 py-1 rounded border border-emerald-500/40 text-[10px] font-semibold text-emerald-700 dark:text-emerald-400 hover:bg-emerald-500/10 disabled:opacity-50"
+                                                        onClick={(e) => { e.stopPropagation(); setAllowTarget({ name: processName, rule: ruleName }); }}
+                                                    >Allow</button>
+                                                )}
+                                            </td>
+                                        </tr>
+                                        {isExpanded && (
+                                            <tr className="bg-slate-50/50 dark:bg-slate-900/30">
+                                                <td colSpan={7} className="p-4">
+                                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+                                                        <div><span className="font-semibold text-slate-500 uppercase text-[10px]">PID</span><div className="font-mono mt-0.5">{getField(ev, 'pid') || '—'}</div></div>
+                                                        <div><span className="font-semibold text-slate-500 uppercase text-[10px]">PPID</span><div className="font-mono mt-0.5">{getField(ev, 'ppid') || '—'}</div></div>
+                                                        <div className="md:col-span-2"><span className="font-semibold text-slate-500 uppercase text-[10px]">Command Line</span><div className="font-mono mt-0.5 bg-slate-100 dark:bg-slate-900/60 p-2 rounded break-all max-h-24 overflow-auto">{getField(ev, 'command_line') || '—'}</div></div>
+                                                        <div><span className="font-semibold text-slate-500 uppercase text-[10px]">Parent</span><div className="font-mono mt-0.5">{getField(ev, 'parent_name') || '—'}</div></div>
+                                                        <div><span className="font-semibold text-slate-500 uppercase text-[10px]">Parent Executable</span><div className="font-mono mt-0.5 truncate" title={getField(ev, 'parent_executable')}>{getField(ev, 'parent_executable') || '—'}</div></div>
+                                                        <div><span className="font-semibold text-slate-500 uppercase text-[10px]">Kill Tree</span><div className="mt-0.5">{getField(ev, 'kill_tree') === 'true' ? <span className="text-rose-600 font-bold">Yes</span> : 'No'}</div></div>
+                                                        <div><span className="font-semibold text-slate-500 uppercase text-[10px]">Signature</span><div className="mt-0.5">{getField(ev, 'signature_status') || '—'}</div></div>
+                                                        <div><span className="font-semibold text-slate-500 uppercase text-[10px]">Elevated</span><div className="mt-0.5">{getField(ev, 'is_elevated') === 'true' ? <span className="text-amber-600 font-bold">Yes</span> : 'No'}</div></div>
+                                                        <div><span className="font-semibold text-slate-500 uppercase text-[10px]">Integrity Level</span><div className="mt-0.5">{getField(ev, 'integrity_level') || '—'}</div></div>
+                                                        {getField(ev, 'kill_output') && (
+                                                            <div className="md:col-span-2"><span className="font-semibold text-slate-500 uppercase text-[10px]">Kill Output</span><pre className="font-mono mt-0.5 bg-slate-900 text-slate-100 p-2 rounded text-[10px] max-h-20 overflow-auto">{getField(ev, 'kill_output')}</pre></div>
+                                                        )}
+                                                        {getField(ev, 'kill_error') && (
+                                                            <div className="md:col-span-2"><span className="font-semibold text-rose-500 uppercase text-[10px]">Error</span><pre className="font-mono mt-0.5 bg-rose-500/10 text-rose-700 dark:text-rose-300 p-2 rounded text-[10px]">{getField(ev, 'kill_error')}</pre></div>
+                                                        )}
+                                                        <div><span className="font-semibold text-slate-500 uppercase text-[10px]">Rule ID</span><div className="font-mono mt-0.5 text-slate-400">{getField(ev, 'matched_rule_id') || '—'}</div></div>
+                                                        <div><span className="font-semibold text-slate-500 uppercase text-[10px]">Decision Mode</span><div className="mt-0.5">{getField(ev, 'decision_mode') || '—'}</div></div>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        )}
+                                    </React.Fragment>
+                                );
+                            })}
+                        </tbody>
+                    </table>
+                </div>
+
+                {totalPages > 1 && (
+                    <div className="flex items-center justify-between gap-3 pt-1">
+                        <button type="button" className="inline-flex items-center gap-1 px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-medium disabled:opacity-40" disabled={page <= 1} onClick={() => setPage(p => Math.max(1, p - 1))}>
+                            <ChevronLeft className="w-4 h-4" /> Prev
+                        </button>
+                        <span className="text-xs text-slate-500">Page <span className="font-semibold text-slate-700 dark:text-slate-200">{page}</span> / {totalPages}</span>
+                        <button type="button" className="inline-flex items-center gap-1 px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-medium disabled:opacity-40" disabled={page >= totalPages} onClick={() => setPage(p => Math.min(totalPages, p + 1))}>
+                            Next <ChevronRight className="w-4 h-4" />
+                        </button>
+                    </div>
+                )}
+                </>
+            )}
+
+            {/* Allow Confirmation Modal */}
+            <Modal
+                isOpen={!!allowTarget}
+                onClose={() => { setAllowTarget(null); setAllowReason(''); }}
+                title="Allow Process — Add Exception"
+                footer={
+                    <div className="flex justify-end gap-2">
+                        <button type="button" className="btn btn-secondary" onClick={() => { setAllowTarget(null); setAllowReason(''); }}>Cancel</button>
+                        <button
+                            type="button"
+                            className="px-4 py-2 rounded-lg text-sm font-semibold bg-emerald-600 hover:bg-emerald-700 text-white disabled:opacity-50"
+                            disabled={exceptionMutation.isPending}
+                            onClick={() => { if (allowTarget) exceptionMutation.mutate({ process_name: allowTarget.name, reason: allowReason || `Allowed from rule: ${allowTarget.rule}` }); }}
+                        >
+                            {exceptionMutation.isPending ? 'Adding…' : 'Confirm Allow'}
+                        </button>
+                    </div>
+                }
+            >
+                <div className="space-y-3 text-sm">
+                    <div className="p-3 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/40 text-amber-800 dark:text-amber-300 text-xs flex items-start gap-2">
+                        <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                        <span>Adding an exception means this process will <strong>no longer be auto-terminated</strong> by the prevention engine on this agent.</span>
+                    </div>
+                    <div>
+                        <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Process Name</label>
+                        <code className="block bg-slate-100 dark:bg-slate-900/60 p-2 rounded text-slate-800 dark:text-slate-200">{allowTarget?.name}</code>
+                    </div>
+                    <div>
+                        <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Matched Rule</label>
+                        <code className="block bg-slate-100 dark:bg-slate-900/60 p-2 rounded text-slate-800 dark:text-slate-200 text-xs">{allowTarget?.rule}</code>
+                    </div>
+                    <div>
+                        <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Reason (optional)</label>
+                        <input
+                            className="w-full rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-950 px-3 py-2 text-sm"
+                            value={allowReason}
+                            onChange={(e) => setAllowReason(e.target.value)}
+                            placeholder="e.g., approved automation / known good"
+                        />
+                    </div>
+                </div>
+            </Modal>
         </div>
     );
 }
@@ -2278,15 +2574,38 @@ function ActivityTab({
     alerts,
     alertsLoading,
     canViewAlerts,
+    agentId,
 }: {
     events: CmEventSummary[];
     alerts: Alert[];
     alertsLoading: boolean;
     canViewAlerts: boolean;
+    agentId: string;
 }) {
     const [detailId, setDetailId] = useState<string | null>(null);
     const [actPage, setActPage] = useState(1);
     const ACT_PAGE_SIZE = 20;
+
+    // Fetch network events to merge into the activity timeline
+    const { data: netPayload } = useQuery({
+        queryKey: ['activity-network-events', agentId],
+        queryFn: () => eventsApi.search({
+            filters: [
+                { field: 'agent_id', operator: 'equals', value: agentId },
+                { field: 'event_type', operator: 'equals', value: 'network' },
+            ],
+            logic: 'AND',
+            time_range: {
+                from: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
+                to: new Date().toISOString(),
+            },
+            limit: 50,
+            offset: 0,
+        }),
+        enabled: !!agentId && canViewAlerts,
+        staleTime: 30_000,
+    });
+    const networkEvents = netPayload?.data ?? [];
 
     const merged = useMemo(() => {
         const rows: TimelineRow[] = [];
@@ -2305,9 +2624,14 @@ function ActivityTab({
             const ts = new Date(e.timestamp).getTime();
             rows.push({ kind: 'event', at: Number.isFinite(ts) ? ts : 0, id: `ev-${e.id}`, ev: e });
         }
+        // Merge network events
+        for (const n of networkEvents) {
+            const ts = new Date(n.timestamp).getTime();
+            rows.push({ kind: 'event', at: Number.isFinite(ts) ? ts : 0, id: `net-${n.id}`, ev: n });
+        }
         rows.sort((a, b) => b.at - a.at);
         return rows;
-    }, [alerts, events, canViewAlerts]);
+    }, [alerts, events, networkEvents, canViewAlerts]);
 
     return (
         <div className="space-y-6">
@@ -2366,7 +2690,10 @@ function ActivityTab({
                                         }
                                     }}
                                 >
-                                    <Network className="w-4 h-4 text-cyan-500 shrink-0 mt-0.5" />
+                                    {r.ev.event_type === 'network'
+                                        ? <Network className="w-4 h-4 text-indigo-500 shrink-0 mt-0.5" />
+                                        : <Network className="w-4 h-4 text-cyan-500 shrink-0 mt-0.5" />
+                                    }
                                     <div className="min-w-0 flex-1">
                                         <div className="font-mono text-xs text-cyan-700 dark:text-cyan-300">{r.ev.event_type}</div>
                                         <div className="text-slate-800 dark:text-slate-100">{r.ev.summary}</div>

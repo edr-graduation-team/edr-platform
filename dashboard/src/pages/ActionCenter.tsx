@@ -1,13 +1,13 @@
-import { useQuery } from '@tanstack/react-query';
-import React, { useState, useEffect } from 'react';
+import { useQuery, useMutation } from '@tanstack/react-query';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import {
     Zap, CheckCircle2, Clock, XCircle, AlertTriangle,
     ChevronDown, ChevronRight, RefreshCw, Terminal,
-    Monitor, Search, X, Activity
+    Monitor, Search, X, Activity, ShieldAlert
 } from 'lucide-react';
-import { authApi, commandsApi, type CommandListItem, type CommandStats } from '../api/client';
-import { useToast } from '../components';
+import { authApi, commandsApi, eventsApi, agentsApi, type CommandListItem, type CommandStats, type CmEventSummary } from '../api/client';
+import { useToast, type ToastType } from '../components';
 import { useDebounce } from '../hooks/useDebounce';
 
 const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string; icon: React.ElementType }> = {
@@ -287,6 +287,7 @@ export default function ActionCenter() {
     const navigate = useNavigate();
     const { showToast } = useToast();
     const [searchParams] = useSearchParams();
+    const [activeTab, setActiveTab] = useState<'commands' | 'auto-proc'>('commands');
     const [filters, setFilters] = useState<{
         status?: string;
         command_type?: string;
@@ -350,18 +351,16 @@ export default function ActionCenter() {
             <div className="absolute top-0 right-0 w-[500px] h-[500px] pointer-events-none mix-blend-screen" style={{ background: 'radial-gradient(circle, rgba(6,182,212,0.08) 0%, transparent 70%)' }} />
 
             <div className="relative flex-1 flex flex-col min-h-0 space-y-4 lg:space-y-6  w-full">
-                
-                {/* Header Section */}
+                                {/* Header Section */}
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 shrink-0">
                     <div>
                         <h2 className="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-slate-900 to-slate-600 dark:from-white dark:to-slate-300">
                             Command Center
                         </h2>
                         <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-                            Fleet-wide command history. Start new commands from a device’s <strong>Response</strong> tab.
+                            Command history and autonomous response events across all agents.
                         </p>
                     </div>
-                    
                     {/* Action Bar */}
                     <div className="flex flex-wrap items-center gap-3">
                         {isError && (
@@ -374,7 +373,7 @@ export default function ActionCenter() {
                             {isFetching && !commandsLoading && <RefreshCw className="w-4 h-4 animate-spin text-cyan-500" />}
                             Last updated: {new Date(lastUpdated).toLocaleTimeString()}
                         </span>
-                        {authApi.canExecuteCommands() && (
+                        {activeTab === 'commands' && authApi.canExecuteCommands() && (
                             <button
                                 type="button"
                                 onClick={() => {
@@ -400,16 +399,46 @@ export default function ActionCenter() {
                     </div>
                 </div>
 
-                {/* Stats KPIs */}
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 shrink-0">
-                    <KPICard title="Total Commands" value={stats?.total || 0} icon={Terminal} color="bg-blue-500/10 dark:bg-blue-500/20 text-blue-600 dark:text-blue-400 border border-blue-500/20" />
-                    <KPICard title="Pending" value={stats?.pending || 0} icon={Clock} color="bg-amber-500/10 dark:bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/20" />
-                    <KPICard title="Completed" value={stats?.completed || 0} icon={CheckCircle2} color="bg-emerald-500/10 dark:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20" />
-                    <KPICard title="Failed" value={stats?.failed || 0} icon={XCircle} color="bg-rose-500/10 dark:bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/20" />
+                {/* Sub-tabs */}
+                <div className="flex gap-1 bg-white/60 dark:bg-slate-900/40 backdrop-blur-md border border-slate-200/80 dark:border-slate-700/50 rounded-xl p-1.5 shrink-0 w-fit">
+                    <button
+                        type="button"
+                        onClick={() => setActiveTab('commands')}
+                        className={`flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-lg transition-all duration-200 ${
+                            activeTab === 'commands'
+                                ? 'bg-gradient-to-r from-cyan-500 to-indigo-600 text-white shadow-md'
+                                : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800'
+                        }`}
+                    >
+                        <Terminal className="w-3.5 h-3.5" /> Manual Commands
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => setActiveTab('auto-proc')}
+                        className={`flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-lg transition-all duration-200 ${
+                            activeTab === 'auto-proc'
+                                ? 'bg-gradient-to-r from-cyan-500 to-indigo-600 text-white shadow-md'
+                                : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800'
+                        }`}
+                    >
+                        <ShieldAlert className="w-3.5 h-3.5" /> Auto-Proc Termination
+                    </button>
                 </div>
 
-                {/* Filters Strip */}
-                <div className="relative z-20 shrink-0 bg-white/60 dark:bg-slate-900/40 backdrop-blur-md border border-slate-200/80 dark:border-slate-700/50 rounded-xl p-4 shadow-sm flex flex-col md:flex-row gap-4 items-end">
+                {/* Stats KPIs */}
+                {activeTab === 'commands' && (
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 shrink-0">
+                        <KPICard title="Total Commands" value={stats?.total || 0} icon={Terminal} color="bg-blue-500/10 dark:bg-blue-500/20 text-blue-600 dark:text-blue-400 border border-blue-500/20" />
+                        <KPICard title="Pending" value={stats?.pending || 0} icon={Clock} color="bg-amber-500/10 dark:bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/20" />
+                        <KPICard title="Completed" value={stats?.completed || 0} icon={CheckCircle2} color="bg-emerald-500/10 dark:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20" />
+                        <KPICard title="Failed" value={stats?.failed || 0} icon={XCircle} color="bg-rose-500/10 dark:bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/20" />
+                    </div>
+                )}
+
+                {activeTab === 'auto-proc' && <AutoProcTerminationPanel showToast={showToast} />}
+
+                {/* Filters Strip — only for Manual Commands tab */}
+                {activeTab === 'commands' && <div className="relative z-20 shrink-0 bg-white/60 dark:bg-slate-900/40 backdrop-blur-md border border-slate-200/80 dark:border-slate-700/50 rounded-xl p-4 shadow-sm flex flex-col md:flex-row gap-4 items-end">
                     
                     <div className="w-full md:w-64 relative">
                         <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">
@@ -454,63 +483,335 @@ export default function ActionCenter() {
                             <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
                         </div>
                     </div>
-                </div>
+                </div>}
 
-                {/* Commands Stream Grid */}
-                <div className="relative flex-1 flex flex-col min-h-0 bg-white dark:bg-slate-800/70 rounded-2xl border border-slate-200 dark:border-slate-700/60 shadow-sm overflow-hidden mt-2">
-                    
-                    {/* Inner Scrollable Area */}
-                    <div className="flex-1 overflow-auto custom-scrollbar p-0.5 transform-gpu">
-                        {commandsLoading ? (
-                            <div className="p-4 space-y-4">
-                                <div className="h-20 bg-slate-200 dark:bg-slate-800 rounded-xl animate-pulse"></div>
-                                <div className="h-20 bg-slate-200 dark:bg-slate-800 rounded-xl animate-pulse opacity-75"></div>
-                                <div className="h-20 bg-slate-200 dark:bg-slate-800 rounded-xl animate-pulse opacity-50"></div>
-                            </div>
-                        ) : commands.length === 0 ? (
-                            <div className="text-center py-20 flex flex-col items-center justify-center">
-                                <Activity className="w-12 h-12 text-slate-400 dark:text-slate-600 mb-4" />
-                                <h3 className="text-lg font-medium text-slate-900 dark:text-slate-100 mb-1">No commands found</h3>
-                                <p className="text-slate-500 dark:text-slate-400">Try adjusting your filters or search terms.</p>
-                            </div>
-                        ) : (
-                            <div className="p-4 space-y-3">
-                                {commands.map((cmd) => (
-                                    <CommandRow key={cmd.id} command={cmd} />
-                                ))}
-                            </div>
-                        )}
-                    </div>
+                {/* Commands tab content */}
+                {activeTab === 'commands' && (
+                    <>
+                    {/* Commands Stream Grid */}
+                    <div className="relative flex-1 flex flex-col min-h-0 bg-white dark:bg-slate-800/70 rounded-2xl border border-slate-200 dark:border-slate-700/60 shadow-sm overflow-hidden mt-2">
+                        {/* Inner Scrollable Area */}
+                        <div className="flex-1 overflow-auto custom-scrollbar p-0.5 transform-gpu">
+                            {commandsLoading ? (
+                                <div className="p-4 space-y-4">
+                                    <div className="h-20 bg-slate-200 dark:bg-slate-800 rounded-xl animate-pulse"></div>
+                                    <div className="h-20 bg-slate-200 dark:bg-slate-800 rounded-xl animate-pulse opacity-75"></div>
+                                    <div className="h-20 bg-slate-200 dark:bg-slate-800 rounded-xl animate-pulse opacity-50"></div>
+                                </div>
+                            ) : commands.length === 0 ? (
+                                <div className="text-center py-20 flex flex-col items-center justify-center">
+                                    <Activity className="w-12 h-12 text-slate-400 dark:text-slate-600 mb-4" />
+                                    <h3 className="text-lg font-medium text-slate-900 dark:text-slate-100 mb-1">No commands found</h3>
+                                    <p className="text-slate-500 dark:text-slate-400">Try adjusting your filters or search terms.</p>
+                                </div>
+                            ) : (
+                                <div className="p-4 space-y-3">
+                                    {commands.map((cmd) => (
+                                        <CommandRow key={cmd.id} command={cmd} />
+                                    ))}
+                                </div>
+                            )}
+                        </div>
 
-                    {/* Pagination Strip */}
-                    <div className="shrink-0 px-4 py-3 bg-slate-50/50 dark:bg-slate-900/40 border-t border-slate-200 dark:border-slate-800/60 mt-auto flex items-center justify-between">
-                        <div className="text-sm text-slate-500 dark:text-slate-400">
-                            Showing <span className="font-semibold text-slate-700 dark:text-slate-200">{commands.length}</span> out of <span className="font-semibold text-slate-700 dark:text-slate-200">{stats?.total || 0}</span> commands
-                        </div>
-                        <div className="flex items-center gap-2">
-                            <button
-                                onClick={() => handlePageChange(currentPage - 1)}
-                                disabled={currentPage === 1}
-                                className="px-3 py-1.5 border border-slate-200 dark:border-slate-700 rounded-md text-sm font-medium hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed text-slate-700 dark:text-slate-300 transition-colors"
-                            >
-                                Previous
-                            </button>
-                            <span className="text-sm font-medium text-slate-700 dark:text-slate-300">
-                                Page {currentPage} of {Math.max(1, totalPages)}
-                            </span>
-                            <button
-                                onClick={() => handlePageChange(currentPage + 1)}
-                                disabled={currentPage === totalPages || totalPages === 0}
-                                className="px-3 py-1.5 border border-slate-200 dark:border-slate-700 rounded-md text-sm font-medium hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed text-slate-700 dark:text-slate-300 transition-colors"
-                            >
-                                Next
-                            </button>
+                        {/* Pagination Strip */}
+                        <div className="shrink-0 px-4 py-3 bg-slate-50/50 dark:bg-slate-900/40 border-t border-slate-200 dark:border-slate-800/60 mt-auto flex items-center justify-between">
+                            <div className="text-sm text-slate-500 dark:text-slate-400">
+                                Showing <span className="font-semibold text-slate-700 dark:text-slate-200">{commands.length}</span> out of <span className="font-semibold text-slate-700 dark:text-slate-200">{stats?.total || 0}</span> commands
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <button
+                                    onClick={() => handlePageChange(currentPage - 1)}
+                                    disabled={currentPage === 1}
+                                    className="px-3 py-1.5 border border-slate-200 dark:border-slate-700 rounded-md text-sm font-medium hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed text-slate-700 dark:text-slate-300 transition-colors"
+                                >
+                                    Previous
+                                </button>
+                                <span className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                                    Page {currentPage} of {Math.max(1, totalPages)}
+                                </span>
+                                <button
+                                    onClick={() => handlePageChange(currentPage + 1)}
+                                    disabled={currentPage === totalPages || totalPages === 0}
+                                    className="px-3 py-1.5 border border-slate-200 dark:border-slate-700 rounded-md text-sm font-medium hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed text-slate-700 dark:text-slate-300 transition-colors"
+                                >
+                                    Next
+                                </button>
+                            </div>
                         </div>
                     </div>
-                </div>
+                    </>
+                )}
             </div>
         </div>
     );
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Auto-Proc Termination Panel (all agents)
+// ─────────────────────────────────────────────────────────────────────────────
 
+const AP_ACTION_BADGE: Record<string, { label: string; color: string; bg: string; icon: React.ElementType }> = {
+    auto_terminated:                  { label: 'Terminated',  color: '#22c55e', bg: 'rgba(34,197,94,0.12)',  icon: CheckCircle2 },
+    auto_terminate_failed:            { label: 'Failed',      color: '#ef4444', bg: 'rgba(239,68,68,0.12)',  icon: XCircle },
+    process_rule_matched_detect_only: { label: 'Detect Only', color: '#f59e0b', bg: 'rgba(245,158,11,0.12)', icon: AlertTriangle },
+};
+
+const AP_PAGE_SIZE = 30;
+
+function AutoProcTerminationPanel({ showToast }: { showToast: (msg: string, type?: ToastType) => void }) {
+    const [rangeDays, setRangeDays] = useState<7 | 30 | 90>(30);
+    const [page, setPage] = useState(1);
+    const [expandedId, setExpandedId] = useState<string | null>(null);
+    const [allowTarget, setAllowTarget] = useState<{ agentId: string; name: string; rule: string } | null>(null);
+    const [allowReason, setAllowReason] = useState('');
+
+    const { from, to } = useMemo(() => {
+        const toD = new Date();
+        const fromD = new Date(Date.now() - rangeDays * 24 * 60 * 60 * 1000);
+        return { from: fromD.toISOString(), to: toD.toISOString() };
+    }, [rangeDays]);
+
+    useEffect(() => { setPage(1); }, [rangeDays]);
+
+    const offset = (page - 1) * AP_PAGE_SIZE;
+
+    const q = useQuery({
+        queryKey: ['auto-proc-all', from, to, offset],
+        queryFn: () => eventsApi.search({
+            filters: [
+                { field: 'data.autonomous', operator: 'equals', value: true },
+            ],
+            logic: 'AND',
+            time_range: { from, to },
+            limit: AP_PAGE_SIZE,
+            offset,
+        }),
+        staleTime: 15_000,
+        refetchInterval: 30_000,
+        retry: 1,
+    });
+
+    const rows: CmEventSummary[] = q.data?.data ?? [];
+    const total = q.data?.pagination?.total ?? 0;
+    const totalPages = Math.max(1, Math.ceil(total / AP_PAGE_SIZE));
+
+    const exceptionMutation = useMutation({
+        mutationFn: (body: { agentId: string; process_name: string; reason?: string }) =>
+            agentsApi.addProcessException(body.agentId, { process_name: body.process_name, reason: body.reason }),
+        onSuccess: () => {
+            showToast('Process exception added', 'success');
+            setAllowTarget(null);
+            setAllowReason('');
+        },
+        onError: (e: Error) => showToast(e.message || 'Failed to add exception', 'error'),
+    });
+
+    const getField = (ev: CmEventSummary, field: string): string => {
+        const raw = ev as any;
+        return String(raw.data?.[field] ?? raw[field] ?? '');
+    };
+
+    const getBadge = (ev: CmEventSummary) => {
+        const raw = ev as any;
+        const action = raw.data?.action || raw.action || '';
+        return AP_ACTION_BADGE[action] || AP_ACTION_BADGE['process_rule_matched_detect_only'];
+    };
+
+    // KPI stats from current page rows
+    const terminated = rows.filter(r => getField(r, 'action') === 'auto_terminated').length;
+    const detectOnly = rows.filter(r => getField(r, 'action') === 'process_rule_matched_detect_only').length;
+    const failed    = rows.filter(r => getField(r, 'action') === 'auto_terminate_failed').length;
+
+    return (
+        <>
+        {/* KPIs */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 shrink-0">
+            <KPICard title="Total Events" value={total} icon={ShieldAlert} color="bg-cyan-500/10 dark:bg-cyan-500/20 text-cyan-600 dark:text-cyan-400 border border-cyan-500/20" subtitle={`Last ${rangeDays} days`} />
+            <KPICard title="Terminated" value={terminated} icon={CheckCircle2} color="bg-emerald-500/10 dark:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20" />
+            <KPICard title="Detect Only" value={detectOnly} icon={AlertTriangle} color="bg-amber-500/10 dark:bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/20" />
+            <KPICard title="Failed" value={failed} icon={XCircle} color="bg-rose-500/10 dark:bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/20" />
+        </div>
+
+        {/* Time range selector */}
+        <div className="flex flex-wrap items-center gap-2 shrink-0">
+            <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Time range</span>
+            {([7, 30, 90] as const).map((d) => (
+                <button key={d} type="button" onClick={() => setRangeDays(d)}
+                    className={`px-2.5 py-1 rounded-md text-xs font-medium border transition-colors ${
+                        rangeDays === d
+                            ? 'border-cyan-500/60 bg-cyan-500/10 text-cyan-800 dark:text-cyan-200'
+                            : 'border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+                    }`}
+                >Last {d} days</button>
+            ))}
+        </div>
+
+        {/* Table */}
+        <div className="relative flex-1 flex flex-col min-h-0 bg-white dark:bg-slate-800/70 rounded-2xl border border-slate-200 dark:border-slate-700/60 shadow-sm overflow-hidden">
+            <div className="flex-1 overflow-auto custom-scrollbar transform-gpu">
+                {q.isLoading ? (
+                    <div className="p-4 space-y-4">
+                        <div className="h-16 bg-slate-200 dark:bg-slate-800 rounded-xl animate-pulse"></div>
+                        <div className="h-16 bg-slate-200 dark:bg-slate-800 rounded-xl animate-pulse opacity-75"></div>
+                        <div className="h-16 bg-slate-200 dark:bg-slate-800 rounded-xl animate-pulse opacity-50"></div>
+                    </div>
+                ) : rows.length === 0 ? (
+                    <div className="text-center py-20 flex flex-col items-center justify-center">
+                        <ShieldAlert className="w-12 h-12 text-slate-400 dark:text-slate-600 mb-4" />
+                        <h3 className="text-lg font-medium text-slate-900 dark:text-slate-100 mb-1">No auto-response events</h3>
+                        <p className="text-slate-500 dark:text-slate-400">Process termination events from all agents will appear here.</p>
+                    </div>
+                ) : (
+                    <table className="w-full text-left text-xs">
+                        <thead className="bg-slate-100 dark:bg-slate-800/80 text-slate-600 dark:text-slate-400 uppercase text-[10px] sticky top-0 z-10">
+                            <tr>
+                                <th className="p-3">Time</th>
+                                <th className="p-3">Action</th>
+                                <th className="p-3">Severity</th>
+                                <th className="p-3">Agent / Host</th>
+                                <th className="p-3">Process</th>
+                                <th className="p-3">Rule</th>
+                                <th className="p-3">User</th>
+                                <th className="p-3 text-right">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {rows.map((ev) => {
+                                const badge = getBadge(ev);
+                                const BadgeIcon = badge.icon;
+                                const isExpanded = expandedId === ev.id;
+                                const processName = getField(ev, 'name') || getField(ev, 'process_name') || '—';
+                                const ruleName = getField(ev, 'matched_rule_title') || getField(ev, 'matched_rule_id') || '—';
+                                const userName = getField(ev, 'user_name') || '—';
+                                const severity = (ev as any).severity || getField(ev, 'severity') || 'medium';
+                                const sevColor = severity === 'critical' ? 'text-rose-600 dark:text-rose-400 bg-rose-500/10 border-rose-500/20'
+                                    : severity === 'high' ? 'text-orange-600 dark:text-orange-400 bg-orange-500/10 border-orange-500/20'
+                                    : 'text-amber-600 dark:text-amber-400 bg-amber-500/10 border-amber-500/20';
+                                const agentId = ev.agent_id;
+                                const hostname = getField(ev, 'hostname') || agentId?.slice(0, 12) || '—';
+
+                                return (
+                                    <React.Fragment key={ev.id}>
+                                        <tr
+                                            className="border-t border-slate-100 dark:border-slate-800 cursor-pointer hover:bg-slate-50/90 dark:hover:bg-slate-800/40 transition-colors"
+                                            onClick={() => setExpandedId(isExpanded ? null : ev.id)}
+                                        >
+                                            <td className="p-3 whitespace-nowrap text-slate-600 dark:text-slate-300">{new Date(ev.timestamp).toLocaleString()}</td>
+                                            <td className="p-3">
+                                                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '2px 8px', borderRadius: '9999px', fontSize: '10px', fontWeight: 600, color: badge.color, backgroundColor: badge.bg }}>
+                                                    <BadgeIcon style={{ width: 12, height: 12 }} /> {badge.label}
+                                                </span>
+                                            </td>
+                                            <td className="p-3">
+                                                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase border ${sevColor}`}>{severity}</span>
+                                            </td>
+                                            <td className="p-3">
+                                                <Link
+                                                    to={`/management/devices/${encodeURIComponent(agentId)}?tab=network`}
+                                                    className="text-cyan-600 dark:text-cyan-400 hover:underline font-medium"
+                                                    onClick={(e) => e.stopPropagation()}
+                                                    title={agentId}
+                                                >
+                                                    {hostname}
+                                                </Link>
+                                            </td>
+                                            <td className="p-3 font-mono font-medium text-slate-800 dark:text-slate-200">{processName}</td>
+                                            <td className="p-3 text-slate-600 dark:text-slate-300 max-w-[160px] truncate" title={ruleName}>{ruleName}</td>
+                                            <td className="p-3 text-slate-500">{userName}</td>
+                                            <td className="p-3 text-right">
+                                                {getField(ev, 'action') !== 'process_rule_matched_detect_only' && (
+                                                    <button
+                                                        type="button"
+                                                        className="px-2 py-1 rounded border border-emerald-500/40 text-[10px] font-semibold text-emerald-700 dark:text-emerald-400 hover:bg-emerald-500/10"
+                                                        onClick={(e) => { e.stopPropagation(); setAllowTarget({ agentId, name: processName, rule: ruleName }); }}
+                                                    >Allow</button>
+                                                )}
+                                            </td>
+                                        </tr>
+                                        {isExpanded && (
+                                            <tr className="bg-slate-50/50 dark:bg-slate-900/30">
+                                                <td colSpan={8} className="p-4">
+                                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
+                                                        <div><span className="font-semibold text-slate-500 uppercase text-[10px]">PID</span><div className="font-mono mt-0.5">{getField(ev, 'pid') || '—'}</div></div>
+                                                        <div><span className="font-semibold text-slate-500 uppercase text-[10px]">PPID</span><div className="font-mono mt-0.5">{getField(ev, 'ppid') || '—'}</div></div>
+                                                        <div><span className="font-semibold text-slate-500 uppercase text-[10px]">Kill Tree</span><div className="mt-0.5">{getField(ev, 'kill_tree') === 'true' ? <span className="text-rose-600 font-bold">Yes</span> : 'No'}</div></div>
+                                                        <div className="md:col-span-3"><span className="font-semibold text-slate-500 uppercase text-[10px]">Command Line</span><div className="font-mono mt-0.5 bg-slate-100 dark:bg-slate-900/60 p-2 rounded break-all max-h-24 overflow-auto">{getField(ev, 'command_line') || '—'}</div></div>
+                                                        <div><span className="font-semibold text-slate-500 uppercase text-[10px]">Parent</span><div className="font-mono mt-0.5">{getField(ev, 'parent_name') || '—'}</div></div>
+                                                        <div><span className="font-semibold text-slate-500 uppercase text-[10px]">Signature</span><div className="mt-0.5">{getField(ev, 'signature_status') || '—'}</div></div>
+                                                        <div><span className="font-semibold text-slate-500 uppercase text-[10px]">Elevated</span><div className="mt-0.5">{getField(ev, 'is_elevated') === 'true' ? <span className="text-amber-600 font-bold">Yes</span> : 'No'}</div></div>
+                                                        <div><span className="font-semibold text-slate-500 uppercase text-[10px]">Rule ID</span><div className="font-mono mt-0.5 text-slate-400">{getField(ev, 'matched_rule_id') || '—'}</div></div>
+                                                        <div><span className="font-semibold text-slate-500 uppercase text-[10px]">Decision Mode</span><div className="mt-0.5">{getField(ev, 'decision_mode') || '—'}</div></div>
+                                                        <div><span className="font-semibold text-slate-500 uppercase text-[10px]">Agent ID</span><div className="font-mono mt-0.5 text-slate-400 text-[10px]">{agentId}</div></div>
+                                                        {getField(ev, 'kill_output') && (
+                                                            <div className="md:col-span-3"><span className="font-semibold text-slate-500 uppercase text-[10px]">Kill Output</span><pre className="font-mono mt-0.5 bg-slate-900 text-slate-100 p-2 rounded text-[10px] max-h-20 overflow-auto">{getField(ev, 'kill_output')}</pre></div>
+                                                        )}
+                                                        {getField(ev, 'kill_error') && (
+                                                            <div className="md:col-span-3"><span className="font-semibold text-rose-500 uppercase text-[10px]">Error</span><pre className="font-mono mt-0.5 bg-rose-500/10 text-rose-700 dark:text-rose-300 p-2 rounded text-[10px]">{getField(ev, 'kill_error')}</pre></div>
+                                                        )}
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        )}
+                                    </React.Fragment>
+                                );
+                            })}
+                        </tbody>
+                    </table>
+                )}
+            </div>
+
+            {/* Pagination */}
+            {totalPages > 1 && (
+                <div className="shrink-0 px-4 py-3 bg-slate-50/50 dark:bg-slate-900/40 border-t border-slate-200 dark:border-slate-800/60 flex items-center justify-between">
+                    <div className="text-sm text-slate-500 dark:text-slate-400">
+                        {total} event{total !== 1 ? 's' : ''} total
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page <= 1} className="px-3 py-1.5 border border-slate-200 dark:border-slate-700 rounded-md text-sm font-medium hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed text-slate-700 dark:text-slate-300 transition-colors">Previous</button>
+                        <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Page {page} of {totalPages}</span>
+                        <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page >= totalPages} className="px-3 py-1.5 border border-slate-200 dark:border-slate-700 rounded-md text-sm font-medium hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed text-slate-700 dark:text-slate-300 transition-colors">Next</button>
+                    </div>
+                </div>
+            )}
+        </div>
+
+        {/* Allow Confirmation Dialog */}
+        {allowTarget && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={() => { setAllowTarget(null); setAllowReason(''); }}>
+                <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 p-6 max-w-md w-full mx-4" onClick={(e) => e.stopPropagation()}>
+                    <h3 className="text-lg font-bold text-slate-800 dark:text-slate-100 mb-3">Allow Process — Add Exception</h3>
+                    <div className="space-y-3 text-sm">
+                        <div className="p-3 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/40 text-amber-800 dark:text-amber-300 text-xs flex items-start gap-2">
+                            <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                            <span>This process will <strong>no longer be auto-terminated</strong> on the target agent.</span>
+                        </div>
+                        <div>
+                            <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Process</label>
+                            <code className="block bg-slate-100 dark:bg-slate-800 p-2 rounded">{allowTarget.name}</code>
+                        </div>
+                        <div>
+                            <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Rule</label>
+                            <code className="block bg-slate-100 dark:bg-slate-800 p-2 rounded text-xs">{allowTarget.rule}</code>
+                        </div>
+                        <div>
+                            <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Reason (optional)</label>
+                            <input className="w-full rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-950 px-3 py-2 text-sm" value={allowReason} onChange={(e) => setAllowReason(e.target.value)} placeholder="e.g., approved automation" />
+                        </div>
+                    </div>
+                    <div className="flex justify-end gap-2 mt-4">
+                        <button type="button" className="px-4 py-2 rounded-lg text-sm font-medium border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800" onClick={() => { setAllowTarget(null); setAllowReason(''); }}>Cancel</button>
+                        <button
+                            type="button"
+                            className="px-4 py-2 rounded-lg text-sm font-semibold bg-emerald-600 hover:bg-emerald-700 text-white disabled:opacity-50"
+                            disabled={exceptionMutation.isPending}
+                            onClick={() => { if (allowTarget) exceptionMutation.mutate({ agentId: allowTarget.agentId, process_name: allowTarget.name, reason: allowReason || `Allowed from rule: ${allowTarget.rule}` }); }}
+                        >
+                            {exceptionMutation.isPending ? 'Adding…' : 'Confirm Allow'}
+                        </button>
+                    </div>
+                </div>
+            </div>
+        )}
+        </>
+    );
+}

@@ -208,7 +208,7 @@ func (r *PostgresEventRepository) Search(ctx context.Context, req EventSearchReq
 			if !allowedJSONB[key] {
 				continue
 			}
-			jsonPath := fmt.Sprintf("raw->>'%s'", key)
+			jsonPath := fmt.Sprintf("COALESCE(raw->'data'->>'%s', raw->>'%s')", key, key)
 			switch op {
 			case "equals":
 				val := fmt.Sprint(f.Value)

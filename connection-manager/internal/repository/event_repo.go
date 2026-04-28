@@ -236,7 +236,7 @@ func (r *PostgresEventRepository) Search(ctx context.Context, req EventSearchReq
 					}
 				}
 				if len(vals) > 0 {
-					add(fmt.Sprintf("%s = ANY($%d)", jsonPath, argPos), vals)
+					add(fmt.Sprintf("%s = ANY($%d::text[])", jsonPath, argPos), vals)
 				}
 			}
 		}

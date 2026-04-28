@@ -37,7 +37,7 @@ type DetailTab =
     | 'quarantine'
     | 'activity'
     | 'forensics'
-    | 'network'
+    | 'auto-proc'
     | 'configuration'
     | 'software';
 
@@ -48,7 +48,7 @@ const TAB_LABELS: { id: DetailTab; label: string; icon: React.FC<any> }[] = [
     { id: 'quarantine', label: 'Quarantine', icon: Shield },
     { id: 'activity', label: 'Activity', icon: List },
     { id: 'forensics', label: 'Forensic Logs', icon: FileText },
-    { id: 'network', label: 'Auto-Proc Termination', icon: ShieldAlert },
+    { id: 'auto-proc', label: 'Auto-Proc Termination', icon: ShieldAlert },
     { id: 'configuration', label: 'Configuration', icon: Settings },
     { id: 'software', label: 'Software', icon: Package },
 ];
@@ -582,7 +582,7 @@ export default function EndpointDetail() {
                             </div>
                     )}
 
-                    {tab === 'network' &&
+                    {tab === 'auto-proc' &&
                         (canViewResp ? (
                             <AutoProcTerminationTab agentId={agentId} canViewAlerts={canViewAlerts} canExec={canExec} />
                         ) : (
@@ -1650,6 +1650,7 @@ function AutoProcTerminationTab({ agentId, canViewAlerts, canExec }: { agentId: 
             filters: [
                 { field: 'agent_id', operator: 'equals', value: agentId },
                 { field: 'event_type', operator: 'equals', value: 'process' },
+                { field: 'data.action', operator: 'in', value: ['auto_terminated', 'auto_terminate_failed'] },
             ],
             logic: 'AND',
             time_range: { from, to },

@@ -81,13 +81,11 @@ const RESPONSE_OPTIONS: { value: CommandType; label: string; destructive?: boole
     { value: 'update_filter_policy', label: 'Update filter policy (JSON)' },
     { value: 'restart_agent', label: 'Restart agent' },
     { value: 'restart_service', label: 'Restart agent service' },
-    { value: 'stop_agent', label: 'Stop agent service' },
     { value: 'start_agent', label: 'Start agent service' },
     { value: 'restart_machine', label: 'Restart machine', destructive: true },
     { value: 'shutdown_machine', label: 'Shutdown machine', destructive: true },
     { value: 'enable_sysmon', label: 'Enable Sysmon (install + channel)' },
     { value: 'disable_sysmon', label: 'Disable Sysmon (uninstall)' },
-    { value: 'update_agent', label: 'Upgrade agent (in-place)' },
     { value: 'uninstall_agent', label: 'Uninstall agent (permanent)', destructive: true },
 ];
 

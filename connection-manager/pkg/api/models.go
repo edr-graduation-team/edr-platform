@@ -445,7 +445,7 @@ type EventSearchRequest struct {
 // EventFilter for event filtering.
 type EventFilter struct {
 	Field    string      `json:"field"`
-	Operator string      `json:"operator" validate:"oneof=equals contains regex gt lt gte lte"`
+	Operator string      `json:"operator" validate:"oneof=equals contains regex gt lt gte lte in"`
 	Value    interface{} `json:"value"`
 }
 
@@ -457,12 +457,16 @@ type EventListResponse struct {
 }
 
 // EventSummary for list views.
+// Data contains the nested event payload (action, name, pid, matched_rule_id, etc.)
+// so the dashboard can display process termination details without a secondary fetch.
 type EventSummary struct {
-	ID        uuid.UUID `json:"id"`
-	AgentID   uuid.UUID `json:"agent_id"`
-	EventType string    `json:"event_type"`
-	Timestamp time.Time `json:"timestamp"`
-	Summary   string    `json:"summary"`
+	ID        uuid.UUID              `json:"id"`
+	AgentID   uuid.UUID              `json:"agent_id"`
+	EventType string                 `json:"event_type"`
+	Severity  string                 `json:"severity"`
+	Timestamp time.Time              `json:"timestamp"`
+	Summary   string                 `json:"summary"`
+	Data      map[string]interface{} `json:"data,omitempty"`
 }
 
 // EventDetail is a single stored event including the ingestion JSON payload.

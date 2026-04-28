@@ -12,13 +12,13 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"encoding/hex"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
-	"os/exec"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strings"
@@ -54,7 +54,7 @@ var (
 	// NOTE: the agent no longer carries any uninstall secret. Uninstall is a
 	// server-authorised C2 action (UNINSTALL_AGENT), so there is nothing to
 	// embed in the binary that could be extracted and replayed by an attacker.
-	EmbeddedTokenObf     = "" // XOR-obfuscated enrollment token (for zero-touch install ONLY)
+	EmbeddedTokenObf      = "" // XOR-obfuscated enrollment token (for zero-touch install ONLY)
 	EmbeddedInstallSysmon = "" // "true" when dashboard build enabled Sysmon bootstrap
 )
 
@@ -69,13 +69,13 @@ func main() {
 		showVersion = flag.Bool("version", false, "Show version information and exit")
 
 		// ── Installation flags ─────────────────────────────────────────────────
-		doInstall    = flag.Bool("install", false, "Zero-touch install: patch hosts, write config, register and start Windows Service")
-		doUpdate     = flag.Bool("update", false, "In-place upgrade: replace agent binary, optionally update config, and restart Windows Service")
-		doUpdateStage2 = flag.Bool("update-stage2", false, "[INTERNAL] Stage2 for -update, executed as SYSTEM")
-		serverIP     = flag.String("server-ip", "", "C2 server IP address (used with -install for hosts file injection)")
-		serverDomain = flag.String("server-domain", "", "C2 server FQDN/hostname (used with -install)")
-		serverPort   = flag.String("server-port", "50051", "C2 gRPC port (used with -install, default 50051)")
-		token        = flag.String("token", "", "Enrollment token (install only — never used for uninstall)")
+		doInstall               = flag.Bool("install", false, "Zero-touch install: patch hosts, write config, register and start Windows Service")
+		doUpdate                = flag.Bool("update", false, "In-place upgrade: replace agent binary, optionally update config, and restart Windows Service")
+		doUpdateStage2          = flag.Bool("update-stage2", false, "[INTERNAL] Stage2 for -update, executed as SYSTEM")
+		serverIP                = flag.String("server-ip", "", "C2 server IP address (used with -install for hosts file injection)")
+		serverDomain            = flag.String("server-domain", "", "C2 server FQDN/hostname (used with -install)")
+		serverPort              = flag.String("server-port", "50051", "C2 gRPC port (used with -install, default 50051)")
+		token                   = flag.String("token", "", "Enrollment token (install only — never used for uninstall)")
 		installSkipConnectivity = flag.Bool(
 			"install-skip-connectivity-check",
 			false,
@@ -403,11 +403,11 @@ func runInstall(
 	// ── Step 5: Generate config ──────────────────────────────────────────────
 	fmt.Printf("[5/7] Generating agent configuration...\n")
 	opts := installer.Options{
-		ServerIP:     serverIP,
-		ServerDomain: serverDomain,
-		ServerPort:   serverPort,
-		Token:        token,
-		ConfigPath:   configPath,
+		ServerIP:      serverIP,
+		ServerDomain:  serverDomain,
+		ServerPort:    serverPort,
+		Token:         token,
+		ConfigPath:    configPath,
 		InstallSysmon: EmbeddedInstallSysmon,
 	}
 	if err := installer.GenerateConfig(opts); err != nil {
@@ -494,10 +494,10 @@ func runInstall(
 }
 
 type updateOverrides struct {
-	ServerIP     string `json:"server_ip,omitempty"`
-	ServerDomain string `json:"server_domain,omitempty"`
-	ServerPort   string `json:"server_port,omitempty"`
-	Token        string `json:"token,omitempty"`
+	ServerIP      string `json:"server_ip,omitempty"`
+	ServerDomain  string `json:"server_domain,omitempty"`
+	ServerPort    string `json:"server_port,omitempty"`
+	Token         string `json:"token,omitempty"`
 	InstallSysmon string `json:"install_sysmon,omitempty"`
 }
 
@@ -547,10 +547,10 @@ func runUpdate(
 
 	// Write overrides for stage2 (SYSTEM).
 	ov := updateOverrides{
-		ServerIP:     strings.TrimSpace(serverIP),
-		ServerDomain: strings.TrimSpace(serverDomain),
-		ServerPort:   strings.TrimSpace(serverPort),
-		Token:        strings.TrimSpace(token),
+		ServerIP:      strings.TrimSpace(serverIP),
+		ServerDomain:  strings.TrimSpace(serverDomain),
+		ServerPort:    strings.TrimSpace(serverPort),
+		Token:         strings.TrimSpace(token),
 		InstallSysmon: strings.TrimSpace(EmbeddedInstallSysmon),
 	}
 	overridesPath := `C:\ProgramData\EDR\update_overrides.json`
@@ -642,7 +642,7 @@ func runUpdateStage2(
 	_ = cfg.SaveToRegistry()
 
 	// Stop service, swap binary, start.
-	_ = exec.Command("sc", "stop", "EDRAgent").Run()
+	_ = exec.Command("sc.exe", "stop", "EDRAgent").Run()
 	time.Sleep(2 * time.Second)
 
 	dst := `C:\ProgramData\EDR\bin\edr-agent.exe`
@@ -659,7 +659,7 @@ func runUpdateStage2(
 	}
 	_ = os.Remove(src)
 
-	_ = exec.Command("sc", "start", "EDRAgent").Run()
+	_ = exec.Command("sc.exe", "start", "EDRAgent").Run()
 	fmt.Println("✓ Upgrade applied (SYSTEM stage2).")
 	os.Exit(0)
 }

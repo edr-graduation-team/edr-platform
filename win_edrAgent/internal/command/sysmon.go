@@ -32,35 +32,85 @@ func sysmonConfigPath() string {
 	return filepath.Join(sysmonToolDir(), "sysmonconfig.xml")
 }
 
+// defaultSysmonConfigXML is the fallback Sysmon configuration used when no
+// config_url is provided and no config file exists on disk. It matches the
+// server-side embedded sysmonconfig.xml and enables all key event types.
+const defaultSysmonConfigXML = `<!--
+  EDR Platform default Sysmon configuration.
+  This is intentionally conservative (low noise) and safe as a default.
+-->
+<Sysmon schemaversion="4.90">
+  <HashAlgorithms>sha256</HashAlgorithms>
+  <EventFiltering>
+    <ProcessCreate onmatch="include" />
+    <NetworkConnect onmatch="include" />
+    <FileCreateTime onmatch="include" />
+    <ImageLoad onmatch="include" />
+    <CreateRemoteThread onmatch="include" />
+    <RegistryEvent onmatch="include" />
+    <DnsQuery onmatch="include" />
+    <FileCreate onmatch="include" />
+    <ProcessTerminate onmatch="include" />
+  </EventFiltering>
+</Sysmon>
+`
+
 func (h *Handler) enableSysmon(ctx context.Context, params map[string]string) (string, error) {
 	if err := os.MkdirAll(sysmonToolDir(), 0755); err != nil {
 		return "", fmt.Errorf("create sysmon dir: %w", err)
 	}
 
-	// Optional: download config XML (dashboard can pass a URL)
+	// ── Ensure config XML exists (download → default fallback) ───────────
 	if u := strings.TrimSpace(params["config_url"]); u != "" {
 		if err := downloadToFile(ctx, u, sysmonConfigPath(), 5<<20); err != nil {
 			return "", fmt.Errorf("download sysmon config: %w", err)
 		}
 	}
+	if !fileExists(sysmonConfigPath()) {
+		if err := os.WriteFile(sysmonConfigPath(), []byte(defaultSysmonConfigXML), 0644); err != nil {
+			return "", fmt.Errorf("write default sysmon config: %w", err)
+		}
+	}
 
+	alreadyRunning := isSysmonRunning(ctx)
 	installedBefore := isSysmonServiceInstalled(ctx)
 
+	// ── If Sysmon is already running, only update config — skip reinstall ─
+	if alreadyRunning {
+		// Apply config update without reinstalling the driver/service.
+		if fileExists(sysmonExePath()) && fileExists(sysmonConfigPath()) {
+			out, err := execCombined(ctx, sysmonExePath(), "-accepteula", "-c", sysmonConfigPath())
+			if err != nil {
+				return "", fmt.Errorf("sysmon config update failed: %v: %s", err, trim(out, 400))
+			}
+		}
+
+		if err := setEventChannelEnabled(ctx, sysmonChannel, true); err != nil {
+			return "", err
+		}
+
+		msg := "Sysmon already running — skipped install, channel enabled."
+		if fileExists(sysmonConfigPath()) {
+			sum, _ := sha256File(sysmonConfigPath())
+			msg += fmt.Sprintf(" Config applied (sha256=%s).", sum)
+		}
+		return msg, nil
+	}
+
+	// ── Fresh install: download binary + install with config ──────────────
 	if !fileExists(sysmonExePath()) {
 		if err := downloadAndExtractSysmon(ctx, sysmonExePath()); err != nil {
 			return "", err
 		}
 	}
 
-	// Install if missing; if present, we still ensure channel is enabled.
 	installArgs := []string{"-accepteula", "-i"}
 	if fileExists(sysmonConfigPath()) {
 		installArgs = append(installArgs, sysmonConfigPath())
 	}
-	// Sysmon install is idempotent; if it's already installed this updates config when provided.
 	out, err := execCombined(ctx, sysmonExePath(), installArgs...)
 	if err != nil {
-		return "", fmt.Errorf("sysmon install/config failed: %v: %s", err, trim(out, 400))
+		return "", fmt.Errorf("sysmon install failed: %v: %s", err, trim(out, 400))
 	}
 
 	if err := setEventChannelEnabled(ctx, sysmonChannel, true); err != nil {
@@ -98,14 +148,23 @@ func (h *Handler) disableSysmon(ctx context.Context, _ map[string]string) (strin
 }
 
 func isSysmonServiceInstalled(ctx context.Context) bool {
-	// Sysmon service name is typically Sysmon64 (64-bit).
-	cmd := exec.CommandContext(ctx, "sc", "query", "Sysmon64")
+	cmd := exec.CommandContext(ctx, "sc.exe", "query", "Sysmon64")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return false
 	}
 	s := strings.ToUpper(string(out))
 	return strings.Contains(s, "SERVICE_NAME") && (strings.Contains(s, "RUNNING") || strings.Contains(s, "STOPPED"))
+}
+
+func isSysmonRunning(ctx context.Context) bool {
+	cmd := exec.CommandContext(ctx, "sc.exe", "query", "Sysmon64")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return false
+	}
+	s := strings.ToUpper(string(out))
+	return strings.Contains(s, "SERVICE_NAME") && strings.Contains(s, "RUNNING")
 }
 
 func setEventChannelEnabled(ctx context.Context, channel string, enabled bool) error {
@@ -218,4 +277,3 @@ func trim(s string, n int) string {
 	}
 	return s[:n] + "..."
 }
-

@@ -610,6 +610,8 @@ func (c *Client) SendHeartbeat(req *HeartbeatRequest) (*HeartbeatResponse, error
 		IpAddresses:     req.IPAddresses,
 		AgentVersion:    req.Version,
 		CertExpiresAt:   req.CertExpiresAt,
+		SysmonInstalled: req.SysmonInstalled,
+		SysmonRunning:   req.SysmonRunning,
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

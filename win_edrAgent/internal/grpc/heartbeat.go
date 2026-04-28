@@ -407,7 +407,7 @@ func checkSysmonStatus() (installed bool, running bool) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "sc", "query", "Sysmon64")
+	cmd := exec.CommandContext(ctx, "sc.exe", "query", "Sysmon64")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return false, false

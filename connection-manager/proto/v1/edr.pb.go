@@ -14,14 +14,15 @@
 package edrv1
 
 import (
+	reflect "reflect"
+	sync "sync"
+	unsafe "unsafe"
+
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	durationpb "google.golang.org/protobuf/types/known/durationpb"
 	emptypb "google.golang.org/protobuf/types/known/emptypb"
 	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
-	reflect "reflect"
-	sync "sync"
-	unsafe "unsafe"
 )
 
 const (
@@ -194,25 +195,25 @@ func (ServerStatus) EnumDescriptor() ([]byte, []int) {
 type CommandType int32
 
 const (
-	CommandType_COMMAND_TYPE_UNSPECIFIED          CommandType = 0
-	CommandType_COMMAND_TYPE_UPDATE_CONFIG        CommandType = 1
-	CommandType_COMMAND_TYPE_COLLECT_FORENSICS    CommandType = 2
-	CommandType_COMMAND_TYPE_ISOLATE              CommandType = 3
-	CommandType_COMMAND_TYPE_UNISOLATE            CommandType = 4
-	CommandType_COMMAND_TYPE_RESTART_SERVICE      CommandType = 5
-	CommandType_COMMAND_TYPE_UPDATE_AGENT         CommandType = 6
-	CommandType_COMMAND_TYPE_TERMINATE_PROCESS    CommandType = 7
-	CommandType_COMMAND_TYPE_ADJUST_RATE          CommandType = 8
-	CommandType_COMMAND_TYPE_RUN_CMD              CommandType = 9  // Whitelisted diagnostic commands (agent-enforced)
-	CommandType_COMMAND_TYPE_RESTART              CommandType = 10 // Restart the machine (OS-level reboot)
-	CommandType_COMMAND_TYPE_SHUTDOWN             CommandType = 11 // Shutdown the machine (OS-level power off)
-	CommandType_COMMAND_TYPE_UPDATE_FILTER_POLICY CommandType = 12 // Push new event filtering rules to agent
-	CommandType_COMMAND_TYPE_QUARANTINE_FILE      CommandType = 13
-	CommandType_COMMAND_TYPE_BLOCK_IP             CommandType = 14
-	CommandType_COMMAND_TYPE_UNBLOCK_IP           CommandType = 15
-	CommandType_COMMAND_TYPE_BLOCK_DOMAIN         CommandType = 16
-	CommandType_COMMAND_TYPE_UNBLOCK_DOMAIN       CommandType = 17
-	CommandType_COMMAND_TYPE_UPDATE_SIGNATURES    CommandType = 18
+	CommandType_COMMAND_TYPE_UNSPECIFIED             CommandType = 0
+	CommandType_COMMAND_TYPE_UPDATE_CONFIG           CommandType = 1
+	CommandType_COMMAND_TYPE_COLLECT_FORENSICS       CommandType = 2
+	CommandType_COMMAND_TYPE_ISOLATE                 CommandType = 3
+	CommandType_COMMAND_TYPE_UNISOLATE               CommandType = 4
+	CommandType_COMMAND_TYPE_RESTART_SERVICE         CommandType = 5
+	CommandType_COMMAND_TYPE_UPDATE_AGENT            CommandType = 6
+	CommandType_COMMAND_TYPE_TERMINATE_PROCESS       CommandType = 7
+	CommandType_COMMAND_TYPE_ADJUST_RATE             CommandType = 8
+	CommandType_COMMAND_TYPE_RUN_CMD                 CommandType = 9  // Whitelisted diagnostic commands (agent-enforced)
+	CommandType_COMMAND_TYPE_RESTART                 CommandType = 10 // Restart the machine (OS-level reboot)
+	CommandType_COMMAND_TYPE_SHUTDOWN                CommandType = 11 // Shutdown the machine (OS-level power off)
+	CommandType_COMMAND_TYPE_UPDATE_FILTER_POLICY    CommandType = 12 // Push new event filtering rules to agent
+	CommandType_COMMAND_TYPE_QUARANTINE_FILE         CommandType = 13
+	CommandType_COMMAND_TYPE_BLOCK_IP                CommandType = 14
+	CommandType_COMMAND_TYPE_UNBLOCK_IP              CommandType = 15
+	CommandType_COMMAND_TYPE_BLOCK_DOMAIN            CommandType = 16
+	CommandType_COMMAND_TYPE_UNBLOCK_DOMAIN          CommandType = 17
+	CommandType_COMMAND_TYPE_UPDATE_SIGNATURES       CommandType = 18
 	CommandType_COMMAND_TYPE_RESTORE_QUARANTINE_FILE CommandType = 19
 	CommandType_COMMAND_TYPE_DELETE_QUARANTINE_FILE  CommandType = 20
 	CommandType_COMMAND_TYPE_UNINSTALL_AGENT         CommandType = 21
@@ -2511,8 +2512,8 @@ type HeartbeatRequest struct {
 	// Sysmon telemetry
 	SysmonInstalled bool `protobuf:"varint,50,opt,name=sysmon_installed,json=sysmonInstalled,proto3" json:"sysmon_installed,omitempty"`
 	SysmonRunning   bool `protobuf:"varint,51,opt,name=sysmon_running,json=sysmonRunning,proto3" json:"sysmon_running,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *HeartbeatRequest) Reset() {
@@ -3496,7 +3497,7 @@ const file_proto_v1_edr_proto_rawDesc = "" +
 	"\x06output\x18\x04 \x01(\tR\x06output\x12\x14\n" +
 	"\x05error\x18\x05 \x01(\tR\x05error\x125\n" +
 	"\bduration\x18\x06 \x01(\v2\x19.google.protobuf.DurationR\bduration\x128\n" +
-	"\ttimestamp\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\ttimestamp\"\xc9\x04\n" +
+	"\ttimestamp\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\ttimestamp\"\x9c\x05\n" +
 	"\x10HeartbeatRequest\x12\x19\n" +
 	"\bagent_id\x18\x01 \x01(\tR\aagentId\x128\n" +
 	"\ttimestamp\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\ttimestamp\x12+\n" +
@@ -3516,7 +3517,7 @@ const file_proto_v1_edr_proto_rawDesc = "" +
 	"\x0eevents_dropped\x18\x17 \x01(\x03R\reventsDropped\x12!\n" +
 	"\fip_addresses\x18\x18 \x03(\tR\vipAddresses\x12#\n" +
 	"\ragent_version\x18\x1e \x01(\tR\fagentVersion\x12&\n" +
-	"\x0fcert_expires_at\x18( \x01(\x03R\rcertExpiresAt\"\x91\x04\n" +
+	"\x0fcert_expires_at\x18( \x01(\x03R\rcertExpiresAt\x12*\n\x11sysmon_installed\x182 \x01(\bR\x0fsysmonInstalled\x12%\n\x0esysmon_running\x183 \x01(\bR\rsysmonRunning\"\x91\x04\n" +
 	"\x11HeartbeatResponse\x12\x19\n" +
 	"\bagent_id\x18\x01 \x01(\tR\aagentId\x12E\n" +
 	"\x10server_timestamp\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\x0fserverTimestamp\x129\n" +

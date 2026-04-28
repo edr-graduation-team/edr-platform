@@ -2509,8 +2509,11 @@ type HeartbeatRequest struct {
 	AgentVersion string `protobuf:"bytes,30,opt,name=agent_version,json=agentVersion,proto3" json:"agent_version,omitempty"`
 	// Certificate info
 	CertExpiresAt int64 `protobuf:"varint,40,opt,name=cert_expires_at,json=certExpiresAt,proto3" json:"cert_expires_at,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	// Sysmon telemetry
+	SysmonInstalled bool `protobuf:"varint,50,opt,name=sysmon_installed,json=sysmonInstalled,proto3" json:"sysmon_installed,omitempty"`
+	SysmonRunning   bool `protobuf:"varint,51,opt,name=sysmon_running,json=sysmonRunning,proto3" json:"sysmon_running,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *HeartbeatRequest) Reset() {
@@ -2646,6 +2649,20 @@ func (x *HeartbeatRequest) GetCertExpiresAt() int64 {
 		return x.CertExpiresAt
 	}
 	return 0
+}
+
+func (x *HeartbeatRequest) GetSysmonInstalled() bool {
+	if x != nil {
+		return x.SysmonInstalled
+	}
+	return false
+}
+
+func (x *HeartbeatRequest) GetSysmonRunning() bool {
+	if x != nil {
+		return x.SysmonRunning
+	}
+	return false
 }
 
 // HeartbeatResponse - Server response to heartbeat

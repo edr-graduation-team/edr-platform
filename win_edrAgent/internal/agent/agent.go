@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"runtime/debug"
@@ -270,9 +271,19 @@ func (a *Agent) Start(ctx context.Context) error {
 }
 
 func (a *Agent) bootstrapSysmonOnce() {
-	// Marker file to avoid repeating on every service restart.
+	// Marker file to avoid repeating heavy download+install on every restart.
+	// If Sysmon is already running AND the marker exists, skip entirely.
+	// If Sysmon is already running but marker is missing (e.g., update/reinstall),
+	// enableSysmon will just apply config and enable channel (fast, no download).
 	const marker = `C:\ProgramData\EDR\sysmon_bootstrap.done`
+	markerExists := false
 	if _, err := os.Stat(marker); err == nil {
+		markerExists = true
+	}
+
+	// Quick check: if Sysmon is already running and we've done this before, skip.
+	if markerExists && isSysmonServiceRunning() {
+		a.logger.Info("[SYS] Sysmon already running and bootstrap marker exists — skipping")
 		return
 	}
 
@@ -298,6 +309,19 @@ func (a *Agent) bootstrapSysmonOnce() {
 	_ = os.MkdirAll(filepath.Dir(marker), 0755)
 	_ = os.WriteFile(marker, []byte(time.Now().UTC().Format(time.RFC3339)), 0644)
 	a.logger.Info("[SYS] Sysmon bootstrap completed")
+}
+
+// isSysmonServiceRunning checks if Sysmon64 service is in RUNNING state.
+func isSysmonServiceRunning() bool {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "sc.exe", "query", "Sysmon64")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return false
+	}
+	s := strings.ToUpper(string(out))
+	return strings.Contains(s, "SERVICE_NAME") && strings.Contains(s, "RUNNING")
 }
 
 // Stop gracefully stops all agent components.

@@ -1692,7 +1692,7 @@ function ResponseTab({
                 public_api_base_url: typeof window !== 'undefined' ? window.location.origin : undefined,
                 token_id: upgradeForm.tokenId,
                 skip_config: false,
-                install_sysmon: upgradeForm.installSysmon,
+                install_sysmon: (_agent.sysmon_installed && _agent.sysmon_running) ? false : upgradeForm.installSysmon,
                 expires_in_seconds: 900,
                 agent_id: agentId,
             });
@@ -2085,10 +2085,18 @@ function ResponseTab({
                             {(upgradeTokens || []).map((t: any) => <option key={t.id || t.token_id} value={t.id || t.token_id}>{(t.id || t.token_id || '').slice(0, 12)}... - {t.description || 'Token'}</option>)}
                         </select>
                     </div>
-                    <label className="flex items-center gap-2 text-sm">
-                        <input type="checkbox" className="rounded" checked={upgradeForm.installSysmon} onChange={(e) => setUpgradeForm(f => ({...f, installSysmon: e.target.checked}))} />
-                        Install Sysmon with upgrade
-                    </label>
+                    {/* Hide Sysmon option when already installed & running on this endpoint */}
+                    {!(_agent.sysmon_installed && _agent.sysmon_running) ? (
+                        <label className="flex items-center gap-2 text-sm">
+                            <input type="checkbox" className="rounded" checked={upgradeForm.installSysmon} onChange={(e) => setUpgradeForm(f => ({...f, installSysmon: e.target.checked}))} />
+                            Install Sysmon with upgrade
+                        </label>
+                    ) : (
+                        <div className="flex items-center gap-2 text-sm text-emerald-600 dark:text-emerald-400">
+                            <CheckCircle2 className="w-4 h-4" />
+                            Sysmon is already installed and running on this endpoint
+                        </div>
+                    )}
                     <div className="flex justify-end gap-2 pt-3 border-t border-slate-200 dark:border-slate-700">
                         <button type="button" className="px-4 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-700" onClick={() => setUpgradeOpen(false)}>Cancel</button>
                         <button type="button" className="px-4 py-2 text-sm rounded-lg bg-cyan-600 hover:bg-cyan-700 text-white font-semibold disabled:opacity-50" disabled={!upgradeForm.tokenId || upgradeMutation.isPending} onClick={() => upgradeMutation.mutate()}>

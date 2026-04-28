@@ -337,6 +337,10 @@ message HeartbeatRequest {
   
   string agent_version = 30;
   int64 cert_expires_at = 40;
+
+  // Sysmon telemetry
+  bool sysmon_installed = 50; // Sysmon64 service is registered on the endpoint
+  bool sysmon_running   = 51; // Sysmon64 service is in RUNNING state
 }
 
 enum AgentStatus {

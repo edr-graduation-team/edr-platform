@@ -580,6 +580,7 @@ function AutoProcTerminationPanel({ showToast }: { showToast: (msg: string, type
         queryFn: () => eventsApi.search({
             filters: [
                 { field: 'event_type', operator: 'equals', value: 'process' },
+                { field: 'data.action', operator: 'in', value: ['auto_terminated', 'auto_terminate_failed'] },
             ],
             logic: 'AND',
             time_range: { from, to },
@@ -709,7 +710,7 @@ function AutoProcTerminationPanel({ showToast }: { showToast: (msg: string, type
                                             </td>
                                             <td className="p-3">
                                                 <Link
-                                                    to={`/management/devices/${encodeURIComponent(agentId)}?tab=network`}
+                                                    to={`/management/devices/${encodeURIComponent(agentId)}?tab=auto-proc`}
                                                     className="text-cyan-600 dark:text-cyan-400 hover:underline font-medium"
                                                     onClick={(e) => e.stopPropagation()}
                                                     title={agentId}

@@ -186,8 +186,9 @@ func (h *Heartbeat) sendHeartbeat(sendFunc func(*HeartbeatRequest) (*HeartbeatRe
 	// Process response
 	h.processResponse(resp)
 
-	h.logger.Infof("[Heartbeat] OK: status=%s sent=%d events=%d/%d queue=%d",
-		req.Status, h.heartbeatsSent.Load(), req.EventsSent, req.EventsGenerated, req.QueueDepth)
+	h.logger.Infof("[Heartbeat] OK: status=%s sent=%d events=%d/%d queue=%d sysmon=%v/%v",
+		req.Status, h.heartbeatsSent.Load(), req.EventsSent, req.EventsGenerated, req.QueueDepth,
+		req.SysmonInstalled, req.SysmonRunning)
 }
 
 // buildRequest creates a heartbeat request with current metrics.

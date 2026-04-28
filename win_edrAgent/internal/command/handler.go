@@ -1652,7 +1652,13 @@ func (h *Handler) mtlsHTTPClient(serverName string) (*http.Client, error) {
 		return nil, fmt.Errorf("load client certificate: %w", err)
 	}
 
-	caPool := x509.NewCertPool()
+	// Start from system CA pool so downloads from public URLs (e.g.
+	// protosoft.cloud with Let's Encrypt cert) are trusted, then add
+	// the internal EDR CA for internal-server downloads.
+	caPool, sysErr := x509.SystemCertPool()
+	if sysErr != nil || caPool == nil {
+		caPool = x509.NewCertPool()
+	}
 	var caPEM []byte
 	if len(cfg.Certs.CACertPEM) > 0 {
 		caPEM = cfg.Certs.CACertPEM
@@ -1662,8 +1668,8 @@ func (h *Handler) mtlsHTTPClient(serverName string) (*http.Client, error) {
 			return nil, fmt.Errorf("read CA cert: %w", err)
 		}
 	}
-	if len(caPEM) == 0 || !caPool.AppendCertsFromPEM(caPEM) {
-		return nil, fmt.Errorf("no usable CA certificate for server verification")
+	if len(caPEM) > 0 {
+		caPool.AppendCertsFromPEM(caPEM)
 	}
 
 	return &http.Client{

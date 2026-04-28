@@ -3497,7 +3497,7 @@ const file_proto_v1_edr_proto_rawDesc = "" +
 	"\x06output\x18\x04 \x01(\tR\x06output\x12\x14\n" +
 	"\x05error\x18\x05 \x01(\tR\x05error\x125\n" +
 	"\bduration\x18\x06 \x01(\v2\x19.google.protobuf.DurationR\bduration\x128\n" +
-	"\ttimestamp\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\ttimestamp\"\x9c\x05\n" +
+	"\ttimestamp\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\ttimestamp\"\x9b\x05\n" +
 	"\x10HeartbeatRequest\x12\x19\n" +
 	"\bagent_id\x18\x01 \x01(\tR\aagentId\x128\n" +
 	"\ttimestamp\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\ttimestamp\x12+\n" +
@@ -3517,7 +3517,7 @@ const file_proto_v1_edr_proto_rawDesc = "" +
 	"\x0eevents_dropped\x18\x17 \x01(\x03R\reventsDropped\x12!\n" +
 	"\fip_addresses\x18\x18 \x03(\tR\vipAddresses\x12#\n" +
 	"\ragent_version\x18\x1e \x01(\tR\fagentVersion\x12&\n" +
-	"\x0fcert_expires_at\x18( \x01(\x03R\rcertExpiresAt\x12*\n\x11sysmon_installed\x182 \x01(\bR\x0fsysmonInstalled\x12%\n\x0esysmon_running\x183 \x01(\bR\rsysmonRunning\"\x91\x04\n" +
+	"\x0fcert_expires_at\x18( \x01(\x03R\rcertExpiresAt\x12)\n\x10sysmon_installed\x182 \x01(\bR\x0fsysmonInstalled\x12%\n\x0esysmon_running\x183 \x01(\bR\rsysmonRunning\"\x91\x04\n" +
 	"\x11HeartbeatResponse\x12\x19\n" +
 	"\bagent_id\x18\x01 \x01(\tR\aagentId\x12E\n" +
 	"\x10server_timestamp\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\x0fserverTimestamp\x129\n" +

@@ -1645,7 +1645,7 @@ function AutoProcTerminationTab({ agentId, canViewAlerts, canExec }: { agentId: 
     const offset = (page - 1) * AUTO_PROC_PAGE_SIZE;
 
     const q = useQuery({
-        queryKey: ['auto-proc-events', agentId, from, to, offset],
+        queryKey: ['auto-proc-events-v2', agentId, from, to, offset],
         queryFn: () => eventsApi.search({
             filters: [
                 { field: 'agent_id', operator: 'equals', value: agentId },
@@ -1712,7 +1712,7 @@ function AutoProcTerminationTab({ agentId, canViewAlerts, canExec }: { agentId: 
                 <div className="flex flex-wrap items-center gap-2 shrink-0">
                     <button
                         type="button"
-                        onClick={() => queryClient.invalidateQueries({ queryKey: ['auto-proc-events', agentId] })}
+                        onClick={() => queryClient.invalidateQueries({ queryKey: ['auto-proc-events-v2', agentId] })}
                         disabled={q.isFetching}
                         className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border border-slate-200 dark:border-slate-600 bg-white/70 dark:bg-slate-900/50 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-50"
                     >

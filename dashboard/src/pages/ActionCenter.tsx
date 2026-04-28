@@ -576,7 +576,7 @@ function AutoProcTerminationPanel({ showToast }: { showToast: (msg: string, type
     const offset = (page - 1) * AP_PAGE_SIZE;
 
     const q = useQuery({
-        queryKey: ['auto-proc-all', from, to, offset],
+        queryKey: ['auto-proc-all-v2', from, to, offset],
         queryFn: () => eventsApi.search({
             filters: [
                 { field: 'event_type', operator: 'equals', value: 'process' },

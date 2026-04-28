@@ -22,7 +22,18 @@ import (
 	pb "github.com/edr-platform/win-agent/internal/pb"
 )
 
-const registerTimeout = 30 * time.Second
+const (
+	// dialTimeout caps the TCP+TLS connection establishment phase.
+	// If the server does not complete the TLS handshake within this window,
+	// the dial fails with a clear connectivity error instead of silently
+	// consuming the entire registerTimeout and returning DeadlineExceeded.
+	dialTimeout = 15 * time.Second
+
+	// registerTimeout caps the RegisterAgent RPC itself, measured from the
+	// moment the gRPC connection is READY. Kept generous to accommodate
+	// first-enrollment DB operations (token validation, cert issuance, etc.).
+	registerTimeout = 60 * time.Second
+)
 
 // ErrBootstrapTokenRequired is returned when first-time enrollment needs a token but none is configured.
 var ErrBootstrapTokenRequired = errors.New("bootstrap token is required for enrollment")
@@ -143,11 +154,22 @@ func EnsureEnrolled(cfg *config.Config, logger *logging.Logger, configFilePath s
 		logger.Info("Enrollment using TLS (server-auth only, no client cert)")
 	}
 
-	conn, err := grpc.Dial(cfg.Server.Address, dialOpt)
+	// Establish TCP+TLS with an explicit deadline so a hung TLS handshake
+	// (server accepted TCP but not responding to ClientHello) fails fast
+	// with a clear error rather than waiting for the full registerTimeout.
+	dialCtx, dialCancel := context.WithTimeout(context.Background(), dialTimeout)
+	defer dialCancel()
+	//nolint:staticcheck // grpc.DialContext is deprecated in favour of grpc.NewClient,
+	// but grpc.NewClient has no WithBlock() equivalent; retained intentionally.
+	conn, err := grpc.DialContext(dialCtx, cfg.Server.Address, dialOpt, grpc.WithBlock()) //nolint:staticcheck
 	if err != nil {
+		if dialCtx.Err() != nil {
+			return fmt.Errorf("dial server: connection to %s timed out after %s — server may be unreachable or TLS handshake failed: %w", cfg.Server.Address, dialTimeout, err)
+		}
 		return fmt.Errorf("dial server: %w", err)
 	}
 	defer conn.Close()
+	logger.Infof("Enrollment: gRPC connection established to %s (TLS ok)", cfg.Server.Address)
 
 	client := pb.NewEventIngestionServiceClient(conn)
 	hardwareID, src, err := GetHardwareIDWithSource()

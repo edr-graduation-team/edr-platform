@@ -111,19 +111,19 @@ export function useAlerts(): UseAlertsReturn {
 
     // Fetch alerts
     const { data, isLoading, isError, error } = useQuery({
-        queryKey: ['alerts', filters.severities, filters.statuses, debouncedSearch, dateRange, page, pageSize, sortBy, sortOrder],
+        queryKey: ['alerts', filters.severities, filters.statuses, debouncedSearch, dateRange.from?.toISOString(), page, pageSize, sortBy, sortOrder],
         queryFn: () => alertsApi.list({
             limit: pageSize,
             offset: (page - 1) * pageSize,
             severity: filters.severities.length > 0 ? filters.severities.join(',') : undefined,
             status: filters.statuses.length > 0 ? filters.statuses.join(',') : undefined,
             date_from: dateRange.from?.toISOString(),
-            date_to: dateRange.to?.toISOString(),
+            date_to: new Date().toISOString(),
             search: debouncedSearch || undefined,
             sort: sortBy,
             order: sortOrder,
         }),
-        refetchInterval: 5000,
+        refetchInterval: 1000,
     });
 
     const alerts = data?.alerts || [];

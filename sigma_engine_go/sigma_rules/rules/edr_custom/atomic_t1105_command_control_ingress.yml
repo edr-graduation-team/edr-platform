@@ -1,0 +1,111 @@
+title: "Atomic Red Team - T1105/T1071 Command and Control Ingress Tool Transfer"
+id: edr-atomic-t1105-001
+status: stable
+level: high
+description: |
+  Detects ingress tool transfer and C2 staging tested by Atomic Red Team.
+  Covers T1105 (Ingress Tool Transfer) via certutil, bitsadmin, PowerShell
+  download cradles, and curl/wget. Also covers T1071.001 (Web Protocols)
+  for suspicious outbound HTTP/HTTPS connections from LOLBins.
+author: EDR Detection Engineering
+date: 2026/04/28
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  # ── Certutil download ──────────────────────────────────────────────
+  selection_certutil_dl:
+    Image|endswith: '\certutil.exe'
+    CommandLine|contains:
+      - '-urlcache'
+      - '-f '
+      - 'http'
+  # ── BITSAdmin download ────────────────────────────────────────────
+  selection_bitsadmin:
+    Image|endswith: '\bitsadmin.exe'
+    CommandLine|contains:
+      - '/transfer'
+      - '/create'
+      - '/addfile'
+      - '/resume'
+      - '/complete'
+  # ── PowerShell download cradles ────────────────────────────────────
+  selection_ps_download:
+    Image|endswith:
+      - '\powershell.exe'
+      - '\pwsh.exe'
+    CommandLine|contains:
+      - 'Net.WebClient'
+      - 'DownloadString'
+      - 'DownloadFile'
+      - 'DownloadData'
+      - 'Invoke-WebRequest'
+      - 'Invoke-RestMethod'
+      - 'Start-BitsTransfer'
+      - 'iwr '
+      - 'curl '
+      - 'wget '
+      - 'New-Object System.Net.Sockets.TCPClient'
+      - 'IO.StreamReader'
+  # ── Windows curl/wget ──────────────────────────────────────────────
+  selection_curl:
+    Image|endswith:
+      - '\curl.exe'
+    CommandLine|contains:
+      - '-o '
+      - '--output'
+      - 'http'
+  # ── Esentutl copy from URL ────────────────────────────────────────
+  selection_esentutl:
+    Image|endswith: '\esentutl.exe'
+    CommandLine|contains:
+      - '/y'
+      - 'http'
+  # ── Desktopimgdownldr (LOLBin) ────────────────────────────────────
+  selection_desktopimg:
+    Image|endswith: '\desktopimgdownldr.exe'
+  # ── MpCmdRun download ─────────────────────────────────────────────
+  selection_mpcmdrun:
+    Image|endswith: '\MpCmdRun.exe'
+    CommandLine|contains:
+      - '-DownloadFile'
+      - '-url'
+  # ── MSBuild remote project ────────────────────────────────────────
+  selection_msbuild:
+    Image|endswith: '\MSBuild.exe'
+    CommandLine|contains:
+      - 'http://'
+      - 'https://'
+  # ── MSHTA remote HTA ──────────────────────────────────────────────
+  selection_mshta_remote:
+    Image|endswith: '\mshta.exe'
+    CommandLine|contains:
+      - 'http://'
+      - 'https://'
+  filter_windows_update:
+    ParentImage|endswith:
+      - '\svchost.exe'
+      - '\MoUsoCoreWorker.exe'
+      - '\TiWorker.exe'
+  filter_defender:
+    ParentImage|endswith:
+      - '\MsMpEng.exe'
+  condition: >
+    (selection_certutil_dl or selection_bitsadmin or selection_ps_download
+    or selection_curl or selection_esentutl or selection_desktopimg
+    or selection_mpcmdrun or selection_msbuild or selection_mshta_remote)
+    and not (filter_windows_update or filter_defender)
+falsepositives:
+  - Legitimate use of certutil for certificate operations
+  - BITSAdmin used by WSUS or SCCM
+  - Authorised PowerShell scripts fetching configuration files
+tags:
+  - attack.command_and_control
+  - attack.t1105
+  - attack.t1071
+  - attack.t1071.001
+  - attack.t1140
+references:
+  - https://attack.mitre.org/techniques/T1105/
+  - https://github.com/redcanaryco/atomic-red-team/blob/master/atomics/T1105/T1105.md
+  - https://github.com/redcanaryco/atomic-red-team/blob/master/atomics/T1071.001/T1071.001.md

@@ -269,6 +269,29 @@ func isNoisyModule(lower string) bool {
 		`\windows\system32\profapi.dll`,
 		`\windows\system32\version.dll`,
 		`\windows\system32\cabinet.dll`,
+
+		// Additional Networking
+		`\windows\system32\iphlpapi.dll`,
+		`\windows\system32\dnsapi.dll`,
+		`\windows\system32\mswsock.dll`,
+		`\windows\system32\winhttp.dll`,
+
+		// UI / Shell / WinRT (top offenders in telemetry data)
+		`\windows\system32\wintypes.dll`,
+		`\windows\system32\kernel.appcore.dll`,
+		`\windows\system32\shcore.dll`,
+		`\windows\system32\coremessaging.dll`,
+		`\windows\system32\coreuicomponents.dll`,
+		`\windows\system32\textinputframework.dll`,
+		`\windows\system32\dwmapi.dll`,
+		`\windows\system32\ntmarta.dll`,
+		`\windows\system32\atl.dll`,
+		`\windows\system32\mscoree.dll`,
+		`\windows\system32\mscoreei.dll`,
+
+		// .NET CLR / Framework (loaded by every .NET process)
+		`\windows\system32\ucrtbase_clr0400.dll`,
+		`\windows\system32\vcruntime140_clr0400.dll`,
 	}
 	for _, n := range noisyExact {
 		if strings.HasSuffix(lower, n) {

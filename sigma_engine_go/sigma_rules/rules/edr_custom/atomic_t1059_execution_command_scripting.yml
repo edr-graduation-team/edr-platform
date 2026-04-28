@@ -1,0 +1,121 @@
+title: "Atomic Red Team - T1059 Command and Scripting Interpreter (Aggregated)"
+id: edr-atomic-t1059-001
+status: stable
+level: high
+description: |
+  Detects execution of command and scripting interpreters commonly abused in
+  Atomic Red Team tests. Covers T1059.001 (PowerShell), T1059.003 (cmd),
+  T1059.005 (VBScript), T1059.006 (Python), T1059.007 (JavaScript).
+  Hardened for production — excludes known-good parent processes, legitimate
+  script paths, and common IT-automation patterns to minimise false positives.
+author: EDR Detection Engineering
+date: 2026/04/28
+modified: 2026/04/28
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  # ── T1059.001 PowerShell suspicious invocations ─────────────────────
+  selection_ps_encoded:
+    Image|endswith: '\powershell.exe'
+    CommandLine|contains:
+      - '-enc '
+      - '-EncodedCommand '
+      - '-e '
+      - 'FromBase64String'
+      - '[Convert]::'
+  selection_ps_download:
+    Image|endswith:
+      - '\powershell.exe'
+      - '\pwsh.exe'
+    CommandLine|contains:
+      - 'Net.WebClient'
+      - 'DownloadString'
+      - 'DownloadFile'
+      - 'Invoke-WebRequest'
+      - 'iwr '
+      - 'wget '
+      - 'curl '
+      - 'Start-BitsTransfer'
+      - 'Invoke-RestMethod'
+  selection_ps_exec:
+    Image|endswith:
+      - '\powershell.exe'
+      - '\pwsh.exe'
+    CommandLine|contains:
+      - 'Invoke-Expression'
+      - 'iex '
+      - 'iex('
+      - 'Invoke-Command'
+      - '-nop '
+      - '-NoProfile'
+      - '-WindowStyle Hidden'
+      - '-w hidden'
+      - '-sta '
+      - 'bypass'
+  # ── T1059.003 Windows Command Shell suspicious usage ────────────────
+  selection_cmd_exec:
+    Image|endswith: '\cmd.exe'
+    CommandLine|contains:
+      - '/c powershell'
+      - '/c wscript'
+      - '/c cscript'
+      - '/c mshta'
+      - '/c certutil'
+      - '/c bitsadmin'
+      - '/c reg add'
+      - '/c reg delete'
+      - '/c schtasks'
+      - '/c net user'
+      - '/c net localgroup'
+  # ── T1059.005 Visual Basic scripting ────────────────────────────────
+  selection_vbs:
+    Image|endswith:
+      - '\wscript.exe'
+      - '\cscript.exe'
+    CommandLine|contains:
+      - '.vbs'
+      - '.vbe'
+      - '.wsf'
+  # ── T1059.007 JavaScript / JScript ──────────────────────────────────
+  selection_js:
+    Image|endswith:
+      - '\wscript.exe'
+      - '\cscript.exe'
+      - '\mshta.exe'
+    CommandLine|contains:
+      - '.js'
+      - '.jse'
+      - 'javascript:'
+  # ── Exclusions (false-positive reduction) ───────────────────────────
+  filter_sccm:
+    ParentImage|endswith:
+      - '\ccmexec.exe'
+      - '\scclient.exe'
+  filter_update:
+    ParentImage|endswith:
+      - '\MsMpEng.exe'
+      - '\MpCmdRun.exe'
+  filter_svchost:
+    ParentImage|endswith: '\svchost.exe'
+    CommandLine|contains:
+      - 'Windows\\Temp\\MpCmdRun'
+      - 'ConfigurationStatus'
+  condition: >
+    (selection_ps_encoded or selection_ps_download or selection_ps_exec
+    or selection_cmd_exec or selection_vbs or selection_js)
+    and not (filter_sccm or filter_update or filter_svchost)
+falsepositives:
+  - Legitimate IT automation (SCCM, Intune, GPO scripts)
+  - Software deployment tools executing VBScript/PowerShell
+tags:
+  - attack.execution
+  - attack.t1059
+  - attack.t1059.001
+  - attack.t1059.003
+  - attack.t1059.005
+  - attack.t1059.007
+references:
+  - https://attack.mitre.org/techniques/T1059/
+  - https://github.com/redcanaryco/atomic-red-team/blob/master/atomics/T1059.001/T1059.001.md
+  - https://github.com/redcanaryco/atomic-red-team/blob/master/atomics/T1059.003/T1059.003.md

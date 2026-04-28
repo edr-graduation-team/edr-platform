@@ -1,0 +1,93 @@
+title: "Atomic Red Team - T1055 Process Injection Techniques"
+id: edr-atomic-t1055-001
+status: stable
+level: critical
+description: |
+  Detects process injection techniques tested by Atomic Red Team.
+  Covers T1055.001 (DLL Injection), T1055.002 (PE Injection),
+  T1055.003 (Thread Execution Hijacking), T1055.004 (Asynchronous Procedure Call),
+  T1055.012 (Process Hollowing). Detection via suspicious process creation
+  patterns, known injection tool usage, and anomalous parent-child relationships.
+author: EDR Detection Engineering
+date: 2026/04/28
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  # ── Known injection tools and frameworks ────────────────────────────
+  selection_inject_tools:
+    CommandLine|contains:
+      - 'Invoke-DllInjection'
+      - 'Invoke-Shellcode'
+      - 'Invoke-ReflectivePEInjection'
+      - 'Inject-Dll'
+      - 'CreateRemoteThread'
+      - 'VirtualAllocEx'
+      - 'WriteProcessMemory'
+      - 'NtCreateThreadEx'
+      - 'RtlCreateUserThread'
+      - 'QueueUserAPC'
+      - 'SetThreadContext'
+      - 'NtUnmapViewOfSection'
+  # ── T1055.012 Process Hollowing indicators ─────────────────────────
+  selection_hollowing:
+    Image|endswith:
+      - '\svchost.exe'
+      - '\explorer.exe'
+      - '\RuntimeBroker.exe'
+    ParentImage|endswith:
+      - '\cmd.exe'
+      - '\powershell.exe'
+      - '\pwsh.exe'
+      - '\wscript.exe'
+      - '\cscript.exe'
+      - '\mshta.exe'
+  # ── Mavinject injection (T1218/T1055 overlap) ─────────────────────
+  selection_mavinject:
+    Image|endswith: '\mavinject.exe'
+    CommandLine|contains:
+      - '/INJECTRUNNING'
+      - 'INJECTRUNNING'
+  # ── rundll32 suspicious DLL loading ────────────────────────────────
+  selection_rundll32_inject:
+    Image|endswith: '\rundll32.exe'
+    CommandLine|contains:
+      - 'javascript:'
+      - 'vbscript:'
+      - 'shell32.dll,Control_RunDLL'
+      - 'url.dll,FileProtocolHandler'
+  # ── PowerShell Add-Type for inline C# compilation (shellcode) ──────
+  selection_ps_addtype:
+    Image|endswith:
+      - '\powershell.exe'
+      - '\pwsh.exe'
+    CommandLine|contains:
+      - 'Add-Type'
+      - 'DllImport'
+      - 'kernel32'
+      - 'ntdll'
+  filter_legit:
+    ParentImage|endswith:
+      - '\services.exe'
+      - '\svchost.exe'
+      - '\wmiprvse.exe'
+      - '\MsMpEng.exe'
+  condition: >
+    (selection_inject_tools or selection_hollowing or selection_mavinject
+    or selection_rundll32_inject or selection_ps_addtype)
+    and not filter_legit
+falsepositives:
+  - .NET development environments using Add-Type legitimately
+  - Legitimate use of mavinject by accessibility tools
+tags:
+  - attack.defense_evasion
+  - attack.privilege_escalation
+  - attack.t1055
+  - attack.t1055.001
+  - attack.t1055.002
+  - attack.t1055.003
+  - attack.t1055.004
+  - attack.t1055.012
+references:
+  - https://attack.mitre.org/techniques/T1055/
+  - https://github.com/redcanaryco/atomic-red-team/blob/master/atomics/T1055/T1055.md

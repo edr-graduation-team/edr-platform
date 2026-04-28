@@ -502,9 +502,9 @@ func (c *RegistryCollector) generateEvent(action string, wk RegistryWatchKey, va
 		"previous_data": oldValue,
 		"watch_name":    wk.Name,
 		// Sigma-compatible fields (match Sysmon EventID 12/13/14)
-		"TargetObject":  targetObject,
-		"Details":       newValue,
-		"EventType":     sigmaAction,
+		"TargetObject": targetObject,
+		"Details":      newValue,
+		"EventType":    sigmaAction,
 	})
 
 	// Apply filter
@@ -517,12 +517,15 @@ func (c *RegistryCollector) generateEvent(action string, wk RegistryWatchKey, va
 }
 
 // send delivers a registry event to the agent's event pipeline.
+// Registry events are high-value (persistence detection) so we block with
+// a timeout instead of dropping immediately when the channel is full.
 func (c *RegistryCollector) send(evt *event.Event) {
 	select {
 	case c.eventChan <- evt:
 		c.eventsGenerated.Add(1)
-	default:
+	case <-time.After(2 * time.Second):
 		c.dropped.Add(1)
+		c.logger.Warnf("[REG] Priority event DROPPED after 2s timeout (channel full)")
 	}
 }
 
@@ -602,4 +605,3 @@ func inferRegType(valType uint32) string {
 func waitDuration(seconds int) <-chan time.Time {
 	return time.After(time.Duration(seconds) * time.Second)
 }
-

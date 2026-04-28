@@ -1,0 +1,99 @@
+title: "Atomic Red Team - T1070 Indicator Removal on Host"
+id: edr-atomic-t1070-001
+status: stable
+level: high
+description: |
+  Detects attempts to remove forensic indicators tested by Atomic Red Team.
+  Covers T1070.001 (Clear Windows Event Logs), T1070.003 (Clear Command History),
+  T1070.004 (File Deletion), T1070.005 (Network Share Connection Removal),
+  T1070.006 (Timestomp).
+author: EDR Detection Engineering
+date: 2026/04/28
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  # ── T1070.001 Clear Windows Event Logs ──────────────────────────────
+  selection_wevtutil_clear:
+    Image|endswith: '\wevtutil.exe'
+    CommandLine|contains:
+      - ' cl '
+      - ' clear-log '
+  selection_ps_clear_log:
+    Image|endswith:
+      - '\powershell.exe'
+      - '\pwsh.exe'
+    CommandLine|contains:
+      - 'Clear-EventLog'
+      - 'Remove-EventLog'
+      - 'wevtutil cl'
+      - 'Limit-EventLog'
+  # ── T1070.003 Clear Command History ────────────────────────────────
+  selection_clear_history:
+    CommandLine|contains:
+      - 'Clear-History'
+      - 'Remove-Item.*PSReadLine'
+      - 'Remove-Item.*ConsoleHost_history'
+      - 'del.*ConsoleHost_history'
+      - 'Set-PSReadlineOption -HistorySaveStyle SaveNothing'
+  # ── T1070.004 File Deletion (suspicious bulk / forensic) ───────────
+  selection_sdelete:
+    Image|endswith:
+      - '\sdelete.exe'
+      - '\sdelete64.exe'
+  selection_cipher_wipe:
+    Image|endswith: '\cipher.exe'
+    CommandLine|contains: '/w:'
+  selection_fsutil_zero:
+    Image|endswith: '\fsutil.exe'
+    CommandLine|contains:
+      - 'setZeroData'
+      - 'deleteJournal'
+  # ── T1070.005 Network Share Connection Removal ─────────────────────
+  selection_net_use_delete:
+    Image|endswith:
+      - '\net.exe'
+      - '\net1.exe'
+    CommandLine|contains:
+      - 'use'
+      - '/delete'
+  # ── T1070.006 Timestomp via PowerShell ─────────────────────────────
+  selection_timestomp:
+    CommandLine|contains:
+      - 'CreationTime'
+      - 'LastWriteTime'
+      - 'LastAccessTime'
+      - 'Set-ItemProperty.*FileInfo'
+      - 'timestomp'
+      - '[IO.File]::SetCreationTime'
+      - '[IO.File]::SetLastWriteTime'
+  # ── USN Journal deletion ───────────────────────────────────────────
+  selection_usn_delete:
+    Image|endswith: '\fsutil.exe'
+    CommandLine|contains:
+      - 'usn'
+      - 'deleteJournal'
+  filter_maintenance:
+    ParentImage|endswith:
+      - '\TiWorker.exe'
+      - '\TrustedInstaller.exe'
+      - '\MpCmdRun.exe'
+  condition: >
+    (selection_wevtutil_clear or selection_ps_clear_log or selection_clear_history
+    or selection_sdelete or selection_cipher_wipe or selection_fsutil_zero
+    or selection_net_use_delete or selection_timestomp or selection_usn_delete)
+    and not filter_maintenance
+falsepositives:
+  - Log rotation scripts running under scheduled tasks
+  - Legitimate secure file deletion by compliance software
+tags:
+  - attack.defense_evasion
+  - attack.t1070
+  - attack.t1070.001
+  - attack.t1070.003
+  - attack.t1070.004
+  - attack.t1070.005
+  - attack.t1070.006
+references:
+  - https://attack.mitre.org/techniques/T1070/
+  - https://github.com/redcanaryco/atomic-red-team/blob/master/atomics/T1070.001/T1070.001.md

@@ -14,11 +14,19 @@ package collectors
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/edr-platform/win-agent/internal/event"
 )
+
+// fileDedup suppresses duplicate file events for the same (path+opcode)
+// within a 30-second window.  The first event always passes through so
+// Sigma rules can still match; only the thousands of repeated accesses
+// to the same path are dropped.
+var fileDedup = NewDedupCache(30*time.Second, 15*time.Second)
 
 // FileIo opcode constants from the Windows Kernel Trace.
 const (
@@ -35,6 +43,24 @@ func (c *ETWCollector) handleFileIo(pid uint32, opcode uint8, filePath string) {
 	// --- Noise filter: skip high-volume, low-value file paths ---
 	lower := strings.ToLower(filePath)
 	if isNoisyFilePath(lower) {
+		return
+	}
+
+	// --- Directory open filter: bare directory paths have no security signal ---
+	if opcode == fileIoCreate && isDirectoryOpen(lower) {
+		return
+	}
+
+	// --- DLL/EXE read filter: file-access of System32 binaries is noise ---
+	// (image_load events cover actual DLL loading; file reads are just stat/open)
+	if opcode == fileIoCreate && isSystemBinaryRead(lower) {
+		return
+	}
+
+	// --- Time-windowed deduplication ---
+	// Same path+opcode within 30s → suppress (first one always passes).
+	dedupKey := fmt.Sprintf("%s|%d", lower, opcode)
+	if fileDedup.IsDuplicate(dedupKey) {
 		return
 	}
 
@@ -157,6 +183,12 @@ func isNoisyFilePath(lower string) bool {
 		".cat",
 		// Side-by-side assembly manifests
 		".manifest",
+		// MUI resource files (language packs — no security signal)
+		".mui",
+		// Oracle / database trace files (extremely noisy on DB servers)
+		".trc", ".aud",
+		// NGen / ReadyToRun native image metadata
+		".ni.dll",
 	}
 	for _, s := range noisySuffixes {
 		if strings.HasSuffix(lower, s) {
@@ -198,6 +230,14 @@ func isNoisyFilePath(lower string) bool {
 		`\programdata\edr\queue`,
 		`\programdata\edr\logs`,
 		`\programdata\edr\quarantine`,
+		// PowerShell module directory (read-only, extremely noisy)
+		`\windowspowershell\v1.0\modules`,
+		`\powershell\7\modules`,
+		// Oracle / database runtime noise
+		`\diag\rdbms\`,
+		`\app\diag\`,
+		// CLR / .NET JIT temp artifacts
+		`\clr\`,
 	}
 	for _, d := range noisyDirs {
 		if strings.Contains(lower, d) {
@@ -211,4 +251,47 @@ func isNoisyFilePath(lower string) bool {
 	}
 
 	return false
+}
+
+// isDirectoryOpen returns true if the path looks like a bare directory open
+// rather than a file access.  Directory traversals (C:\, C:\Windows,
+// C:\Windows\system32) fire thousands of FileIo Create events with zero
+// security value.
+func isDirectoryOpen(lower string) bool {
+	// Paths with no extension AND ending with a known directory name
+	ext := filepath.Ext(lower)
+	if ext != "" {
+		return false
+	}
+	// If the path is just a drive root (C:, C:\) or well-known directory
+	if len(lower) <= 3 {
+		return true // e.g. "c:\"
+	}
+	// Heuristic: paths ending without an extension that are under System32,
+	// Windows, or ProgramData are likely directory opens.
+	knownDirs := []string{
+		`c:\windows`, `c:\windows\system32`, `c:\windows\syswow64`,
+		`c:\programdata`, `c:\program files`, `c:\program files (x86)`,
+		`c:\users`, `c:\`,
+	}
+	for _, d := range knownDirs {
+		if lower == d || lower == d+`\` {
+			return true
+		}
+	}
+	return false
+}
+
+// isSystemBinaryRead returns true if this is a file-open of a system
+// binary (.dll/.exe/.sys) in System32.  These are file-ACCESS events,
+// not image_load events — the image_load handler already covers actual
+// module loading.  Repeated file reads of system DLLs are pure noise.
+func isSystemBinaryRead(lower string) bool {
+	if !strings.Contains(lower, `\windows\system32\`) &&
+		!strings.Contains(lower, `\windows\syswow64\`) {
+		return false
+	}
+	ext := filepath.Ext(lower)
+	return ext == ".dll" || ext == ".exe" || ext == ".sys" || ext == ".drv" ||
+		ext == ".ocx" || ext == ".cpl" || ext == ".config"
 }

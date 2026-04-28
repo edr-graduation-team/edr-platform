@@ -1,0 +1,91 @@
+title: "Atomic Red Team - T1136 Create Account"
+id: edr-atomic-t1136-001
+status: stable
+level: high
+description: |
+  Detects local and domain account creation for persistence, tested by Atomic
+  Red Team. Covers T1136.001 (Local Account) and T1136.002 (Domain Account).
+  Includes detection of hidden admin accounts and group membership changes.
+author: EDR Detection Engineering
+date: 2026/04/28
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  # ── T1136.001 Local Account Creation ────────────────────────────────
+  selection_net_user_add:
+    Image|endswith:
+      - '\net.exe'
+      - '\net1.exe'
+    CommandLine|contains:
+      - 'user'
+      - '/add'
+  selection_ps_localuser:
+    Image|endswith:
+      - '\powershell.exe'
+      - '\pwsh.exe'
+    CommandLine|contains:
+      - 'New-LocalUser'
+      - 'Add-LocalGroupMember'
+  # ── T1136.002 Domain Account Creation ──────────────────────────────
+  selection_dsadd:
+    Image|endswith: '\dsadd.exe'
+    CommandLine|contains: 'user'
+  selection_ps_aduser:
+    Image|endswith:
+      - '\powershell.exe'
+      - '\pwsh.exe'
+    CommandLine|contains:
+      - 'New-ADUser'
+      - 'Add-ADGroupMember'
+  # ── Adding user to privileged groups ───────────────────────────────
+  selection_admin_group:
+    Image|endswith:
+      - '\net.exe'
+      - '\net1.exe'
+    CommandLine|contains:
+      - 'localgroup'
+      - 'administrators'
+      - '/add'
+  selection_rdp_group:
+    Image|endswith:
+      - '\net.exe'
+      - '\net1.exe'
+    CommandLine|contains:
+      - 'localgroup'
+      - 'Remote Desktop Users'
+      - '/add'
+  # ── Hidden user creation ($ suffix) ────────────────────────────────
+  selection_hidden_user:
+    Image|endswith:
+      - '\net.exe'
+      - '\net1.exe'
+    CommandLine|contains:
+      - '$'
+      - '/add'
+  # ── WMI account creation ───────────────────────────────────────────
+  selection_wmic_user:
+    Image|endswith: '\wmic.exe'
+    CommandLine|contains:
+      - 'useraccount'
+      - 'create'
+  filter_sccm:
+    ParentImage|endswith:
+      - '\ccmexec.exe'
+      - '\svchost.exe'
+  condition: >
+    (selection_net_user_add or selection_ps_localuser or selection_dsadd
+    or selection_ps_aduser or selection_admin_group or selection_rdp_group
+    or selection_hidden_user or selection_wmic_user)
+    and not filter_sccm
+falsepositives:
+  - Legitimate user provisioning by IT helpdesk
+  - Automated user creation scripts during onboarding
+tags:
+  - attack.persistence
+  - attack.t1136
+  - attack.t1136.001
+  - attack.t1136.002
+references:
+  - https://attack.mitre.org/techniques/T1136/
+  - https://github.com/redcanaryco/atomic-red-team/blob/master/atomics/T1136.001/T1136.001.md

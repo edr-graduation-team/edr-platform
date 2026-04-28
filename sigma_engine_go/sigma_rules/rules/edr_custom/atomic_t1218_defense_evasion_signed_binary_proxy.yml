@@ -1,0 +1,126 @@
+title: "Atomic Red Team - T1218 Signed Binary Proxy Execution"
+id: edr-atomic-t1218-001
+status: stable
+level: high
+description: |
+  Detects abuse of signed Windows binaries to proxy execution of malicious code,
+  tested by Atomic Red Team. Covers T1218.001 (Compiled HTML), T1218.003 (CMSTP),
+  T1218.004 (InstallUtil), T1218.005 (Mshta), T1218.009 (Regsvcs/Regasm),
+  T1218.010 (Regsvr32), T1218.011 (Rundll32), T1218.014 (MMC).
+author: EDR Detection Engineering
+date: 2026/04/28
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  # ── T1218.001 Compiled HTML (.chm) ─────────────────────────────────
+  selection_chm:
+    Image|endswith: '\hh.exe'
+    CommandLine|contains:
+      - '.chm'
+      - 'http://'
+      - 'https://'
+  # ── T1218.003 CMSTP ────────────────────────────────────────────────
+  selection_cmstp:
+    Image|endswith: '\cmstp.exe'
+    CommandLine|contains:
+      - '/s'
+      - '/ni'
+      - '.inf'
+  # ── T1218.004 InstallUtil ──────────────────────────────────────────
+  selection_installutil:
+    Image|endswith: '\InstallUtil.exe'
+  # ── T1218.005 Mshta ────────────────────────────────────────────────
+  selection_mshta:
+    Image|endswith: '\mshta.exe'
+    CommandLine|contains:
+      - 'javascript:'
+      - 'vbscript:'
+      - 'http://'
+      - 'https://'
+      - '.hta'
+      - 'about:blank'
+  # ── T1218.009 Regsvcs / Regasm ─────────────────────────────────────
+  selection_regsvcs:
+    Image|endswith:
+      - '\regsvcs.exe'
+      - '\regasm.exe'
+  # ── T1218.010 Regsvr32 (Squiblydoo) ───────────────────────────────
+  selection_regsvr32:
+    Image|endswith: '\regsvr32.exe'
+    CommandLine|contains:
+      - '/s'
+      - '/i:'
+      - 'scrobj.dll'
+      - 'http://'
+      - 'https://'
+      - '/u '
+  # ── T1218.011 Rundll32 suspicious patterns ─────────────────────────
+  selection_rundll32:
+    Image|endswith: '\rundll32.exe'
+    CommandLine|contains:
+      - 'javascript:'
+      - 'vbscript:'
+      - 'shell32.dll,ShellExec_RunDLL'
+      - 'url.dll,OpenURL'
+      - 'url.dll,FileProtocolHandler'
+      - 'zipfldr.dll,RouteTheCall'
+      - 'advpack.dll,LaunchINFSection'
+      - 'advpack.dll,RegisterOCX'
+      - 'ieadvpack.dll,LaunchINFSection'
+      - 'pcwutl.dll,LaunchApplication'
+      - 'syssetup.dll,SetupInfObjectInstallAction'
+  # ── T1218.014 MMC snap-in abuse ────────────────────────────────────
+  selection_mmc:
+    Image|endswith: '\mmc.exe'
+    CommandLine|contains:
+      - '.msc'
+    ParentImage|endswith:
+      - '\cmd.exe'
+      - '\powershell.exe'
+      - '\pwsh.exe'
+  # ── T1216 Signed Script Proxy Execution (PubPrn, SyncAppvPublishingServer) ─
+  selection_pubprn:
+    CommandLine|contains:
+      - 'pubprn.vbs'
+      - 'SyncAppvPublishingServer'
+  # ── Certutil download/decode (T1140/T1218 overlap) ─────────────────
+  selection_certutil:
+    Image|endswith: '\certutil.exe'
+    CommandLine|contains:
+      - '-urlcache'
+      - '-decode'
+      - '-decodehex'
+      - '-encode'
+      - 'split'
+      - '-f '
+  filter_legitimate:
+    ParentImage|endswith:
+      - '\msiexec.exe'
+      - '\TiWorker.exe'
+      - '\TrustedInstaller.exe'
+  condition: >
+    (selection_chm or selection_cmstp or selection_installutil or selection_mshta
+    or selection_regsvcs or selection_regsvr32 or selection_rundll32
+    or selection_mmc or selection_pubprn or selection_certutil)
+    and not filter_legitimate
+falsepositives:
+  - Legitimate .chm help file access
+  - Enterprise software using regsvr32 for COM registration
+  - Certutil for legitimate certificate operations
+tags:
+  - attack.defense_evasion
+  - attack.t1218
+  - attack.t1218.001
+  - attack.t1218.003
+  - attack.t1218.004
+  - attack.t1218.005
+  - attack.t1218.009
+  - attack.t1218.010
+  - attack.t1218.011
+  - attack.t1218.014
+  - attack.t1216
+references:
+  - https://attack.mitre.org/techniques/T1218/
+  - https://github.com/redcanaryco/atomic-red-team/blob/master/atomics/T1218.010/T1218.010.md
+  - https://github.com/redcanaryco/atomic-red-team/blob/master/atomics/T1218.011/T1218.011.md

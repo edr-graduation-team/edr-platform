@@ -13,13 +13,16 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// EventRow is the minimal event row used by API handlers.
+// EventRow is the event row returned by search/list APIs.
+// Raw is included so callers can extract typed fields (action, name, pid, etc.).
 type EventRow struct {
 	ID        uuid.UUID
 	AgentID   uuid.UUID
 	EventType string
+	Severity  string
 	Timestamp time.Time
 	Summary   string
+	Raw       json.RawMessage
 }
 
 // EventInsert is an insert payload (parsed/normalized from ingestion).
@@ -43,12 +46,12 @@ type EventSearchFilter struct {
 
 // EventSearchRequest matches API EventSearchRequest (without importing api package).
 type EventSearchRequest struct {
-	Filters   []EventSearchFilter
-	Logic     string // AND/OR
-	TimeFrom  time.Time
-	TimeTo    time.Time
-	Limit     int
-	Offset    int
+	Filters  []EventSearchFilter
+	Logic    string // AND/OR
+	TimeFrom time.Time
+	TimeTo   time.Time
+	Limit    int
+	Offset   int
 }
 
 // EventDetail is one row from `events` including JSONB raw.
@@ -128,7 +131,7 @@ func (r *PostgresEventRepository) ListByAgent(ctx context.Context, agentID uuid.
 	}
 
 	q := `
-		SELECT id, agent_id, event_type, ts, summary
+		SELECT id, agent_id, event_type, severity, ts, summary, raw
 		FROM events
 		WHERE agent_id = $1
 		ORDER BY ts DESC
@@ -142,7 +145,7 @@ func (r *PostgresEventRepository) ListByAgent(ctx context.Context, agentID uuid.
 	out := []EventRow{}
 	for rs.Next() {
 		var e EventRow
-		if err := rs.Scan(&e.ID, &e.AgentID, &e.EventType, &e.Timestamp, &e.Summary); err != nil {
+		if err := rs.Scan(&e.ID, &e.AgentID, &e.EventType, &e.Severity, &e.Timestamp, &e.Summary, &e.Raw); err != nil {
 			return nil, 0, fmt.Errorf("scan event: %w", err)
 		}
 		out = append(out, e)
@@ -166,8 +169,6 @@ func (r *PostgresEventRepository) Search(ctx context.Context, req EventSearchReq
 	where := []string{"ts >= $1", "ts <= $2"}
 	args := []interface{}{req.TimeFrom, req.TimeTo}
 
-	// Very small filter DSL (equals/contains/regex/gt/lt/gte/lte) for a safe subset.
-	// Only allow filtering on known fields to keep query safe and indexed.
 	add := func(clause string, v interface{}) {
 		where = append(where, clause)
 		args = append(args, v)
@@ -176,34 +177,73 @@ func (r *PostgresEventRepository) Search(ctx context.Context, req EventSearchReq
 	for _, f := range req.Filters {
 		field := strings.TrimSpace(strings.ToLower(f.Field))
 		op := strings.TrimSpace(strings.ToLower(f.Operator))
+		argPos := len(args) + 1
 
 		switch field {
+		// ── Indexed top-level columns ─────────────────────────────────────
 		case "agent_id", "event_type", "severity":
-			// ok
-		default:
-			continue
-		}
+			switch op {
+			case "equals":
+				add(fmt.Sprintf("%s = $%d", field, argPos), f.Value)
+			case "contains":
+				add(fmt.Sprintf("%s ILIKE $%d", field, argPos), "%"+fmt.Sprint(f.Value)+"%")
+			case "regex":
+				add(fmt.Sprintf("%s ~* $%d", field, argPos), fmt.Sprint(f.Value))
+			}
 
-		argPos := len(args) + 1
-		switch op {
-		case "equals":
-			add(fmt.Sprintf("%s = $%d", field, argPos), f.Value)
-		case "contains":
-			add(fmt.Sprintf("%s ILIKE $%d", field, argPos), "%"+fmt.Sprint(f.Value)+"%")
-		case "regex":
-			add(fmt.Sprintf("%s ~* $%d", field, argPos), fmt.Sprint(f.Value))
-		case "gt", "lt", "gte", "lte":
-			// Not meaningful on these string fields; ignore.
-			continue
+		// ── JSONB raw fields (data.*) ─────────────────────────────────────
+		// Supported keys: data.autonomous, data.action, data.name, data.matched_rule_id, etc.
 		default:
-			continue
+			if !strings.HasPrefix(field, "data.") {
+				continue
+			}
+			key := strings.TrimPrefix(field, "data.")
+			// Whitelist keys we allow for JSONB extraction (safety guard)
+			allowedJSONB := map[string]bool{
+				"autonomous": true, "action": true, "name": true,
+				"matched_rule_id": true, "matched_rule_title": true,
+				"response_action": true, "decision_mode": true,
+				"pid": true, "user_name": true,
+			}
+			if !allowedJSONB[key] {
+				continue
+			}
+			jsonPath := fmt.Sprintf("raw->>'%s'", key)
+			switch op {
+			case "equals":
+				val := fmt.Sprint(f.Value)
+				if b, ok := f.Value.(bool); ok {
+					// boolean stored as JSON "true"/"false" string in JSONB text extraction
+					if b {
+						val = "true"
+					} else {
+						val = "false"
+					}
+				}
+				add(fmt.Sprintf("%s = $%d", jsonPath, argPos), val)
+			case "contains":
+				add(fmt.Sprintf("%s ILIKE $%d", jsonPath, argPos), "%"+fmt.Sprint(f.Value)+"%")
+			case "in":
+				// Value should be a []string or []interface{}
+				// Render as: raw->>'action' = ANY($n::text[])
+				var vals []string
+				switch v := f.Value.(type) {
+				case []string:
+					vals = v
+				case []interface{}:
+					for _, vi := range v {
+						vals = append(vals, fmt.Sprint(vi))
+					}
+				}
+				if len(vals) > 0 {
+					add(fmt.Sprintf("%s = ANY($%d)", jsonPath, argPos), vals)
+				}
+			}
 		}
 	}
 
 	joiner := " AND "
 	if strings.EqualFold(req.Logic, "OR") {
-		// Keep time bounds ANDed; OR only between user filters.
-		// Simplify: if OR requested and at least one user filter exists, wrap user filters.
 		if len(where) > 2 {
 			head := where[:2]
 			user := where[2:]
@@ -221,7 +261,7 @@ func (r *PostgresEventRepository) Search(ctx context.Context, req EventSearchReq
 	}
 
 	dataQ := `
-		SELECT id, agent_id, event_type, ts, summary
+		SELECT id, agent_id, event_type, severity, ts, summary, raw
 		FROM events
 		WHERE ` + w + `
 		ORDER BY ts DESC
@@ -237,7 +277,7 @@ func (r *PostgresEventRepository) Search(ctx context.Context, req EventSearchReq
 	out := []EventRow{}
 	for rs.Next() {
 		var e EventRow
-		if err := rs.Scan(&e.ID, &e.AgentID, &e.EventType, &e.Timestamp, &e.Summary); err != nil {
+		if err := rs.Scan(&e.ID, &e.AgentID, &e.EventType, &e.Severity, &e.Timestamp, &e.Summary, &e.Raw); err != nil {
 			return nil, 0, fmt.Errorf("scan event: %w", err)
 		}
 		out = append(out, e)
@@ -262,3 +302,5 @@ func (r *PostgresEventRepository) GetByID(ctx context.Context, id uuid.UUID) (*E
 	}
 	return &d, nil
 }
+
+

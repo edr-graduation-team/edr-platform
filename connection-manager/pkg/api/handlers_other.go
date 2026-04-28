@@ -3,6 +3,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"strconv"
 	"strings"
@@ -461,13 +462,50 @@ func (h *Handlers) SearchEvents(c echo.Context) error {
 
 	out := make([]EventSummary, 0, len(rows))
 	for _, r := range rows {
-		out = append(out, EventSummary{
+		es := EventSummary{
 			ID:        r.ID,
 			AgentID:   r.AgentID,
 			EventType: r.EventType,
+			Severity:  r.Severity,
 			Timestamp: r.Timestamp,
 			Summary:   r.Summary,
-		})
+		}
+		// Decode raw payload so the dashboard gets typed fields (action, name, pid, rule, etc.)
+		// without needing a second /events/:id fetch for every row.
+		if len(r.Raw) > 0 {
+			var raw map[string]interface{}
+			if err := json.Unmarshal(r.Raw, &raw); err == nil {
+				// Prefer the nested "data" object if present, otherwise use top-level raw.
+				if nested, ok := raw["data"].(map[string]interface{}); ok {
+					es.Data = nested
+				} else {
+					// Flatten: copy useful keys from the top-level raw into Data.
+					flat := make(map[string]interface{})
+					for _, k := range []string{
+						"action", "autonomous", "name", "process_name",
+						"pid", "ppid", "command_line", "parent_name",
+						"matched_rule_id", "matched_rule_title", "decision_mode",
+						"kill_tree", "kill_output", "kill_error",
+						"user_name", "is_elevated", "signature_status",
+						"hostname",
+					} {
+						if v, exists := raw[k]; exists {
+							flat[k] = v
+						}
+					}
+					if len(flat) > 0 {
+						es.Data = flat
+					}
+				}
+				// Also pull severity from raw if not set
+				if es.Severity == "" || es.Severity == "informational" {
+					if s, ok := raw["severity"].(string); ok && s != "" {
+						es.Severity = s
+					}
+				}
+			}
+		}
+		out = append(out, es)
 	}
 
 	return c.JSON(http.StatusOK, EventListResponse{

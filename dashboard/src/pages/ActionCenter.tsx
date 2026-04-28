@@ -579,7 +579,7 @@ function AutoProcTerminationPanel({ showToast }: { showToast: (msg: string, type
         queryKey: ['auto-proc-all', from, to, offset],
         queryFn: () => eventsApi.search({
             filters: [
-                { field: 'data.autonomous', operator: 'equals', value: true },
+                { field: 'event_type', operator: 'equals', value: 'process' },
             ],
             logic: 'AND',
             time_range: { from, to },
@@ -614,13 +614,16 @@ function AutoProcTerminationPanel({ showToast }: { showToast: (msg: string, type
     const getBadge = (ev: CmEventSummary) => {
         const raw = ev as any;
         const action = raw.data?.action || raw.action || '';
-        return AP_ACTION_BADGE[action] || AP_ACTION_BADGE['process_rule_matched_detect_only'];
+        return AP_ACTION_BADGE[action] || AP_ACTION_BADGE['auto_terminate_failed'];
     };
 
-    // KPI stats from current page rows
-    const terminated = rows.filter(r => getField(r, 'action') === 'auto_terminated').length;
-    const detectOnly = rows.filter(r => getField(r, 'action') === 'process_rule_matched_detect_only').length;
-    const failed    = rows.filter(r => getField(r, 'action') === 'auto_terminate_failed').length;
+    // Client-side filter: only show autonomous termination events (exclude non-autonomous process events)
+    const AUTONOMOUS_ACTIONS = ['auto_terminated', 'auto_terminate_failed'];
+    const filteredRows = rows.filter(r => AUTONOMOUS_ACTIONS.includes(getField(r, 'action')));
+
+    // KPI stats
+    const terminated = filteredRows.filter(r => getField(r, 'action') === 'auto_terminated').length;
+    const failed     = filteredRows.filter(r => getField(r, 'action') === 'auto_terminate_failed').length;
 
     return (
         <>
@@ -628,7 +631,6 @@ function AutoProcTerminationPanel({ showToast }: { showToast: (msg: string, type
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 shrink-0">
             <KPICard title="Total Events" value={total} icon={ShieldAlert} color="bg-cyan-500/10 dark:bg-cyan-500/20 text-cyan-600 dark:text-cyan-400 border border-cyan-500/20" subtitle={`Last ${rangeDays} days`} />
             <KPICard title="Terminated" value={terminated} icon={CheckCircle2} color="bg-emerald-500/10 dark:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20" />
-            <KPICard title="Detect Only" value={detectOnly} icon={AlertTriangle} color="bg-amber-500/10 dark:bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/20" />
             <KPICard title="Failed" value={failed} icon={XCircle} color="bg-rose-500/10 dark:bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/20" />
         </div>
 
@@ -655,11 +657,11 @@ function AutoProcTerminationPanel({ showToast }: { showToast: (msg: string, type
                         <div className="h-16 bg-slate-200 dark:bg-slate-800 rounded-xl animate-pulse opacity-75"></div>
                         <div className="h-16 bg-slate-200 dark:bg-slate-800 rounded-xl animate-pulse opacity-50"></div>
                     </div>
-                ) : rows.length === 0 ? (
+                ) : filteredRows.length === 0 ? (
                     <div className="text-center py-20 flex flex-col items-center justify-center">
                         <ShieldAlert className="w-12 h-12 text-slate-400 dark:text-slate-600 mb-4" />
-                        <h3 className="text-lg font-medium text-slate-900 dark:text-slate-100 mb-1">No auto-response events</h3>
-                        <p className="text-slate-500 dark:text-slate-400">Process termination events from all agents will appear here.</p>
+                        <h3 className="text-lg font-medium text-slate-900 dark:text-slate-100 mb-1">No auto-termination events</h3>
+                        <p className="text-slate-500 dark:text-slate-400">Autonomous process termination events will appear here when the agent acts.</p>
                     </div>
                 ) : (
                     <table className="w-full text-left text-xs">
@@ -676,7 +678,7 @@ function AutoProcTerminationPanel({ showToast }: { showToast: (msg: string, type
                             </tr>
                         </thead>
                         <tbody>
-                            {rows.map((ev) => {
+                            {filteredRows.map((ev) => {
                                 const badge = getBadge(ev);
                                 const BadgeIcon = badge.icon;
                                 const isExpanded = expandedId === ev.id;

@@ -1649,7 +1649,7 @@ function AutoProcTerminationTab({ agentId, canViewAlerts, canExec }: { agentId: 
         queryFn: () => eventsApi.search({
             filters: [
                 { field: 'agent_id', operator: 'equals', value: agentId },
-                { field: 'data.autonomous', operator: 'equals', value: true },
+                { field: 'event_type', operator: 'equals', value: 'process' },
             ],
             logic: 'AND',
             time_range: { from, to },
@@ -1680,7 +1680,7 @@ function AutoProcTerminationTab({ agentId, canViewAlerts, canExec }: { agentId: 
     const getActionBadge = (ev: CmEventSummary) => {
         const raw = ev as any;
         const action = raw.data?.action || raw.action || '';
-        return ACTION_BADGE[action] || ACTION_BADGE['process_rule_matched_detect_only'];
+        return ACTION_BADGE[action] || ACTION_BADGE['auto_terminate_failed'];
     };
 
     const getField = (ev: CmEventSummary, field: string): string => {
@@ -1688,10 +1688,13 @@ function AutoProcTerminationTab({ agentId, canViewAlerts, canExec }: { agentId: 
         return String(raw.data?.[field] ?? raw[field] ?? '');
     };
 
+    // Client-side filter: show only actual termination events
+    const AUTONOMOUS_ACTIONS = ['auto_terminated', 'auto_terminate_failed'];
+    const filteredRows = rows.filter(r => AUTONOMOUS_ACTIONS.includes(getField(r, 'action')));
+
     // Stats
-    const terminated = rows.filter(r => getField(r, 'action') === 'auto_terminated').length;
-    const detectOnly = rows.filter(r => getField(r, 'action') === 'process_rule_matched_detect_only').length;
-    const failed = rows.filter(r => getField(r, 'action') === 'auto_terminate_failed').length;
+    const terminated = filteredRows.filter(r => getField(r, 'action') === 'auto_terminated').length;
+    const failed = filteredRows.filter(r => getField(r, 'action') === 'auto_terminate_failed').length;
 
     return (
         <div className="space-y-4 text-sm animate-slide-up-fade">
@@ -1718,14 +1721,10 @@ function AutoProcTerminationTab({ agentId, canViewAlerts, canExec }: { agentId: 
             </div>
 
             {/* Mini KPIs */}
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-2 gap-3">
                 <div className="rounded-lg border border-emerald-200 dark:border-emerald-800/40 bg-emerald-50/50 dark:bg-emerald-900/10 p-3">
                     <div className="text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider">Terminated</div>
                     <div className="text-lg font-bold text-emerald-700 dark:text-emerald-300 mt-0.5">{terminated}</div>
-                </div>
-                <div className="rounded-lg border border-amber-200 dark:border-amber-800/40 bg-amber-50/50 dark:bg-amber-900/10 p-3">
-                    <div className="text-[10px] font-semibold text-amber-600 dark:text-amber-400 uppercase tracking-wider">Detect Only</div>
-                    <div className="text-lg font-bold text-amber-700 dark:text-amber-300 mt-0.5">{detectOnly}</div>
                 </div>
                 <div className="rounded-lg border border-rose-200 dark:border-rose-800/40 bg-rose-50/50 dark:bg-rose-900/10 p-3">
                     <div className="text-[10px] font-semibold text-rose-600 dark:text-rose-400 uppercase tracking-wider">Failed</div>
@@ -1773,7 +1772,7 @@ function AutoProcTerminationTab({ agentId, canViewAlerts, canExec }: { agentId: 
                             </tr>
                         </thead>
                         <tbody>
-                            {rows.map((ev) => {
+                            {filteredRows.map((ev) => {
                                 const badge = getActionBadge(ev);
                                 const BadgeIcon = badge.icon;
                                 const isExpanded = expandedId === ev.id;

@@ -286,7 +286,7 @@ export function PlaybooksPage() {
         case 'network_isolate':   mappedType = 'isolate_network'; break;
         case 'process_terminate': mappedType = 'terminate_process'; params = { process_name: p('process_name') || String(cmd.params?.process_name || 'suspicious.exe'), kill_tree: 'true' }; break;
         case 'forensic_dump':     mappedType = 'collect_forensics'; params = { event_types: 'process,file,network,registry', max_events: '1000' }; break;
-        case 'device_unmount':    mappedType = 'run_cmd'; params = { cmd: 'powershell -Command "Get-Volume | Where-Object {$_.DriveType -eq \'Removable\'} | Dismount-Volume -Confirm:$false"', from_playbook: 'true' }; break;
+        case 'device_unmount':    mappedType = 'run_cmd'; params = { cmd: '__EJECT_USB__', from_playbook: 'true' }; break;
         case 'log_pull':          mappedType = 'collect_logs'; params = { log_types: 'System,Security' }; break;
         case 'yara_scan':         mappedType = 'scan_file'; params = { file_path: p('file_path') || String(cmd.params?.file_path || 'C:\\Windows\\Temp') }; break;
         case 'registry_query':    mappedType = 'run_cmd'; params = { cmd: 'reg query HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Run' }; break;

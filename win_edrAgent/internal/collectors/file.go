@@ -57,8 +57,58 @@ func (c *ETWCollector) handleFileIo(pid uint32, opcode uint8, filePath string) {
 		return
 	}
 
-	// --- Time-windowed deduplication ---
-	// Same path+opcode within 30s → suppress (first one always passes).
+	// --- Self-filter: drop the agent's own file I/O ---
+	procPath := getImagePath(pid)
+	procName := baseName(procPath)
+	if procName == "" {
+		procName = "unknown"
+	}
+	if isSelfOrChildProcess(strings.ToLower(procName), "") {
+		return
+	}
+
+	// --- AUTO-RESPONSE: MUST run BEFORE dedup so quarantine is NEVER skipped ---
+	// The dedup cache suppresses repeated telemetry events to reduce noise, but
+	// it must NOT gate the security response path. A file written twice (e.g.
+	// OneDrive sync touching a newly-written file, or a restore-then-rewrite)
+	// must still be evaluated for hash matches on every Create/Write.
+	if c.fileAutoResp != nil && (opcode == fileIoCreate || opcode == fileIoWrite) {
+		name := filepath.Base(filePath)
+		dir := filepath.Dir(filePath)
+		ext := filepath.Ext(name)
+		sid, user, elevated, integrity := getPrivileges(pid)
+		cmdLine := getCmdLine(pid)
+		base := map[string]interface{}{
+			"action":          "",
+			"path":            filePath,
+			"name":            name,
+			"directory":       dir,
+			"extension":       ext,
+			"pid":             pid,
+			"process_name":    procName,
+			"process_path":    procPath,
+			"user_name":       user,
+			"user_sid":        sid,
+			"command_line":    cmdLine,
+			"is_elevated":     elevated,
+			"integrity_level": integrity,
+		}
+		if alt, stop := c.fileAutoResp.EvaluateAndAct(context.Background(), filePath, opcode, pid, base); stop {
+			if alt != nil {
+				if c.filter != nil && c.filter.ShouldFilter(alt) {
+					return
+				}
+				c.send(alt)
+			}
+			c.fileEvents.Add(1)
+			return
+		}
+	}
+
+	// --- Time-windowed deduplication (telemetry-only, AFTER auto-response) ---
+	// Same path+opcode within 30s → suppress the upstream telemetry event.
+	// Auto-response above has already run, so we only gate the Sigma/analytics
+	// feed here, not the security enforcement path.
 	dedupKey := fmt.Sprintf("%s|%d", lower, opcode)
 	if fileDedup.IsDuplicate(dedupKey) {
 		return
@@ -85,55 +135,11 @@ func (c *ETWCollector) handleFileIo(pid uint32, opcode uint8, filePath string) {
 		return
 	}
 
-	// Enrich with the process that performed the I/O.
-	procPath := getImagePath(pid)
-	procName := baseName(procPath)
-	if procName == "" {
-		procName = "unknown"
-	}
-	// Drop the agent's own file I/O (queue/log writes) to avoid self-generated
-	// noise and false-positive drift in downstream Sigma matching.
-	if isSelfOrChildProcess(strings.ToLower(procName), "") {
-		return
-	}
-
 	name := filepath.Base(filePath)
 	dir := filepath.Dir(filePath)
 	ext := filepath.Ext(name)
-
-	// For production context-aware scoring, file events must carry enough
-	// endpoint/process context (user + command-line) to satisfy the required
-	// `context_quality_score` inputs.
 	sid, user, elevated, integrity := getPrivileges(pid)
 	cmdLine := getCmdLine(pid)
-
-	if c.fileAutoResp != nil && (opcode == fileIoCreate || opcode == fileIoWrite) {
-		base := map[string]interface{}{
-			"action":          action,
-			"path":            filePath,
-			"name":            name,
-			"directory":       dir,
-			"extension":       ext,
-			"pid":             pid,
-			"process_name":    procName,
-			"process_path":    procPath,
-			"user_name":       user,
-			"user_sid":        sid,
-			"command_line":    cmdLine,
-			"is_elevated":     elevated,
-			"integrity_level": integrity,
-		}
-		if alt, stop := c.fileAutoResp.EvaluateAndAct(context.Background(), filePath, opcode, pid, base); stop {
-			if alt != nil {
-				if c.filter != nil && c.filter.ShouldFilter(alt) {
-					return
-				}
-				c.send(alt)
-			}
-			c.fileEvents.Add(1)
-			return
-		}
-	}
 
 	evt := event.NewEvent(event.EventTypeFile, severity, map[string]interface{}{
 		"action":          action,

@@ -5,22 +5,24 @@ import { UserAssistant } from '../../components/automation/UserAssistant';
 import { Play, Shield, Clock, TrendingUp, AlertTriangle, Plus, Terminal, X, CheckCircle, Target, Trash2 } from 'lucide-react';
 import { automationApi, agentsApi } from '../../api/client';
 
-// Parameters required by each command type
-const COMMAND_PARAMS: Record<string, Array<{ key: string; label: string; placeholder: string; required: boolean }>> = {
-  terminate_process: [{ key: 'process_name', label: 'Process Name', placeholder: 'e.g., vssadmin.exe', required: true }],
-  quarantine_file:   [{ key: 'file_path',    label: 'File Path',    placeholder: 'e.g., C:\\Windows\\Temp\\malware.exe', required: true }],
-  run_cmd:           [{ key: 'cmd',          label: 'Command',      placeholder: 'e.g., powershell -Command "..."', required: true }],
-  collect_logs:      [{ key: 'log_types',    label: 'Log Types',    placeholder: 'System,Security,Application', required: true }],
-  scan_file:         [{ key: 'file_path',    label: 'Path to Scan', placeholder: 'e.g., C:\\Windows\\Temp', required: true }],
-  update_signatures: [{ key: 'url',          label: 'Signature URL',placeholder: 'https://...', required: false }],
+// Parameters required by each command type.
+// All fields set to required:false - every command now carries a DB-level default
+// param pre-filled in openExecuteModal. The * only shows when no DB default exists.
+const COMMAND_PARAMS: Record<string, Array<{ key: string; label: string; placeholder: string; required: boolean; defaultValue?: string }>> = {
+  terminate_process: [{ key: 'process_name', label: 'Process Name / PID', placeholder: 'e.g., vssadmin.exe  or  PID:1234', required: true  }],
+  quarantine_file:   [{ key: 'file_path',    label: 'File Path',    placeholder: 'e.g., C:\\Windows\\Temp\\malware.exe', required: true  }],
+  run_cmd:           [{ key: 'cmd',          label: 'Command',      placeholder: 'e.g., powershell -Command "Get-Volume | Where-Object {$_.DriveType -eq \'Removable\'} | Dismount-Volume -Confirm:$false"',    required: false }],
+  collect_logs:      [{ key: 'log_types',    label: 'Log Types',    placeholder: 'System,Security,Application',        required: false }],
+  scan_file:         [{ key: 'file_path',    label: 'Path to Scan', placeholder: 'e.g., C:\\Windows\\Temp',            required: true  }],
+  update_signatures: [{ key: 'url',          label: 'Signature URL',placeholder: 'https://...',                        required: false }],
   collect_forensics: [
     { key: 'event_types', label: 'Event Types', placeholder: 'process,file,network,registry', required: false },
-    { key: 'max_events',  label: 'Max Events',  placeholder: '1000', required: false },
+    { key: 'max_events',  label: 'Max Events',  placeholder: '1000',                          required: false },
   ],
   filesystem_timeline: [{ key: 'window_hours', label: 'Time Window (hours)', placeholder: '24', required: false }],
   // Legacy type aliases
-  process_terminate: [{ key: 'process_name', label: 'Process Name', placeholder: 'e.g., vssadmin.exe', required: true }],
-  yara_scan:         [{ key: 'file_path',    label: 'Path to Scan', placeholder: 'C:\\Windows\\Temp', required: true }],
+  process_terminate: [{ key: 'process_name', label: 'Process Name / PID', placeholder: 'e.g., vssadmin.exe  or  PID:1234', required: true  }],
+  yara_scan:         [{ key: 'file_path',    label: 'Path to Scan', placeholder: 'C:\\Windows\\Temp',      required: true  }],
 };
 
 // Map API ResponsePlaybook to the component's Playbook interface
@@ -174,28 +176,72 @@ export function PlaybooksPage() {
     setSelectedPlaybook(playbook);
     if (alertContext?.alertDetails?.agentId) setAgentIdInput(alertContext.alertDetails.agentId);
 
-    // Pre-fill cmd params from DB defaults and alert context
+    // ?? Extract relevant fields from the alert's event_data ?????????????????
+    const ed = alertContext?.alertDetails?.event_data || {};
+
+    // Process info from alert (used for terminate_process)
+    const alertProcessName =
+      (ed.Image ? ed.Image.split('\\').pop() : '') ||
+      ed.ProcessName ||
+      ed.OriginalFileName ||
+      '';
+    const alertPid = ed.ProcessId ? String(ed.ProcessId) : '';
+    // If we have a PID, prefer "PID:1234" so the agent can match by PID too.
+    const alertProcessValue = alertProcessName || (alertPid ? `PID:${alertPid}` : '');
+
+    // File path from alert (used for quarantine_file / scan_file)
+    const alertFilePath =
+      ed.TargetFilename ||
+      ed.file_path ||
+      ed.FilePath ||
+      ed.Image ||   // fallback: the process image that triggered the alert
+      '';
+
     const defaults: Record<string, string> = {};
+
     playbook.commands.forEach((cmd, idx) => {
       const defs = COMMAND_PARAMS[cmd.type] || [];
       defs.forEach(pd => {
+        // Step 1: Start with DB default (skip ${template} vars)
         const dbVal = String(cmd.params?.[pd.key] || '');
-        // Don't pre-fill placeholder template vars like ${process_name}
         defaults[`${idx}_${pd.key}`] = dbVal.startsWith('${') ? '' : dbVal;
+
+        // Step 2: For user-required fields, override with alert context when available
+        if (pd.required) {
+          if ((cmd.type === 'terminate_process' || cmd.type === 'process_terminate') && pd.key === 'process_name') {
+            if (alertProcessValue) defaults[`${idx}_process_name`] = alertProcessValue;
+          }
+          if ((cmd.type === 'quarantine_file') && pd.key === 'file_path') {
+            if (alertFilePath) defaults[`${idx}_file_path`] = alertFilePath;
+          }
+          if ((cmd.type === 'scan_file' || cmd.type === 'yara_scan') && pd.key === 'file_path') {
+            if (alertFilePath) defaults[`${idx}_file_path`] = alertFilePath;
+          }
+        }
       });
-      // Override process name from alert context if available
-      if ((cmd.type === 'terminate_process' || cmd.type === 'process_terminate') && alertContext?.alertDetails?.event_data) {
-        const ed = alertContext.alertDetails.event_data;
-        const proc = (ed.Image?.split('\\').pop() || ed.ProcessName || ed.OriginalFileName || '') as string;
-        if (proc) defaults[`${idx}_process_name`] = proc;
-      }
     });
+
     setCmdParams(defaults);
   };
 
   const confirmExecution = async () => {
     if (!agentIdInput || !selectedPlaybook) {
       alert("Please provide a valid Target Agent ID");
+      return;
+    }
+
+    // Pre-flight: check all required fields are filled
+    const missing: string[] = [];
+    selectedPlaybook.commands.forEach((cmd, idx) => {
+      const defs = COMMAND_PARAMS[cmd.type] || [];
+      defs.forEach(pd => {
+        if (pd.required && !cmdParams[`${idx}_${pd.key}`]?.trim()) {
+          missing.push(`Step ${idx + 1} (${cmd.type}) - ${pd.label}`);
+        }
+      });
+    });
+    if (missing.length > 0) {
+      alert(`Please fill in the required fields before executing:\n\n- ${missing.join("\n- ")}`);
       return;
     }
     setIsExecuting(true);
@@ -216,14 +262,18 @@ export function PlaybooksPage() {
 
       switch (cmd.type) {
         // ── Real DB command types ───────────────────────────────────────
-        case 'terminate_process':  params = { process_name: p('process_name') || 'suspicious.exe', kill_tree: 'true' }; break;
-        case 'quarantine_file':    params = { file_path: p('file_path') || 'C:\\Windows\\Temp' }; break;
-        case 'run_cmd':            params = { cmd: p('cmd') }; break;
-        case 'collect_logs':       params = { log_types: p('log_types') || 'System,Security' }; break;
-        case 'scan_file':          params = { file_path: p('file_path') || 'C:\\Windows\\Temp' }; break;
-        case 'collect_forensics':  params = { event_types: p('event_types') || 'process,file,network,registry', max_events: p('max_events') || '1000' }; break;
-        case 'update_signatures':  params = { url: p('url') }; break;
-        case 'filesystem_timeline':params = { window_hours: p('window_hours') || '24' }; break;
+        // For each type: use the user-edited value from state (p(key)),
+        // then fall back to the DB-stored default (cmd.params), then a
+        // hardcoded safe fallback. This means every command runs without
+        // the analyst typing anything when defaults are pre-loaded from DB.
+        case 'terminate_process':  params = { process_name: p('process_name') || String(cmd.params?.process_name || 'suspicious.exe'), kill_tree: 'true' }; break;
+        case 'quarantine_file':    params = { file_path: p('file_path') || String(cmd.params?.file_path || 'C:\\Windows\\Temp') }; break;
+        case 'run_cmd':            params = { cmd: p('cmd') || String(cmd.params?.cmd || '') }; break;
+        case 'collect_logs':       params = { log_types: p('log_types') || String(cmd.params?.log_types || 'System,Security') }; break;
+        case 'scan_file':          params = { file_path: p('file_path') || String(cmd.params?.file_path || 'C:\\Windows\\Temp') }; break;
+        case 'collect_forensics':  params = { event_types: p('event_types') || String(cmd.params?.event_types || 'process,file,network,registry'), max_events: p('max_events') || String(cmd.params?.max_events || '1000') }; break;
+        case 'update_signatures':  params = { url: p('url') || String(cmd.params?.url || '') }; break;
+        case 'filesystem_timeline':params = { window_hours: p('window_hours') || String(cmd.params?.window_hours || '24') }; break;
         case 'isolate_network':
         case 'unisolate_network':
         case 'memory_dump':
@@ -234,13 +284,17 @@ export function PlaybooksPage() {
         case 'network_last_seen':  params = {}; break;
         // ── Legacy type aliases ─────────────────────────────────────────
         case 'network_isolate':   mappedType = 'isolate_network'; break;
-        case 'process_terminate': mappedType = 'terminate_process'; params = { process_name: p('process_name') || 'suspicious.exe', kill_tree: 'true' }; break;
+        case 'process_terminate': mappedType = 'terminate_process'; params = { process_name: p('process_name') || String(cmd.params?.process_name || 'suspicious.exe'), kill_tree: 'true' }; break;
         case 'forensic_dump':     mappedType = 'collect_forensics'; params = { event_types: 'process,file,network,registry', max_events: '1000' }; break;
-        case 'device_unmount':    mappedType = 'run_cmd'; params = { cmd: 'powershell -Command "Get-Volume | Where-Object DriveType -eq Removable | Dismount-Volume"' }; break;
+        case 'device_unmount':    mappedType = 'run_cmd'; params = { cmd: 'powershell -Command "Get-Volume | Where-Object {$_.DriveType -eq \'Removable\'} | Dismount-Volume -Confirm:$false"', from_playbook: 'true' }; break;
         case 'log_pull':          mappedType = 'collect_logs'; params = { log_types: 'System,Security' }; break;
-        case 'yara_scan':         mappedType = 'scan_file'; params = { file_path: p('file_path') || 'C:\\Windows\\Temp' }; break;
+        case 'yara_scan':         mappedType = 'scan_file'; params = { file_path: p('file_path') || String(cmd.params?.file_path || 'C:\\Windows\\Temp') }; break;
         case 'registry_query':    mappedType = 'run_cmd'; params = { cmd: 'reg query HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Run' }; break;
       }
+
+      // Inject playbook context marker so the agent routes through the
+      // elevated playbookAllowedCommands whitelist, not the interactive one.
+      params.from_playbook = "true";
 
       try {
         await agentsApi.executeCommand(agentIdInput, {
@@ -563,23 +617,71 @@ export function PlaybooksPage() {
                   selectedPlaybook.commands.forEach((cmd, idx) => {
                     const defs = COMMAND_PARAMS[cmd.type] || [];
                     defs.forEach(pd => {
+                      const currentVal  = cmdParams[`${idx}_${pd.key}`] || '';
+                      const dbDefault   = String(cmd.params?.[pd.key] || '');
+                      const hasDbValue  = !!dbDefault && !dbDefault.startsWith('${');
+
+                      // "From Alert": required field, filled from alert context (not from DB)
+                      const isFromAlert  = pd.required && !!currentVal && currentVal !== dbDefault;
+                      // "Auto-filled": non-required field that has a DB default (read-only)
+                      const isAutoFilled = !pd.required && hasDbValue && currentVal === dbDefault;
+                      // "Empty required": required field with nothing entered yet
+                      const isEmpty      = pd.required && !currentVal.trim();
+
                       inputs.push(
                         <div key={`${idx}-${pd.key}`}>
                           <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-1.5">
-                            Step {idx + 1} — {pd.label}
+                            Step {idx + 1} &mdash; {pd.label}
                             {pd.required && <span className="text-rose-500 ml-1">*</span>}
                             <span className="text-xs font-normal text-slate-400 ml-2">({cmd.type})</span>
+                            {isFromAlert && (
+                              <span className="ml-2 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 rounded">
+                                From Alert
+                              </span>
+                            )}
+                            {isAutoFilled && (
+                              <span className="ml-2 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 rounded">
+                                Auto-filled
+                              </span>
+                            )}
                           </label>
                           <div className="relative">
                             <input
                               type="text"
-                              value={cmdParams[`${idx}_${pd.key}`] || ''}
+                              value={currentVal}
                               onChange={e => setCmdParams(prev => ({ ...prev, [`${idx}_${pd.key}`]: e.target.value }))}
                               placeholder={pd.placeholder}
-                              className="w-full bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-lg px-4 py-2.5 text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none text-sm pl-10"
+                              readOnly={isAutoFilled}
+                              className={`w-full bg-white dark:bg-slate-950 border rounded-lg px-4 py-2.5 text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none text-sm pl-10 transition-colors ${
+                                isAutoFilled
+                                  ? "border-emerald-300 dark:border-emerald-700 bg-emerald-50 dark:bg-emerald-900/10 text-slate-600 dark:text-slate-400 cursor-default"
+                                  : isEmpty
+                                    ? "border-rose-300 dark:border-rose-600 focus:ring-rose-400"
+                                    : isFromAlert
+                                      ? "border-amber-300 dark:border-amber-600"
+                                      : "border-slate-300 dark:border-slate-700"
+                              }`}
                             />
                             <Terminal className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
                           </div>
+                          {isAutoFilled && (
+                            <p className="text-xs text-emerald-600 dark:text-emerald-400 mt-1 flex items-center gap-1">
+                              <CheckCircle className="w-3 h-3" />
+                              Pre-loaded from playbook - click to override.
+                            </p>
+                          )}
+                          {isFromAlert && (
+                            <p className="text-xs text-amber-600 dark:text-amber-400 mt-1 flex items-center gap-1">
+                              <AlertTriangle className="w-3 h-3" />
+                              Auto-filled from alert context - review and confirm.
+                            </p>
+                          )}
+                          {isEmpty && (
+                            <p className="text-xs text-rose-600 dark:text-rose-400 mt-1 flex items-center gap-1">
+                              <AlertTriangle className="w-3 h-3" />
+                              Required - enter a value to proceed.
+                            </p>
+                          )}
                         </div>
                       );
                     });

@@ -19,8 +19,8 @@ INSERT INTO response_playbooks (id, name, description, category, commands, mitre
  'Automatically unmounts unauthorized mass storage devices and pulls recent file system logs to track potential exfiltration.',
  'remediation',
  '[
-    {"type": "run_cmd", "timeout": 15, "description": "Force unmount untrusted USB storage volume"},
-    {"type": "collect_logs", "timeout": 60, "description": "Retrieve Windows Event Logs for Device insertions"}
+    {"type": "run_cmd", "timeout": 15, "description": "Force unmount untrusted USB storage volume", "params": {"cmd": "powershell -Command \"Get-Volume | Where-Object DriveType -eq Removable | Dismount-Volume\""}},
+    {"type": "collect_logs", "timeout": 60, "description": "Retrieve Windows Event Logs for Device insertions", "params": {"log_types": "System,Security"}}
  ]'::jsonb,
  ARRAY['T1091', 'T1052'],
  true, NOW(), NOW()),
@@ -30,8 +30,8 @@ INSERT INTO response_playbooks (id, name, description, category, commands, mitre
  'Executes a comprehensive YARA scan and queries the registry for persistence mechanisms.',
  'investigation',
  '[
-    {"type": "scan_file", "timeout": 600, "description": "Run full YARA signature scan on recent file modifications"},
-    {"type": "run_cmd", "timeout": 120, "description": "Analyze Run/RunOnce keys and Scheduled Tasks"}
+    {"type": "scan_file", "timeout": 600, "description": "Run full YARA signature scan on recent file modifications", "params": {"file_path": "C:\\Windows\\Temp"}},
+    {"type": "run_cmd", "timeout": 120, "description": "Analyze Run/RunOnce keys and Scheduled Tasks", "params": {"cmd": "reg query HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Run"}}
  ]'::jsonb,
  ARRAY['T1547', 'T1053'],
  true, NOW(), NOW())

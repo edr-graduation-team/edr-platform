@@ -154,9 +154,7 @@ var playbookAllowedCommands = map[string]bool{
 	"icacls":     true, // permission inspection
 	// USB / storage remediation:
 	// mountvol <DriveLetter>\ /D  — eject a removable volume by drive letter.
-	// This is the preferred USB-unmount method: deterministic, no interactive
-	// prompt, and does not require PS Dismount-Volume (which exits with code 1
-	// in non-interactive sessions unless -Confirm:$false is explicitly passed).
+	// Preferred when drive letter is known. Does not require admin or PS Storage module.
 	"mountvol": true,
 }
 
@@ -1383,6 +1381,17 @@ func (h *Handler) collectFileHashForensics(ctx context.Context, filePath string)
 func (h *Handler) collectEventLogAsJSON(ctx context.Context, channel string, logType string, lookbackMs int64, maxEvents int) ([]map[string]any, error) {
 	ps := powershellExePath()
 
+	// Use a dedicated timeout for the PowerShell Get-WinEvent call.
+	// The Security log can be very large; 90 s is enough to collect up to
+	// ~500 events via XPath filter without racing the outer command deadline.
+	// Other logs (System, Application) get 45 s which is more than sufficient.
+	psTTL := 45 * time.Second
+	if strings.EqualFold(channel, "Security") {
+		psTTL = 90 * time.Second
+	}
+	psCtx, psCancel := context.WithTimeout(context.Background(), psTTL)
+	defer psCancel()
+
 	script := fmt.Sprintf(`$ErrorActionPreference='Stop';
 $ms=%d;
 $log=%q;
@@ -1403,7 +1412,7 @@ foreach ($e in $events) {
 }
 $out | ConvertTo-Json -Depth 6 -Compress;`, lookbackMs, channel, maxEvents, strings.ToLower(logType))
 
-	out, err := exec.CommandContext(ctx, ps, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script).CombinedOutput()
+	out, err := exec.CommandContext(psCtx, ps, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script).CombinedOutput()
 	if err != nil {
 		return nil, fmt.Errorf("powershell get-winevent failed: %v: %s", err, string(out))
 	}
@@ -2137,6 +2146,58 @@ func parseCommandLine(cmd string) []string {
 	}
 	return tokens
 }
+// ejectUSBDrivesNative enumerates removable drives via wmic and calls
+// mountvol /D for each one.  It never returns an error so the playbook step
+// always succeeds — if no USB is present it simply says so.
+func ejectUSBDrivesNative(ctx context.Context, log *logging.Logger) (string, error) {
+	// Step 1: list removable drives (DriveType=2) using wmic.
+	wmicCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(wmicCtx,
+		"wmic", "logicaldisk", "where", "DriveType=2",
+		"get", "DeviceID", "/format:value").CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("wmic failed to list removable drives: %w (output: %s)", err, string(out))
+	}
+
+	// Parse lines like "DeviceID=E:"
+	var drives []string
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(strings.ToUpper(line), "DEVICEID=") {
+			letter := strings.TrimSpace(line[len("DEVICEID="):])
+			if letter != "" {
+				drives = append(drives, letter)
+			}
+		}
+	}
+
+	if len(drives) == 0 {
+		log.Infof("[C2] USB eject: no removable drives found")
+		return "No removable USB drives detected — nothing to eject.", nil
+	}
+
+	// Step 2: eject each drive with mountvol <letter>\ /D
+	var results []string
+	for _, d := range drives {
+		mountPath := d + `\`
+		mvCtx, mvCancel := context.WithTimeout(ctx, 10*time.Second)
+		mvOut, mvErr := exec.CommandContext(mvCtx, "mountvol", mountPath, "/D").CombinedOutput()
+		mvCancel()
+		if mvErr != nil {
+			msg := fmt.Sprintf("eject %s FAILED: %v (output: %s)", d, mvErr, strings.TrimSpace(string(mvOut)))
+			log.Warnf("[C2] USB eject: %s", msg)
+			results = append(results, msg)
+		} else {
+			msg := fmt.Sprintf("ejected %s OK", d)
+			log.Infof("[C2] USB eject: %s", msg)
+			results = append(results, msg)
+		}
+	}
+
+	return "USB eject results: " + strings.Join(results, "; "), nil
+}
+
 // runCommand executes a diagnostic command from a strict whitelist.
 //
 // R5 FIX: The previous implementation passed raw user input to cmd.exe /C,
@@ -2156,6 +2217,15 @@ func (h *Handler) runCommand(ctx context.Context, params map[string]string) (str
 	if cmdStr == "" {
 		return "", fmt.Errorf("cmd parameter is required")
 	}
+
+	// ── Native USB ejection ──────────────────────────────────────────────────
+	// The magic token __EJECT_USB__ bypasses the PS whitelist entirely and
+	// uses Go + wmic + mountvol to safely eject all removable drives.
+	// This avoids all PowerShell exit-code / parsing ambiguity.
+	if strings.EqualFold(cmdStr, "__EJECT_USB__") {
+		return ejectUSBDrivesNative(ctx, h.logger)
+	}
+
 
 	// Parse into executable + arguments respecting double-quoted tokens.
 	// strings.Fields naively splits on whitespace and would shred:
@@ -2216,13 +2286,33 @@ func (h *Handler) runCommand(ctx context.Context, params map[string]string) (str
 		for i, arg := range parts[1:] {
 			argL := strings.ToLower(strings.TrimLeft(arg, "-/"))
 			if argL == "command" || argL == "c" {
-				cmdIdx := i + 2 // 0-based over parts[1:] ? real index in parts
+				cmdIdx := i + 2 // 0-based over parts[1:] → real index in parts
 				if cmdIdx < len(parts) {
 					inlineScript := strings.Join(parts[cmdIdx:], " ")
 					parts = append(parts[:cmdIdx], inlineScript)
 				}
 				break
 			}
+		}
+
+		// Always inject -NoProfile -NonInteractive before -Command so that
+		// user PowerShell profile scripts cannot interfere with the command
+		// or alter $ErrorActionPreference / exit behaviour.
+		// Only inject if not already present (respect caller intent).
+		hasNoProfile := false
+		for _, a := range parts[1:] {
+			if strings.EqualFold(strings.TrimLeft(a, "-/"), "noprofile") || strings.EqualFold(strings.TrimLeft(a, "-/"), "nop") {
+				hasNoProfile = true
+				break
+			}
+		}
+		if !hasNoProfile {
+			// Insert after parts[0] (the exe): powershell -NoProfile -NonInteractive <rest>
+			injected := make([]string, 0, len(parts)+2)
+			injected = append(injected, parts[0])
+			injected = append(injected, "-NoProfile", "-NonInteractive")
+			injected = append(injected, parts[1:]...)
+			parts = injected
 		}
 	}
 
@@ -2248,6 +2338,8 @@ func (h *Handler) runCommand(ctx context.Context, params map[string]string) (str
 
 	output, err := execCmd.CombinedOutput()
 	if err != nil {
+		// Log the actual command output so the error is visible in the agent log.
+		h.logger.Errorf("[C2] run_cmd FAILED output: %s", strings.TrimSpace(string(output)))
 		// A context-cancellation race after natural process exit is benign -
 		// the process finished cleanly but Go's cleanup raced the context cancel.
 		if timeoutCtx.Err() != nil && len(output) > 0 {

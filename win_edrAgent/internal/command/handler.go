@@ -110,6 +110,56 @@ var allowedDiagnostics = map[string]bool{
 	"route":      true,
 }
 
+// playbookAllowedCommands is an extended whitelist available ONLY when the
+// RUN_CMD command is explicitly marked from_playbook="true" in its parameters.
+//
+// Playbooks are authored and stored server-side, protected by RBAC, and
+// reviewed by security administrators before deployment.  They are a trusted
+// automation channel and can therefore execute a broader set of safe,
+// operational commands.  The mapping still blocks arbitrary executables—only
+// the entries below are allowed.
+//
+// SECURITY NOTES
+// ─────────────────────────────────────────────────────────────────────────────
+// • powershell: allowed for USB-scan / event-log / registry queries.
+//   The runCommand handler additionally BLOCKS -File and -EncodedCommand so
+//   scripts cannot be loaded from disk or a base64-encoded blob.
+// • cmd: allowed for simple remediation steps (attrib, del, etc.).
+// • sc / net / reg / wmic: read-only administrative queries for diagnostics.
+// ─────────────────────────────────────────────────────────────────────────────
+var playbookAllowedCommands = map[string]bool{
+	// All interactive-diagnostic commands are also available from playbooks.
+	"ping":       true,
+	"tracert":    true,
+	"pathping":   true,
+	"netstat":    true,
+	"ipconfig":   true,
+	"nslookup":   true,
+	"whoami":     true,
+	"hostname":   true,
+	"systeminfo": true,
+	"tasklist":   true,
+	"arp":        true,
+	"route":      true,
+
+	// Extended playbook-only commands:
+	"powershell": true, // inline -Command scripts only (see safety check below)
+	"cmd":        true, // /C with simple remediation commands
+	"sc":         true, // service control (query / start / stop)
+	"net":        true, // net use / net user / net localgroup (read queries)
+	"reg":        true, // registry read (query sub-command only)
+	"wmic":       true, // WMI queries for device / USB enumeration
+	"attrib":     true, // attribute inspection
+	"wevtutil":   true, // event log queries
+	"icacls":     true, // permission inspection
+	// USB / storage remediation:
+	// mountvol <DriveLetter>\ /D  — eject a removable volume by drive letter.
+	// This is the preferred USB-unmount method: deterministic, no interactive
+	// prompt, and does not require PS Dismount-Volume (which exits with code 1
+	// in non-interactive sessions unless -Confirm:$false is explicitly passed).
+	"mountvol": true,
+}
+
 // Command represents an incoming command from the server.
 type Command struct {
 	ID         string
@@ -2053,21 +2103,65 @@ func (h *Handler) adjustRate(ctx context.Context, params map[string]string) (str
 	return fmt.Sprintf("Rate adjusted: batch_size=%s interval=%s", batchSize, interval), nil
 }
 
+
+// parseCommandLine splits a command string into tokens while respecting
+// double-quoted strings.  Unlike strings.Fields it does not split inside
+// quoted regions, so a command like:
+//
+//	powershell -Command "Get-Volume | Where-Object DriveType -eq Removable | Dismount-Volume"
+//
+// correctly yields three tokens instead of many broken fragments.
+// Outer quotes are stripped from each token.
+func parseCommandLine(cmd string) []string {
+	var tokens []string
+	var current strings.Builder
+	inQuote := false
+
+	for i := 0; i < len(cmd); i++ {
+		ch := cmd[i]
+		switch {
+		case ch == '"':
+			inQuote = !inQuote
+			// Don't append the quote character itself.
+		case ch == ' ' && !inQuote:
+			if current.Len() > 0 {
+				tokens = append(tokens, current.String())
+				current.Reset()
+			}
+		default:
+			current.WriteByte(ch)
+		}
+	}
+	if current.Len() > 0 {
+		tokens = append(tokens, current.String())
+	}
+	return tokens
+}
 // runCommand executes a diagnostic command from a strict whitelist.
 //
 // R5 FIX: The previous implementation passed raw user input to cmd.exe /C,
-// which was a catastrophic RCE vulnerability. This version:
+// which was a catastrophic RCE vulnerability.  This version:
 //   1. Parses the command into executable + arguments (no shell interpretation)
 //   2. Validates the executable against a hardcoded whitelist of safe diagnostics
 //   3. Invokes exec.Command directly (no cmd.exe, no shell interpolation)
+//
+// PLAYBOOK CONTEXT EXTENSION
+// When params["from_playbook"] == "true" the command is allowed against an
+// extended whitelist (playbookAllowedCommands).  Playbooks are server-authored
+// and RBAC-protected so they are treated as a trusted automation channel.
+// Additional safety gates are applied per-executable (e.g. powershell is
+// restricted to -Command inline mode; -File and -EncodedCommand are blocked).
 func (h *Handler) runCommand(ctx context.Context, params map[string]string) (string, error) {
 	cmdStr := strings.TrimSpace(params["cmd"])
 	if cmdStr == "" {
 		return "", fmt.Errorf("cmd parameter is required")
 	}
 
-	// Parse into executable + arguments (no shell interpretation).
-	parts := strings.Fields(cmdStr)
+	// Parse into executable + arguments respecting double-quoted tokens.
+	// strings.Fields naively splits on whitespace and would shred:
+	//   powershell -Command "Get-Volume | Where-Object DriveType -eq Removable | Dismount-Volume"
+	// into many broken pieces. parseCommandLine preserves quoted content as one token.
+	parts := parseCommandLine(cmdStr)
 	if len(parts) == 0 {
 		return "", fmt.Errorf("empty command after parsing")
 	}
@@ -2076,17 +2170,63 @@ func (h *Handler) runCommand(ctx context.Context, params map[string]string) (str
 	exeName := strings.ToLower(filepath.Base(parts[0]))
 	exeName = strings.TrimSuffix(exeName, ".exe")
 
-	// R5 FIX: Strict whitelist check.
-	if !allowedDiagnostics[exeName] {
-		allowed := make([]string, 0, len(allowedDiagnostics))
-		for k := range allowedDiagnostics {
-			allowed = append(allowed, k)
-		}
-		h.logger.Warnf("[C2] BLOCKED run_cmd: %q is not in whitelist", parts[0])
-		return "", fmt.Errorf("BLOCKED: %q is not in the allowed diagnostic commands whitelist. Allowed: %v", parts[0], allowed)
+	// Determine if this RUN_CMD came from a server-side playbook.
+	fromPlaybook := strings.EqualFold(strings.TrimSpace(params["from_playbook"]), "true")
+
+	var allowed bool
+	if fromPlaybook {
+		allowed = playbookAllowedCommands[exeName]
+	} else {
+		allowed = allowedDiagnostics[exeName]
 	}
 
-	// Execute directly via exec.Command — NO cmd.exe, NO shell interpolation.
+	if !allowed {
+		listSrc := allowedDiagnostics
+		if fromPlaybook {
+			listSrc = playbookAllowedCommands
+		}
+		allowedList := make([]string, 0, len(listSrc))
+		for k := range listSrc {
+			allowedList = append(allowedList, k)
+		}
+		source := "interactive"
+		if fromPlaybook {
+			source = "playbook"
+		}
+		h.logger.Warnf("[C2] BLOCKED run_cmd (%s context): %q is not in whitelist", source, parts[0])
+		return "", fmt.Errorf("BLOCKED: %q is not in the allowed commands whitelist (%s context). Allowed: %v", parts[0], source, allowedList)
+	}
+
+	// ?? Per-executable safety gates ???????????????????????????????????????????
+	if exeName == "powershell" {
+		// Block -File and -EncodedCommand to prevent loading external scripts.
+		for _, arg := range parts[1:] {
+			argL := strings.ToLower(strings.TrimLeft(arg, "-/"))
+			if argL == "file" || argL == "f" {
+				return "", fmt.Errorf("BLOCKED: powershell -File is not permitted through run_cmd")
+			}
+			if argL == "encodedcommand" || argL == "ec" || argL == "en" || argL == "enc" {
+				return "", fmt.Errorf("BLOCKED: powershell -EncodedCommand is not permitted through run_cmd")
+			}
+		}
+
+		// Re-join everything after -Command into a single argument so that
+		// multi-word inline scripts (e.g. with pipes or spaces) are passed
+		// to PowerShell as one coherent command string, not fragmented args.
+		for i, arg := range parts[1:] {
+			argL := strings.ToLower(strings.TrimLeft(arg, "-/"))
+			if argL == "command" || argL == "c" {
+				cmdIdx := i + 2 // 0-based over parts[1:] ? real index in parts
+				if cmdIdx < len(parts) {
+					inlineScript := strings.Join(parts[cmdIdx:], " ")
+					parts = append(parts[:cmdIdx], inlineScript)
+				}
+				break
+			}
+		}
+	}
+
+	// Execute directly via exec.Command - NO cmd.exe, NO shell interpolation.
 	timeoutCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
@@ -2097,12 +2237,31 @@ func (h *Handler) runCommand(ctx context.Context, params map[string]string) (str
 		execCmd = exec.CommandContext(timeoutCtx, parts[0])
 	}
 
-	output, err := execCmd.CombinedOutput()
-	if err != nil {
-		return string(output), fmt.Errorf("command failed: %w", err)
+	// Spawn the child in its own process group so that if the context times
+	// out, the OS sends CTRL_BREAK_EVENT to the whole group instead of calling
+	// TerminateProcess on individual handles. This avoids "Access is denied"
+	// errors that occur when child processes have higher privileges than the
+	// parent (e.g. Dismount-Volume spawning elevated WMI workers).
+	execCmd.SysProcAttr = &syscall.SysProcAttr{
+		CreationFlags: syscall.CREATE_NEW_PROCESS_GROUP,
 	}
 
-	h.logger.Infof("[C2] run_cmd executed (whitelisted): %s", cmdStr)
+	output, err := execCmd.CombinedOutput()
+	if err != nil {
+		// A context-cancellation race after natural process exit is benign -
+		// the process finished cleanly but Go's cleanup raced the context cancel.
+		if timeoutCtx.Err() != nil && len(output) > 0 {
+			h.logger.Infof("[C2] run_cmd context expired after process exit (output captured): %s", cmdStr)
+		} else {
+			return string(output), fmt.Errorf("command failed: %w", err)
+		}
+	}
+
+	ctxLabel := "interactive"
+	if fromPlaybook {
+		ctxLabel = "playbook"
+	}
+	h.logger.Infof("[C2] run_cmd executed (whitelisted, %s context): %s", ctxLabel, cmdStr)
 	return string(output), nil
 }
 

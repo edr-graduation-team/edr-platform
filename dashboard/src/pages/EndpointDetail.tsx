@@ -258,6 +258,11 @@ export default function EndpointDetail() {
         queryKey: ['agent', agentId],
         queryFn: () => agentsApi.get(agentId),
         enabled: !!agentId,
+        // Poll every 30 s so the displayed online/offline status stays in sync
+        // with the live backend. Without this, a cached last_seen value can age
+        // past the staleness threshold and incorrectly show the agent as offline.
+        refetchInterval: 30_000,
+        refetchIntervalInBackground: false,
     });
 
     const { data: riskPayload } = useQuery({
@@ -280,12 +285,20 @@ export default function EndpointDetail() {
         queryKey: ['agent-commands', agentId, 'response'],
         queryFn: () => agentsApi.getCommands(agentId, { limit: 100 }),
         enabled: !!agentId && tab === 'response',
+        // Poll every 8 s so command statuses (pending → completed/failed) update
+        // in real-time without the analyst needing to manually refresh.
+        refetchInterval: tab === 'response' ? 8_000 : false,
+        refetchIntervalInBackground: false,
     });
 
     const { data: quarantineData, isLoading: qLoading } = useQuery({
         queryKey: ['agent-quarantine', agentId],
         queryFn: () => agentsApi.listQuarantine(agentId, { include_resolved: true }),
         enabled: !!agentId && tab === 'quarantine',
+        // Poll every 5 s so auto-quarantine events from the agent appear in the
+        // dashboard within seconds rather than 2-3 minutes.
+        refetchInterval: tab === 'quarantine' ? 5_000 : false,
+        refetchIntervalInBackground: false,
     });
 
     const { data: eventsPayload } = useQuery({

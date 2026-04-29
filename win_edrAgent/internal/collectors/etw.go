@@ -267,13 +267,35 @@ func goFileIoEvent(evt *C.ParsedFileIoEvent) {
 
 // kernelPathToWin32 converts a kernel device path to a Win32 drive-letter path.
 // ETW FileIo events use NT device paths; os.Stat/os.Rename require Win32 paths.
+//
+// The device map is refreshed every 60 seconds via a background goroutine so
+// that volumes mounted AFTER agent startup (e.g. OneDrive Known Folder Move,
+// network drives, USB insertions) are always covered. Using sync.Once caused
+// Desktop paths to fail conversion when the OneDrive volume appeared after
+// the initial snapshot, returning the raw \Device\HarddiskVolumeN path which
+// did NOT match monitoredPath() → responder was silently skipped for Desktop.
 var (
-	devMapOnce sync.Once
-	devMapMu   sync.RWMutex
-	devMap     map[string]string // lowercase \device\harddiskvolumen → "C:"
+	devMapMu  sync.RWMutex
+	devMap    map[string]string // lowercase \device\harddiskvolumen → "C:"
+	devMapInit sync.Once        // ensures the refresh goroutine starts exactly once
 )
 
-func buildDevMap() {
+// startDevMapRefresher starts a goroutine that refreshes the device map
+// immediately and then every 60 seconds. Must be called once.
+func startDevMapRefresher() {
+	devMapInit.Do(func() {
+		refreshDevMap() // populate synchronously before first use
+		go func() {
+			ticker := time.NewTicker(60 * time.Second)
+			defer ticker.Stop()
+			for range ticker.C {
+				refreshDevMap()
+			}
+		}()
+	})
+}
+
+func refreshDevMap() {
 	m := make(map[string]string, 26)
 	var buf [512]uint16
 	for c := 'A'; c <= 'Z'; c++ {
@@ -298,19 +320,34 @@ func buildDevMap() {
 
 func kernelPathToWin32(p string) string {
 	low := strings.ToLower(p)
+
 	// Already a Win32 path (e.g. "C:\...")
 	if len(p) >= 3 && p[1] == ':' {
 		return p
 	}
-	// NT prefix \??\ (e.g. \??\C:\Users\...)
+
+	// NT global-root prefix \??\C:\... or \\?\\C:\...
 	if strings.HasPrefix(low, `\??\`) && len(p) > 4 {
-		return p[4:]
+		rest := p[4:]
+		if len(rest) >= 3 && rest[1] == ':' {
+			return rest
+		}
 	}
+	if strings.HasPrefix(low, `\\?\`) && len(p) > 4 {
+		rest := p[4:]
+		if len(rest) >= 3 && rest[1] == ':' {
+			return rest
+		}
+	}
+
 	// Kernel device path \Device\HarddiskVolumeN\...
 	if !strings.HasPrefix(low, `\device\`) {
-		return p
+		return p // UNC or unknown — return as-is
 	}
-	devMapOnce.Do(buildDevMap)
+
+	// Ensure the map is populated (and the refresh goroutine is running).
+	startDevMapRefresher()
+
 	devMapMu.RLock()
 	m := devMap
 	devMapMu.RUnlock()
@@ -319,7 +356,17 @@ func kernelPathToWin32(p string) string {
 			return drive + p[len(dev):]
 		}
 	}
-	return p
+	// Fallback: volume not yet in map — trigger an immediate refresh and retry.
+	refreshDevMap()
+	devMapMu.RLock()
+	m = devMap
+	devMapMu.RUnlock()
+	for dev, drive := range m {
+		if strings.HasPrefix(low, dev) {
+			return drive + p[len(dev):]
+		}
+	}
+	return p // still unmapped — return kernel path unchanged
 }
 
 func wcharToGo(p *C.WCHAR, max int) string {

@@ -1,7 +1,16 @@
 import type { Agent } from '../api/client';
 
-/** Matches server-side sweeper / Device Management list behavior (1 minute). */
-export const STALE_THRESHOLD_MS = 60 * 1000;
+/**
+ * Frontend staleness window.
+ * The backend sweeper marks agents offline after 1 minute of no last_seen update.
+ * We give the frontend 3× that window (3 min) as headroom for:
+ *   - Network round-trip latency on the API /agents/:id fetch
+ *   - The dashboard query not refetching continuously
+ *   - Minor clock drift between agent host and server
+ * If the backend has already swept the agent to "offline", that status
+ * comes back from the API and is displayed as-is (no override needed).
+ */
+export const STALE_THRESHOLD_MS = 3 * 60 * 1000; // 3 minutes
 
 export function formatRelativeTime(timestamp: string): string {
     const diff = Date.now() - new Date(timestamp).getTime();

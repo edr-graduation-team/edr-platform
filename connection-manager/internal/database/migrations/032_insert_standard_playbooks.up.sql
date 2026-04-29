@@ -12,21 +12,21 @@ INSERT INTO response_playbooks (name, description, category, severity_filter, ru
    {
      "type": "isolate_network",
      "timeout": 300,
-     "description": "عزل الشبكة فوراً",
+     "description": "Isolate endpoint from network immediately",
      "on_failure": "stop"
    },
    {
      "type": "collect_forensics",
      "params": {"event_types": "process,file,network,dns,registry", "max_events": "1000"},
      "timeout": 900,
-     "description": "جمع الأدلة الرقمية",
+     "description": "Collect digital forensic evidence",
      "on_failure": "continue"
    },
    {
      "type": "quarantine_file",
-     "params": {"file_path": "${suspicious_file}"},
+     "params": {"file_path": "C:\\Windows\\Temp"},
      "timeout": 300,
-     "description": "عزل الملفات المشبوهة",
+     "description": "Quarantine suspicious file (override path as needed)",
      "on_failure": "continue"
    }
  ]'::jsonb,
@@ -43,27 +43,27 @@ INSERT INTO response_playbooks (name, description, category, severity_filter, ru
    {
      "type": "isolate_network",
      "timeout": 300,
-     "description": "عزل فوري للشبكة",
+     "description": "Isolate endpoint immediately",
      "on_failure": "stop"
    },
    {
      "type": "terminate_process",
-     "params": {"process_name": "${ransomware_process}", "kill_tree": "true"},
+     "params": {"process_name": "vssadmin.exe", "kill_tree": "true"},
      "timeout": 300,
-     "description": "إنهاء عملية الفدية",
+     "description": "Terminate ransomware process (override name as needed)",
      "on_failure": "continue"
    },
    {
      "type": "collect_forensics",
      "params": {"event_types": "process,file,registry", "max_events": "2000"},
      "timeout": 1200,
-     "description": "جمع الأدلة الشاملة",
+     "description": "Collect comprehensive forensic evidence",
      "on_failure": "continue"
    },
    {
      "type": "memory_dump",
      "timeout": 1800,
-     "description": "أخذ نسخة كاملة من الذاكرة",
+     "description": "Capture full memory snapshot",
      "on_failure": "continue"
    }
  ]'::jsonb,
@@ -152,29 +152,29 @@ INSERT INTO response_playbooks (name, description, category, severity_filter, ru
  '[
    {
      "type": "terminate_process",
-     "params": {"process_name": "${malware_process}", "kill_tree": "true"},
+     "params": {"process_name": "suspicious.exe", "kill_tree": "true"},
      "timeout": 300,
-     "description": "إنهاء العملية الخبيثة",
+     "description": "Terminate malicious process (override name as needed)",
      "on_failure": "continue"
    },
    {
      "type": "quarantine_file",
-     "params": {"file_path": "${malware_file}"},
+     "params": {"file_path": "C:\\Windows\\Temp"},
      "timeout": 300,
-     "description": "عزل الملف الخبيث",
+     "description": "Quarantine malicious file (override path as needed)",
      "on_failure": "continue"
    },
    {
      "type": "update_signatures",
-     "params": {"url": "${signature_url}"},
+     "params": {"url": ""},
      "timeout": 600,
-     "description": "تحديث قواعد التوقيع",
+     "description": "Update threat signature database",
      "on_failure": "continue"
    },
    {
      "type": "unisolate_network",
      "timeout": 300,
-     "description": "إعادة الاتصال بالشبكة",
+     "description": "Restore network connectivity after remediation",
      "on_failure": "continue"
    }
  ]'::jsonb,

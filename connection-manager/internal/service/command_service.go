@@ -36,18 +36,33 @@ func NewCommandService(
 
 // ExecutePlaybookCommand executes a command from a playbook
 func (s *CommandService) ExecutePlaybookCommand(ctx context.Context, executionID uuid.UUID, cmd models.PlaybookCommand, agentID uuid.UUID) *CommandResult {
+	// Inject the playbook-context marker into run_cmd parameters so the agent
+	// grants this command access to the extended playbookAllowedCommands
+	// whitelist (which includes powershell -Command and other safe ops).
+	// This is safe because playbooks are server-authored and RBAC-protected.
+	params := cmd.Parameters
+	if models.CommandType(cmd.Type) == "run_cmd" {
+		if params == nil {
+			params = make(map[string]interface{})
+		}
+		// Only inject when not already present (respect playbook author intent).
+		if _, exists := params["from_playbook"]; !exists {
+			params["from_playbook"] = "true"
+		}
+	}
+
 	// Convert playbook command to system command
 	command := &models.Command{
-		AgentID:      agentID,
-		CommandType:  models.CommandType(cmd.Type),
-		Parameters:    cmd.Parameters,
+		AgentID:        agentID,
+		CommandType:    models.CommandType(cmd.Type),
+		Parameters:     params,
 		TimeoutSeconds: cmd.Timeout,
-		Status:        models.CommandStatusPending,
-		IssuedAt:     time.Now(),
-		ExpiresAt:    time.Now().Add(time.Duration(cmd.Timeout) * time.Second),
+		Status:         models.CommandStatusPending,
+		IssuedAt:       time.Now(),
+		ExpiresAt:      time.Now().Add(time.Duration(cmd.Timeout) * time.Second),
 		Metadata: map[string]interface{}{
 			"playbook_execution_id": executionID,
-			"description":            cmd.Description,
+			"description":           cmd.Description,
 		},
 	}
 	

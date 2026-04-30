@@ -833,12 +833,50 @@ export interface VulnerabilityFinding {
     status: 'open' | 'acknowledged' | 'resolved' | 'risk_accepted' | string;
     source: string;
     package_name: string;
+    installed_version: string;
     fixed_version: string;
+    reference_url: string;
+    kev_listed: boolean;
+    kev_added_date?: string;
+    kev_due_date?: string;
+    exploit_available: boolean;
+    priority_score: number;
     detected_at: string;
     published_at?: string;
     due_at?: string;
     created_at: string;
     updated_at: string;
+}
+
+/** Aggregated stats for dashboard widgets. */
+export interface VulnerabilityStats {
+    total: number;
+    open_count: number;
+    by_severity: Record<string, number>;
+    by_status: Record<string, number>;
+    kev_count: number;
+    affected_hosts: number;
+    top_packages: { package: string; count: number }[];
+    top_hosts: { agent_id: string; hostname: string; count: number }[];
+    overdue_count: number;
+    exploitable_count: number;
+}
+
+/** Payload row for bulk-importing scanner findings. */
+export interface VulnerabilityImportInput {
+    agent_id: string;
+    cve: string;
+    title?: string;
+    description?: string;
+    severity: string;
+    cvss?: number;
+    source?: string;
+    package_name?: string;
+    installed_version?: string;
+    fixed_version?: string;
+    reference_url?: string;
+    published_at?: string;
+    due_at?: string;
 }
 
 export type VulnerabilityListResponse = {
@@ -902,6 +940,7 @@ export const vulnerabilityApi = {
         severity?: string;
         agent_id?: string;
         search?: string;
+        kev_only?: boolean;
     }) => {
         const response = await connectionApi.get<VulnerabilityListResponse>('/api/v1/vuln/findings', { params });
         return response.data;
@@ -914,6 +953,22 @@ export const vulnerabilityApi = {
         const response = await connectionApi.patch<{ data: VulnerabilityFinding }>(`/api/v1/vuln/findings/${encodeURIComponent(id)}`, {
             status,
         });
+        return response.data.data;
+    },
+    bulkImport: async (findings: VulnerabilityImportInput[]) => {
+        const response = await connectionApi.post<{
+            data: { received: number; inserted: number; updated: number; skipped: number };
+        }>('/api/v1/vuln/findings/bulk', { findings });
+        return response.data.data;
+    },
+    syncKEV: async () => {
+        const response = await connectionApi.post<{
+            data: { catalog_size: number; findings_updated: number };
+        }>('/api/v1/vuln/kev/sync');
+        return response.data.data;
+    },
+    getStats: async () => {
+        const response = await connectionApi.get<{ data: VulnerabilityStats }>('/api/v1/vuln/stats');
         return response.data.data;
     },
 };

@@ -176,6 +176,9 @@ func (s *Server) RegisterRoutes(handlers *Handlers) {
 	vuln.GET("/findings", handlers.ListVulnerabilityFindings, handlers.RequirePermission("endpoints", "read"))
 	vuln.GET("/findings/:id", handlers.GetVulnerabilityFinding, handlers.RequirePermission("endpoints", "read"))
 	vuln.PATCH("/findings/:id", handlers.PatchVulnerabilityFindingStatus, handlers.RequirePermission("endpoints", "manage"))
+	vuln.POST("/findings/bulk", handlers.BulkImportVulnerabilityFindings, handlers.RequirePermission("endpoints", "manage"))
+	vuln.POST("/kev/sync", handlers.SyncKEVCatalog, handlers.RequirePermission("endpoints", "manage"))
+	vuln.GET("/stats", handlers.GetVulnerabilityStats, handlers.RequirePermission("endpoints", "read"))
 
 	// ── Event endpoints ──────────────────────────────────────────────────
 	// Events are part of the alert investigation workflow → alerts:read

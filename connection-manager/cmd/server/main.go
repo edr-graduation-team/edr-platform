@@ -450,8 +450,15 @@ func main() {
 		apiHandlers.SetIncidentRepo(incidentRepo)
 		grpcServer.SetIncidentRepo(incidentRepo)
 
-		apiHandlers.SetVulnRepo(repository.NewPostgresVulnerabilityRepository(pool))
+		vulnRepo := repository.NewPostgresVulnerabilityRepository(pool)
+		apiHandlers.SetVulnRepo(vulnRepo)
 		logger.Info("Vulnerability findings API enabled (vulnerability_findings)")
+
+		// CISA KEV catalog sync — runs once at startup, then daily.
+		kevSync := service.NewKEVSyncService(vulnRepo, logger)
+		apiHandlers.SetKEVSync(kevSync)
+		go kevSync.Run(context.Background())
+		logger.Info("CISA KEV sync service enabled (24h interval)")
 
 		apiHandlers.SetSiemRepo(repository.NewPostgresSiemConnectorRepository(pool))
 		logger.Info("SIEM connectors API enabled (siem_connectors)")

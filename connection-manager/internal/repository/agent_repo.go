@@ -45,6 +45,9 @@ const agentSelectColumns = `
 	COALESCE(sysmon_installed, false), COALESCE(sysmon_running, false),
 	current_cert_id, cert_expires_at,
 	COALESCE(tags, '{}'), COALESCE(metadata, '{}'),
+	COALESCE(criticality, 'medium'),
+	COALESCE(business_unit, ''),
+	COALESCE(environment, ''),
 	created_at, updated_at`
 
 // Create creates a new agent record.
@@ -124,6 +127,9 @@ func (r *PostgresAgentRepository) GetByID(ctx context.Context, id uuid.UUID) (*m
 		&agent.CertExpiresAt,
 		&agent.Tags,
 		&agent.Metadata,
+		&agent.Criticality,
+		&agent.BusinessUnit,
+		&agent.Environment,
 		&agent.CreatedAt,
 		&agent.UpdatedAt,
 	)
@@ -172,6 +178,9 @@ func (r *PostgresAgentRepository) GetByHostname(ctx context.Context, hostname st
 		&agent.CertExpiresAt,
 		&agent.Tags,
 		&agent.Metadata,
+		&agent.Criticality,
+		&agent.BusinessUnit,
+		&agent.Environment,
 		&agent.CreatedAt,
 		&agent.UpdatedAt,
 	)
@@ -413,6 +422,9 @@ func (r *PostgresAgentRepository) List(ctx context.Context, filter AgentFilter) 
 			&agent.CertExpiresAt,
 			&agent.Tags,
 			&agent.Metadata,
+			&agent.Criticality,
+			&agent.BusinessUnit,
+			&agent.Environment,
 			&agent.CreatedAt,
 			&agent.UpdatedAt,
 		)
@@ -495,6 +507,9 @@ func (r *PostgresAgentRepository) GetAgentsNeedingCertRenewal(ctx context.Contex
 			&agent.CertExpiresAt,
 			&agent.Tags,
 			&agent.Metadata,
+			&agent.Criticality,
+			&agent.BusinessUnit,
+			&agent.Environment,
 			&agent.CreatedAt,
 			&agent.UpdatedAt,
 		)
@@ -536,6 +551,75 @@ func (r *PostgresAgentRepository) SetIsolation(ctx context.Context, id uuid.UUID
 		return fmt.Errorf("agent %s not found", id)
 	}
 	return nil
+}
+
+// AgentBusinessContext is the optional set of asset-context fields that can be
+// updated together. Empty/nil entries are left unchanged.
+type AgentBusinessContext struct {
+	Criticality  *string // low | medium | high | critical
+	BusinessUnit *string
+	Environment  *string
+}
+
+// UpdateBusinessContext updates the agent's asset-context fields (criticality,
+// business unit, environment). The DB trigger on agents.criticality automatically
+// recomputes the priority_score of all linked vulnerability_findings.
+func (r *PostgresAgentRepository) UpdateBusinessContext(ctx context.Context, id uuid.UUID, ctxFields AgentBusinessContext) error {
+	if ctxFields.Criticality == nil && ctxFields.BusinessUnit == nil && ctxFields.Environment == nil {
+		return nil
+	}
+	if ctxFields.Criticality != nil {
+		switch *ctxFields.Criticality {
+		case "low", "medium", "high", "critical":
+		default:
+			return fmt.Errorf("invalid criticality: %s (allowed: low, medium, high, critical)", *ctxFields.Criticality)
+		}
+	}
+
+	sets := []string{}
+	args := []interface{}{}
+	idx := 1
+	if ctxFields.Criticality != nil {
+		sets = append(sets, fmt.Sprintf("criticality = $%d", idx))
+		args = append(args, *ctxFields.Criticality)
+		idx++
+	}
+	if ctxFields.BusinessUnit != nil {
+		sets = append(sets, fmt.Sprintf("business_unit = $%d", idx))
+		args = append(args, *ctxFields.BusinessUnit)
+		idx++
+	}
+	if ctxFields.Environment != nil {
+		sets = append(sets, fmt.Sprintf("environment = $%d", idx))
+		args = append(args, *ctxFields.Environment)
+		idx++
+	}
+	sets = append(sets, "updated_at = NOW()")
+	args = append(args, id)
+
+	query := fmt.Sprintf("UPDATE agents SET %s WHERE id = $%d",
+		joinStrings(sets, ", "), idx)
+
+	result, err := r.pool.Exec(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("failed to update agent business context: %w", err)
+	}
+	if result.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// joinStrings is a tiny helper to avoid pulling in strings.Join just for this file.
+func joinStrings(parts []string, sep string) string {
+	if len(parts) == 0 {
+		return ""
+	}
+	out := parts[0]
+	for _, p := range parts[1:] {
+		out += sep + p
+	}
+	return out
 }
 
 // UpsertByHostname atomically creates or replaces the agent record for the given hostname.

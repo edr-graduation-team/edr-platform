@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link, Navigate } from 'react-router-dom';
 import { parityApi } from '../../api/parity/parityApi';
@@ -1124,6 +1124,27 @@ export function DashboardRoiPage() {
 }
 
 export function DashboardReportsPage() {
+    useEffect(() => { document.title = 'Reports \u2014 EDR Platform'; }, []);
+
+    // Import the new professional report generator
+    const ReportGenerator = React.lazy(() => import('../../components/reports').then(m => ({ default: m.ReportGenerator })));
+
+    return (
+        <React.Suspense fallback={
+            <div className="flex items-center justify-center p-12">
+                <div className="animate-pulse flex flex-col items-center gap-4">
+                    <div className="w-12 h-12 rounded-xl bg-slate-200 dark:bg-slate-700" />
+                    <div className="w-48 h-4 rounded bg-slate-200 dark:bg-slate-700" />
+                </div>
+            </div>
+        }>
+            <ReportGenerator />
+        </React.Suspense>
+    );
+}
+
+// Legacy Reports Page (kept for reference)
+export function _LegacyDashboardReportsPage() {
     useEffect(() => { document.title = 'Reports \u2014 EDR Platform'; }, []);
 
     const agentsQ = useQuery({ queryKey: ['agents-stats'], queryFn: () => agentsApi.stats(), staleTime: 30_000 });

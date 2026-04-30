@@ -4,6 +4,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { GenericParityView } from '../../components/parity/GenericParityView';
 import { parityApi } from '../../api/parity/parityApi';
 import * as mocks from '../../api/parity/mocks';
+import VulnerabilityManagementPage from '../VulnerabilityManagement';
 import StatCard from '../../components/StatCard';
 import InsightHero from '../../components/InsightHero';
 import {
@@ -3157,14 +3158,7 @@ export function ManagementRmmPage() {
 
 export function ManagementVulnPage() {
     useEffect(() => { document.title = 'Vulnerability Management | EDR Platform'; }, []);
-    return (
-        <div className="space-y-6 w-full min-w-0 animate-slide-up-fade">
-            <InsightHero icon={ShieldAlert} accent="rose" eyebrow="Security Operations" title="Vulnerability Management"
-                lead={<>Track and remediate CVE findings across the fleet. Data is sourced from the vulnerability scanner integrated with the EDR agent.</>}
-            />
-            <GenericParityView title="Vulnerability findings" missingApi="true" queryKey={['parity','vuln','findings']} fetcher={() => parityApi.getVulnFindings()} mock={mocks.mockVulnFindings.data} />
-        </div>
-    );
+    return <VulnerabilityManagementPage />;
 }
 
 export function ManagementAppControlPage() {

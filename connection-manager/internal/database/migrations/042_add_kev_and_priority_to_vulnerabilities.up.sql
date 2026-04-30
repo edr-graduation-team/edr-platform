@@ -14,7 +14,16 @@ CREATE INDEX IF NOT EXISTS idx_vuln_findings_kev ON vulnerability_findings(kev_l
 CREATE INDEX IF NOT EXISTS idx_vuln_findings_priority ON vulnerability_findings(priority_score DESC);
 
 -- Unique key for upsert: (agent_id, cve, package_name) — one finding per CVE+package per host.
--- Uses a partial unique index allowing same CVE on different packages or hosts.
+-- Pre-step: collapse pre-existing duplicates (keep newest by updated_at) so the unique index can build.
+DELETE FROM vulnerability_findings a
+USING vulnerability_findings b
+WHERE a.cve <> ''
+  AND a.agent_id     = b.agent_id
+  AND a.cve          = b.cve
+  AND a.package_name = b.package_name
+  AND (a.updated_at, a.id) < (b.updated_at, b.id);
+
+-- Partial unique index allowing same CVE on different packages or hosts; skips empty CVEs.
 DO $$
 BEGIN
     IF NOT EXISTS (

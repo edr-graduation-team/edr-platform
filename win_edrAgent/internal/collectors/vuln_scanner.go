@@ -276,6 +276,7 @@ func toSeverity(s string) event.Severity {
 	default:
 		return event.SeverityMedium
 	}
+}
 
 func (c *VulnerabilityScannerCollector) shouldAutoInstallTrivy(cmdName string, err error) bool {
 	if strings.ToLower(strings.TrimSpace(c.cfg.VulnScannerType)) != "trivy" {
@@ -411,5 +412,3 @@ func fileExists(p string) bool {
 	_, err := os.Stat(p)
 	return err == nil
 }
-}
-

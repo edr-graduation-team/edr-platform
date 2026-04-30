@@ -158,7 +158,8 @@ func (c *VulnerabilityScannerCollector) buildCommand() (string, []string) {
 		return bin, []string{"dir:C:\\Program Files", "dir:C:\\Program Files (x86)", "-o", "json"}
 	}
 	return bin, []string{
-		"fs", "C:\\Program Files", "C:\\Program Files (x86)",
+		// Trivy filesystem mode accepts a single PATH per invocation.
+		"fs", "C:\\Program Files",
 		"--format", "json",
 		"--quiet",
 		"--cache-dir", trivyCacheDir(),

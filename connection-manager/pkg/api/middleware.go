@@ -44,6 +44,7 @@ type Handlers struct {
 	fallbackStore       *handlers.EventFallbackStore         // DB fallback store reliability stats
 	incidentRepo        repository.IncidentRepository        // post-isolation playbook + triage tracking
 	vulnRepo            repository.VulnerabilityRepository     // CVE / software vulnerability findings per agent
+	kevSync             *service.KEVSyncService                // CISA KEV synchronization service
 	siemRepo            repository.SiemConnectorRepository     // SIEM / webhook export destinations
 	AutomationHandlers   *AutomationHandlers                 // automation handlers for intelligent response
 }
@@ -152,6 +153,11 @@ func (h *Handlers) SetIncidentRepo(repo repository.IncidentRepository) {
 // SetVulnRepo sets the VulnerabilityRepository for SOC vulnerability findings.
 func (h *Handlers) SetVulnRepo(repo repository.VulnerabilityRepository) {
 	h.vulnRepo = repo
+}
+
+// SetKEVSync wires the CISA KEV synchronization service for manual triggers.
+func (h *Handlers) SetKEVSync(svc *service.KEVSyncService) {
+	h.kevSync = svc
 }
 
 // SetSiemRepo sets the SiemConnectorRepository for SIEM export configuration.

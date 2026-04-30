@@ -196,6 +196,7 @@ func main() {
 	var automationRuleRepo repository.AutomationRuleRepository
 	var executionRepo repository.PlaybookExecutionRepository
 	var automationMetricsRepo repository.AutomationMetricsRepository
+	var agentPackageRepo repository.AgentPackageRepository
 	var dbPool *database.PostgresPool // scoped outside if-block for fallback access
 
 	dbPoolInst, dbErr := database.NewPostgresPool(ctx, &database.PostgresConfig{
@@ -435,7 +436,8 @@ func main() {
 		apiHandlers.SetUserRepo(repository.NewPostgresUserRepository(pool))
 		apiHandlers.SetRoleRepo(repository.NewPostgresRoleRepository(pool))
 		apiHandlers.SetContextPolicyRepo(repository.NewPostgresContextPolicyRepository(pool))
-		apiHandlers.SetAgentPackageRepo(repository.NewPostgresAgentPackageRepository(pool))
+		agentPackageRepo = repository.NewPostgresAgentPackageRepository(pool)
+		apiHandlers.SetAgentPackageRepo(agentPackageRepo)
 		apiHandlers.SetAgentPatchProfileRepo(repository.NewPostgresAgentPatchProfileRepository(pool))
 		// Event storage/search for dashboard investigations
 		eventRepo := repository.NewPostgresEventRepository(pool)
@@ -489,6 +491,10 @@ func main() {
 	if agentRepo != nil {
 		go staleAgentSweeper(sweepCtx, agentRepo, logger)
 		logger.Info("Stale agent sweeper started (interval: 15s, threshold: 1m)")
+	}
+	if agentPackageRepo != nil {
+		go expiredAgentPackageSweeper(sweepCtx, agentPackageRepo, logger)
+		logger.Info("Expired agent package sweeper started (interval: 1m)")
 	}
 
 	// Start gRPC server in goroutine
@@ -649,6 +655,50 @@ func staleAgentSweeper(ctx context.Context, repo repository.AgentRepository, log
 				logger.Errorf("Stale agent sweep failed: %v", err)
 			} else if affected > 0 {
 				logger.Infof("Stale agent sweep: marked %d zombie agents as offline", affected)
+			}
+		}
+	}
+}
+
+// expiredAgentPackageSweeper removes expired package files and DB rows.
+// This enforces short-lived download links even if they are never redeemed.
+func expiredAgentPackageSweeper(ctx context.Context, repo repository.AgentPackageRepository, logger *logrus.Logger) {
+	ticker := time.NewTicker(1 * time.Minute)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			logger.Info("Expired agent package sweeper stopped")
+			return
+		case <-ticker.C:
+			sweepCtx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+			expiredRows, err := repo.ListExpired(sweepCtx, time.Now())
+			cancel()
+			if err != nil {
+				logger.Errorf("Expired agent package sweep failed: %v", err)
+				continue
+			}
+			if len(expiredRows) == 0 {
+				continue
+			}
+
+			deleted := 0
+			for _, row := range expiredRows {
+				if row == nil {
+					continue
+				}
+				if row.StoragePath != "" {
+					_ = os.Remove(row.StoragePath)
+				}
+				delCtx, delCancel := context.WithTimeout(context.Background(), 5*time.Second)
+				if err := repo.Delete(delCtx, row.ID); err == nil {
+					deleted++
+				}
+				delCancel()
+			}
+			if deleted > 0 {
+				logger.Infof("Expired agent package sweep: removed %d package(s)", deleted)
 			}
 		}
 	}

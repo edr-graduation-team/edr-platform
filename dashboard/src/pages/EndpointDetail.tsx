@@ -8,7 +8,6 @@ import {
     ShieldAlert
 } from 'lucide-react';
 import {
-    agentBuildApi,
     agentPackagesApi,
     agentsApi,
     alertsApi,
@@ -20,7 +19,6 @@ import {
     type CommandListItem,
     type CommandRequest,
     type CommandType,
-    type EnrollmentToken,
     type EndpointRiskSummary,
     type QuarantineItem,
     type ForensicCollection,
@@ -1978,16 +1976,8 @@ function ResponseTab({
         serverIP: string;
         serverDomain: string;
         serverPort: string;
-        tokenId: string;
         installSysmon: boolean;
-    }>({ serverIP: '', serverDomain: '', serverPort: '47051', tokenId: '', installSysmon: false });
-
-    // @ts-ignore
-    const { data: upgradeTokens = [], isLoading: upgradeTokensLoading } = useQuery<EnrollmentToken[]>({
-        queryKey: ['enrollment-tokens-valid', 'upgrade'],
-        queryFn: () => agentBuildApi.listValidTokens(),
-        enabled: upgradeOpen,
-    });
+    }>({ serverIP: '', serverDomain: '', serverPort: '47051', installSysmon: false });
 
     // @ts-ignore
     const upgradeMutation = useMutation({
@@ -1997,7 +1987,6 @@ function ResponseTab({
                 server_domain: upgradeForm.serverDomain || undefined,
                 server_port: upgradeForm.serverPort || undefined,
                 public_api_base_url: typeof window !== 'undefined' ? window.location.origin : undefined,
-                token_id: upgradeForm.tokenId,
                 skip_config: false,
                 install_sysmon: (_agent.sysmon_installed && _agent.sysmon_running) ? false : upgradeForm.installSysmon,
                 expires_in_seconds: 900,
@@ -2385,13 +2374,6 @@ function ResponseTab({
                         <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Server Port</label>
                         <input className="input w-full text-sm" value={upgradeForm.serverPort} onChange={(e) => setUpgradeForm(f => ({...f, serverPort: e.target.value}))} />
                     </div>
-                    <div>
-                        <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Enrollment Token</label>
-                        <select className="input w-full text-sm" value={upgradeForm.tokenId} onChange={(e) => setUpgradeForm(f => ({...f, tokenId: e.target.value}))}>
-                            <option value="">Select a token...</option>
-                            {(upgradeTokens || []).map((t: any) => <option key={t.id || t.token_id} value={t.id || t.token_id}>{(t.id || t.token_id || '').slice(0, 12)}... - {t.description || 'Token'}</option>)}
-                        </select>
-                    </div>
                     {/* Hide Sysmon option when already installed & running on this endpoint */}
                     {!(_agent.sysmon_installed && _agent.sysmon_running) ? (
                         <label className="flex items-center gap-2 text-sm">
@@ -2406,7 +2388,7 @@ function ResponseTab({
                     )}
                     <div className="flex justify-end gap-2 pt-3 border-t border-slate-200 dark:border-slate-700">
                         <button type="button" className="px-4 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-700" onClick={() => setUpgradeOpen(false)}>Cancel</button>
-                        <button type="button" className="px-4 py-2 text-sm rounded-lg bg-cyan-600 hover:bg-cyan-700 text-white font-semibold disabled:opacity-50" disabled={!upgradeForm.tokenId || upgradeMutation.isPending} onClick={() => upgradeMutation.mutate()}>
+                        <button type="button" className="px-4 py-2 text-sm rounded-lg bg-cyan-600 hover:bg-cyan-700 text-white font-semibold disabled:opacity-50" disabled={upgradeMutation.isPending} onClick={() => upgradeMutation.mutate()}>
                             {upgradeMutation.isPending ? 'Upgrading...' : 'Start Upgrade'}
                         </button>
                     </div>

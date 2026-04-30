@@ -4,10 +4,15 @@
 package collectors
 
 import (
+	"archive/zip"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -58,6 +63,18 @@ func (c *VulnerabilityScannerCollector) runScan(ctx context.Context) {
 	cmd := exec.CommandContext(scanCtx, cmdName, args...)
 	out, err := cmd.Output()
 	if err != nil {
+		if c.shouldAutoInstallTrivy(cmdName, err) {
+			if bin, ierr := c.ensureTrivyInstalled(scanCtx); ierr == nil && strings.TrimSpace(bin) != "" {
+				c.logger.Infof("[VulnScan] trivy installed at %s; retrying scan", bin)
+				cmdName = bin
+				cmd = exec.CommandContext(scanCtx, cmdName, args...)
+				out, err = cmd.Output()
+			} else if ierr != nil {
+				c.logger.Warnf("[VulnScan] auto-install trivy failed: %v", ierr)
+			}
+		}
+	}
+	if err != nil {
 		c.logger.Warnf("[VulnScan] scanner execution failed (%s): %v", c.cfg.VulnScannerType, err)
 		return
 	}
@@ -105,6 +122,12 @@ func (c *VulnerabilityScannerCollector) runScan(ctx context.Context) {
 func (c *VulnerabilityScannerCollector) buildCommand() (string, []string) {
 	st := strings.ToLower(strings.TrimSpace(c.cfg.VulnScannerType))
 	bin := strings.TrimSpace(c.cfg.VulnScannerPath)
+	if bin == "" && st == "trivy" {
+		managed := trivyExePath()
+		if fileExists(managed) {
+			bin = managed
+		}
+	}
 	if bin == "" {
 		bin = st
 	}
@@ -253,5 +276,140 @@ func toSeverity(s string) event.Severity {
 	default:
 		return event.SeverityMedium
 	}
+
+func (c *VulnerabilityScannerCollector) shouldAutoInstallTrivy(cmdName string, err error) bool {
+	if strings.ToLower(strings.TrimSpace(c.cfg.VulnScannerType)) != "trivy" {
+		return false
+	}
+	if strings.TrimSpace(c.cfg.VulnScannerPath) != "" {
+		// Operator explicitly pinned a binary path; do not override.
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "executable file not found") || strings.Contains(strings.ToLower(cmdName), "trivy")
+}
+
+func trivyToolDir() string {
+	return `C:\ProgramData\EDR\tools\trivy`
+}
+
+func trivyExePath() string {
+	return filepath.Join(trivyToolDir(), "trivy.exe")
+}
+
+func (c *VulnerabilityScannerCollector) ensureTrivyInstalled(ctx context.Context) (string, error) {
+	if fileExists(trivyExePath()) {
+		return trivyExePath(), nil
+	}
+	if err := os.MkdirAll(trivyToolDir(), 0755); err != nil {
+		return "", fmt.Errorf("create trivy dir: %w", err)
+	}
+	zipURL, err := fetchLatestTrivyWindowsZipURL(ctx)
+	if err != nil {
+		return "", err
+	}
+	tmpZip := filepath.Join(os.TempDir(), fmt.Sprintf("trivy-%d.zip", time.Now().UnixNano()))
+	defer os.Remove(tmpZip)
+	if err := downloadToFile(ctx, zipURL, tmpZip, 120<<20); err != nil {
+		return "", fmt.Errorf("download trivy zip: %w", err)
+	}
+	if err := extractZipFile(tmpZip, "trivy.exe", trivyExePath()); err != nil {
+		return "", fmt.Errorf("extract trivy.exe: %w", err)
+	}
+	return trivyExePath(), nil
+}
+
+func fetchLatestTrivyWindowsZipURL(ctx context.Context) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.github.com/repos/aquasecurity/trivy/releases/latest", nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", fmt.Errorf("github api status %d", resp.StatusCode)
+	}
+	var body struct {
+		Assets []struct {
+			Name               string `json:"name"`
+			BrowserDownloadURL string `json:"browser_download_url"`
+		} `json:"assets"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 2<<20)).Decode(&body); err != nil {
+		return "", err
+	}
+	for _, a := range body.Assets {
+		n := strings.ToLower(strings.TrimSpace(a.Name))
+		if strings.Contains(n, "windows-64bit.zip") {
+			return strings.TrimSpace(a.BrowserDownloadURL), nil
+		}
+	}
+	return "", fmt.Errorf("windows-64bit trivy asset not found in latest release")
+}
+
+func extractZipFile(zipPath, wantName, outPath string) error {
+	r, err := zip.OpenReader(zipPath)
+	if err != nil {
+		return err
+	}
+	defer r.Close()
+
+	for _, f := range r.File {
+		if !strings.EqualFold(filepath.Base(f.Name), wantName) {
+			continue
+		}
+		rc, err := f.Open()
+		if err != nil {
+			return err
+		}
+		defer rc.Close()
+		if err := os.MkdirAll(filepath.Dir(outPath), 0755); err != nil {
+			return err
+		}
+		w, err := os.Create(outPath)
+		if err != nil {
+			return err
+		}
+		if _, err := io.Copy(w, rc); err != nil {
+			w.Close()
+			return err
+		}
+		if err := w.Close(); err != nil {
+			return err
+		}
+		return nil
+	}
+	return fmt.Errorf("file %q not found in zip", wantName)
+}
+
+func downloadToFile(ctx context.Context, url, path string, maxBytes int64) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("http %d", resp.StatusCode)
+	}
+	body := io.LimitReader(resp.Body, maxBytes)
+	data, err := io.ReadAll(body)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0644)
+}
+
+func fileExists(p string) bool {
+	_, err := os.Stat(p)
+	return err == nil
+}
 }
 

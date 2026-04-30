@@ -879,6 +879,7 @@ export interface VulnerabilityStats {
     top_hosts: { agent_id: string; hostname: string; count: number }[];
     overdue_count: number;
     exploitable_count: number;
+    edr_signal_count?: number;
 }
 
 /** Payload row for bulk-importing scanner findings. */
@@ -966,6 +967,7 @@ export const vulnerabilityApi = {
         agent_id?: string;
         search?: string;
         kev_only?: boolean;
+        edr_signal_only?: boolean;
     }) => {
         const response = await connectionApi.get<VulnerabilityListResponse>('/api/v1/vuln/findings', { params });
         return response.data;

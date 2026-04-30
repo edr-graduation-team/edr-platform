@@ -452,6 +452,8 @@ func main() {
 
 		vulnRepo := repository.NewPostgresVulnerabilityRepository(pool)
 		apiHandlers.SetVulnRepo(vulnRepo)
+		apiHandlers.SetVulnScannerIngest(service.NewVulnScannerIngestService(logger))
+		evtHandler.SetVulnerabilityRepo(vulnRepo)
 		logger.Info("Vulnerability findings API enabled (vulnerability_findings)")
 
 		// CISA KEV catalog sync — runs once at startup, then daily.

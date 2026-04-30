@@ -50,6 +50,7 @@ type EventHandler struct {
 	commandRepo    repository.CommandRepository    // Re-delivers pending commands on reconnect
 	quarantineRepo repository.QuarantineRepository // Optional: quarantine inventory from telemetry
 	eventRepo      repository.EventRepository      // Optional: durable event store for REST search
+	vulnRepo       repository.VulnerabilityRepository
 }
 
 // NewEventHandler creates a new event handler.
@@ -96,6 +97,11 @@ func (h *EventHandler) SetQuarantineRepo(repo repository.QuarantineRepository) {
 // SetEventRepo sets optional durable event repository for search/list APIs.
 func (h *EventHandler) SetEventRepo(repo repository.EventRepository) {
 	h.eventRepo = repo
+}
+
+// SetVulnerabilityRepo sets optional vulnerability repository for scanner telemetry ingestion.
+func (h *EventHandler) SetVulnerabilityRepo(repo repository.VulnerabilityRepository) {
+	h.vulnRepo = repo
 }
 
 // SetFallbackStore sets the PostgreSQL fallback store.
@@ -729,6 +735,11 @@ func (h *EventHandler) processBatch(ctx context.Context, agentID string, batch *
 
 	h.noteAutonomousResponseEvents(logger, agentID, batch, events)
 	h.persistQuarantineFromEvents(ctx, agentID, events)
+	if h.vulnRepo != nil {
+		if err := h.ingestVulnerabilityEvents(ctx, agentID, events); err != nil {
+			logger.WithError(err).Warn("Failed to ingest vulnerability telemetry events")
+		}
+	}
 
 	// 6b. Persist searchable events to PostgreSQL for REST /events/search.
 	// This is independent from Kafka: even when Kafka is enabled, we still
@@ -797,6 +808,97 @@ func (h *EventHandler) processBatch(ctx context.Context, agentID string, batch *
 		ServerStatus: edrv1.ServerStatus_SERVER_STATUS_OK,
 		AckBatchId:   batch.BatchId,
 	}, nil
+}
+
+func (h *EventHandler) ingestVulnerabilityEvents(ctx context.Context, agentID string, events []map[string]interface{}) error {
+	aid, err := uuid.Parse(agentID)
+	if err != nil {
+		return fmt.Errorf("invalid agent_id %q: %w", agentID, err)
+	}
+	items := make([]repository.VulnerabilityFindingInput, 0, 128)
+	for _, ev := range events {
+		etype, _ := ev["event_type"].(string)
+		if !strings.EqualFold(strings.TrimSpace(etype), "vulnerability_finding") {
+			continue
+		}
+		data, _ := ev["data"].(map[string]interface{})
+		if data == nil {
+			continue
+		}
+		cve := strings.ToUpper(strings.TrimSpace(asString(data["cve"])))
+		if cve == "" {
+			continue
+		}
+		var cvss *float64
+		if v := asFloat64(data["cvss"]); v > 0 {
+			cvss = &v
+		}
+		var publishedAt *time.Time
+		if s := strings.TrimSpace(asString(data["published_at"])); s != "" {
+			if t, err := time.Parse(time.RFC3339, s); err == nil {
+				publishedAt = &t
+			}
+		}
+		items = append(items, repository.VulnerabilityFindingInput{
+			AgentID:          aid,
+			CVE:              cve,
+			Title:            strings.TrimSpace(asString(data["title"])),
+			Description:      strings.TrimSpace(asString(data["description"])),
+			Severity:         strings.ToLower(strings.TrimSpace(asString(data["severity"]))),
+			CVSS:             cvss,
+			Source:           strings.ToLower(strings.TrimSpace(asString(data["source"]))),
+			PackageName:      strings.TrimSpace(asString(data["package_name"])),
+			InstalledVersion: strings.TrimSpace(asString(data["installed_version"])),
+			FixedVersion:     strings.TrimSpace(asString(data["fixed_version"])),
+			ReferenceURL:     strings.TrimSpace(asString(data["reference_url"])),
+			PublishedAt:      publishedAt,
+		})
+	}
+	if len(items) == 0 {
+		return nil
+	}
+	inserted, updated, err := h.vulnRepo.BulkUpsert(ctx, items)
+	if err != nil {
+		return err
+	}
+	h.logger.WithFields(logrus.Fields{
+		"agent_id": agentID,
+		"parsed":   len(items),
+		"inserted": inserted,
+		"updated":  updated,
+	}).Info("Vulnerability telemetry ingested")
+	return nil
+}
+
+func asString(v interface{}) string {
+	switch t := v.(type) {
+	case string:
+		return t
+	case json.Number:
+		return t.String()
+	case float64:
+		return fmt.Sprintf("%g", t)
+	case int:
+		return fmt.Sprintf("%d", t)
+	default:
+		return ""
+	}
+}
+
+func asFloat64(v interface{}) float64 {
+	switch t := v.(type) {
+	case float64:
+		return t
+	case json.Number:
+		f, _ := t.Float64()
+		return f
+	case string:
+		var f float64
+		fmt.Sscanf(strings.TrimSpace(t), "%f", &f)
+		return f
+	default:
+		return 0
+	}
 }
 
 func (h *EventHandler) persistEventsToDB(ctx context.Context, agentID string, batch *edrv1.EventBatch, events []map[string]interface{}) error {

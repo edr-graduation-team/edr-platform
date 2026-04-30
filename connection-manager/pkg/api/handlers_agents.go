@@ -98,6 +98,9 @@ func (h *Handlers) ListAgents(c echo.Context) error {
 		}
 		summary.SysmonInstalled = a.SysmonInstalled
 		summary.SysmonRunning = a.SysmonRunning
+		summary.Criticality = a.Criticality
+		summary.BusinessUnit = a.BusinessUnit
+		summary.Environment = a.Environment
 		summaries = append(summaries, summary)
 	}
 
@@ -150,6 +153,9 @@ func (h *Handlers) GetAgent(c echo.Context) error {
 			IsIsolated:      a.IsIsolated,
 			SysmonInstalled: a.SysmonInstalled,
 			SysmonRunning:   a.SysmonRunning,
+			Criticality:     a.Criticality,
+			BusinessUnit:    a.BusinessUnit,
+			Environment:     a.Environment,
 		},
 		IPAddresses:     ipAddresses,
 		CPUCount:        a.CPUCount,

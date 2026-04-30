@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -118,6 +119,14 @@ type CollectorConfig struct {
 	DNSEnabled           bool `yaml:"dns_enabled"`            // ETW Microsoft-Windows-DNS-Client (enables 50+ Sigma dns_query rules)
 	PipeEnabled          bool `yaml:"pipe_enabled"`           // Kernel FileIo pipe events (Cobalt Strike beacon pipe detection)
 	ProcessAccessEnabled bool `yaml:"process_access_enabled"` // LSASS/credential dump detection (Mimikatz T1003.001)
+
+	// Phase 2 — Vulnerability scanner integration (Trivy/Grype)
+	VulnScanEnabled  bool          `yaml:"vuln_scan_enabled"`
+	VulnScanInterval time.Duration `yaml:"vuln_scan_interval"`
+	VulnScannerType  string        `yaml:"vuln_scanner_type"` // trivy | grype
+	VulnScannerPath  string        `yaml:"vuln_scanner_path"` // optional absolute path to scanner binary
+	VulnScanTimeout  time.Duration `yaml:"vuln_scan_timeout"`
+	VulnScanArgs     []string      `yaml:"vuln_scan_args"` // optional override args
 }
 
 // FilteringConfig defines event filtering rules.
@@ -231,6 +240,12 @@ func DefaultConfig() *Config {
 			DNSEnabled:           true,
 			PipeEnabled:          true,
 			ProcessAccessEnabled: true,
+			VulnScanEnabled:      true,
+			VulnScanInterval:     6 * time.Hour,
+			VulnScannerType:      "trivy",
+			VulnScannerPath:      "",
+			VulnScanTimeout:      20 * time.Minute,
+			VulnScanArgs:         nil,
 		},
 		// Autonomous response defaults: used by installer.GenerateConfig (dashboard / zero-touch).
 		// Keep aligned with config/default.yaml response.* so first-time installs are fully armed.
@@ -432,6 +447,20 @@ func (c *Config) Validate() error {
 	case "auto_kill_then_override", "detect_only":
 	default:
 		return fmt.Errorf("response.process_prevention_mode must be detect_only or auto_kill_then_override")
+	}
+	if c.Collectors.VulnScanInterval <= 0 {
+		c.Collectors.VulnScanInterval = 6 * time.Hour
+	}
+	if c.Collectors.VulnScanTimeout <= 0 {
+		c.Collectors.VulnScanTimeout = 20 * time.Minute
+	}
+	if c.Collectors.VulnScannerType == "" {
+		c.Collectors.VulnScannerType = "trivy"
+	}
+	switch strings.ToLower(c.Collectors.VulnScannerType) {
+	case "trivy", "grype":
+	default:
+		return fmt.Errorf("collectors.vuln_scanner_type must be trivy or grype")
 	}
 	return nil
 }

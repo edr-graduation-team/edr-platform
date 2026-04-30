@@ -45,6 +45,7 @@ type Handlers struct {
 	incidentRepo        repository.IncidentRepository        // post-isolation playbook + triage tracking
 	vulnRepo            repository.VulnerabilityRepository     // CVE / software vulnerability findings per agent
 	kevSync             *service.KEVSyncService                // CISA KEV synchronization service
+	vulnScannerIngest   *service.VulnScannerIngestService      // Trivy/Grype report parser
 	siemRepo            repository.SiemConnectorRepository     // SIEM / webhook export destinations
 	AutomationHandlers   *AutomationHandlers                 // automation handlers for intelligent response
 }
@@ -158,6 +159,11 @@ func (h *Handlers) SetVulnRepo(repo repository.VulnerabilityRepository) {
 // SetKEVSync wires the CISA KEV synchronization service for manual triggers.
 func (h *Handlers) SetKEVSync(svc *service.KEVSyncService) {
 	h.kevSync = svc
+}
+
+// SetVulnScannerIngest wires the scanner parser service (Trivy/Grype).
+func (h *Handlers) SetVulnScannerIngest(svc *service.VulnScannerIngestService) {
+	h.vulnScannerIngest = svc
 }
 
 // SetSiemRepo sets the SiemConnectorRepository for SIEM export configuration.

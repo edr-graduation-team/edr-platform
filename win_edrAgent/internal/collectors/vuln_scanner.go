@@ -61,21 +61,39 @@ func (c *VulnerabilityScannerCollector) runScan(ctx context.Context) {
 	scanCtx, cancel := context.WithTimeout(ctx, c.cfg.VulnScanTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(scanCtx, cmdName, args...)
-	out, err := cmd.Output()
+	out, err := cmd.CombinedOutput()
 	if err != nil {
 		if c.shouldAutoInstallTrivy(cmdName, err) {
 			if bin, ierr := c.ensureTrivyInstalled(scanCtx); ierr == nil && strings.TrimSpace(bin) != "" {
 				c.logger.Infof("[VulnScan] trivy installed at %s; retrying scan", bin)
 				cmdName = bin
 				cmd = exec.CommandContext(scanCtx, cmdName, args...)
-				out, err = cmd.Output()
+				out, err = cmd.CombinedOutput()
 			} else if ierr != nil {
 				c.logger.Warnf("[VulnScan] auto-install trivy failed: %v", ierr)
 			}
 		}
 	}
+	if err != nil && strings.EqualFold(strings.TrimSpace(c.cfg.VulnScannerType), "trivy") {
+		// First run commonly fails because DB/cache is not initialized yet.
+		if ierr := c.ensureTrivyDB(scanCtx, cmdName); ierr == nil {
+			c.logger.Info("[VulnScan] trivy DB/cache initialized; retrying scan")
+			cmd = exec.CommandContext(scanCtx, cmdName, args...)
+			out, err = cmd.CombinedOutput()
+		} else {
+			c.logger.Warnf("[VulnScan] trivy DB init failed: %v", ierr)
+		}
+	}
 	if err != nil {
-		c.logger.Warnf("[VulnScan] scanner execution failed (%s): %v", c.cfg.VulnScannerType, err)
+		msg := strings.TrimSpace(string(out))
+		if len(msg) > 600 {
+			msg = msg[:600] + "..."
+		}
+		if msg == "" {
+			c.logger.Warnf("[VulnScan] scanner execution failed (%s): %v", c.cfg.VulnScannerType, err)
+		} else {
+			c.logger.Warnf("[VulnScan] scanner execution failed (%s): %v | output=%s", c.cfg.VulnScannerType, err, msg)
+		}
 		return
 	}
 	var findings []vulnFinding
@@ -138,7 +156,7 @@ func (c *VulnerabilityScannerCollector) buildCommand() (string, []string) {
 	if st == "grype" {
 		return bin, []string{"dir:C:\\", "-o", "json"}
 	}
-	return bin, []string{"fs", "C:\\", "--format", "json", "--quiet"}
+	return bin, []string{"fs", "C:\\", "--format", "json", "--quiet", "--cache-dir", trivyCacheDir()}
 }
 
 type vulnFinding struct {
@@ -298,6 +316,10 @@ func trivyExePath() string {
 	return filepath.Join(trivyToolDir(), "trivy.exe")
 }
 
+func trivyCacheDir() string {
+	return filepath.Join(trivyToolDir(), "cache")
+}
+
 func (c *VulnerabilityScannerCollector) ensureTrivyInstalled(ctx context.Context) (string, error) {
 	if fileExists(trivyExePath()) {
 		return trivyExePath(), nil
@@ -317,7 +339,30 @@ func (c *VulnerabilityScannerCollector) ensureTrivyInstalled(ctx context.Context
 	if err := extractZipFile(tmpZip, "trivy.exe", trivyExePath()); err != nil {
 		return "", fmt.Errorf("extract trivy.exe: %w", err)
 	}
+	_ = os.MkdirAll(trivyCacheDir(), 0755)
 	return trivyExePath(), nil
+}
+
+func (c *VulnerabilityScannerCollector) ensureTrivyDB(ctx context.Context, trivyBin string) error {
+	if strings.TrimSpace(trivyBin) == "" {
+		trivyBin = trivyExePath()
+	}
+	if err := os.MkdirAll(trivyCacheDir(), 0755); err != nil {
+		return err
+	}
+	cmd := exec.CommandContext(ctx, trivyBin, "image", "--download-db-only", "--cache-dir", trivyCacheDir(), "--quiet")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		msg := strings.TrimSpace(string(out))
+		if len(msg) > 500 {
+			msg = msg[:500] + "..."
+		}
+		if msg != "" {
+			return fmt.Errorf("%v: %s", err, msg)
+		}
+		return err
+	}
+	return nil
 }
 
 func fetchLatestTrivyWindowsZipURL(ctx context.Context) (string, error) {

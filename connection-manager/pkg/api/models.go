@@ -130,6 +130,9 @@ type AgentSummary struct {
 	Metadata        map[string]string `json:"metadata,omitempty"`
 	SysmonInstalled bool              `json:"sysmon_installed"`
 	SysmonRunning   bool              `json:"sysmon_running"`
+	Criticality     string            `json:"criticality"`
+	BusinessUnit    string            `json:"business_unit"`
+	Environment     string            `json:"environment"`
 }
 
 // AgentDetailResponse for single agent.

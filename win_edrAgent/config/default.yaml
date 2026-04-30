@@ -53,6 +53,14 @@ collectors:
   pipe_enabled: true
   # Enable process access telemetry (ETW Kernel-Audit-API-Calls)
   process_access_enabled: true
+  # Enable periodic vulnerability scanning (Trivy/Grype)
+  vuln_scan_enabled: true
+  vuln_scan_interval: 6h
+  vuln_scanner_type: "trivy"
+  vuln_scanner_path: ""
+  vuln_scan_timeout: 20m
+  # Optional scanner args override (when empty, built-in defaults are used)
+  vuln_scan_args: []
 
 response:
   # Enable file-based autonomous quarantine response

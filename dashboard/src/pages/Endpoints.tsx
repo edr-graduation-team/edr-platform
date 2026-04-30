@@ -599,10 +599,23 @@ function dmComponentsLabel(agent: Agent): string {
     return eff === 'online' || eff === 'degraded' ? 'EDR' : '—';
 }
 
+function criticalityPillClass(v?: string): string {
+    switch ((v || 'medium').toLowerCase()) {
+        case 'critical':
+            return 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/30';
+        case 'high':
+            return 'bg-orange-500/10 text-orange-600 dark:text-orange-400 border-orange-500/30';
+        case 'low':
+            return 'bg-sky-500/10 text-sky-600 dark:text-sky-400 border-sky-500/30';
+        default:
+            return 'bg-slate-500/10 text-slate-600 dark:text-slate-400 border-slate-500/30';
+    }
+}
+
 // Main Endpoints Page
 export default function Endpoints() {
     const queryClient = useQueryClient();
-    useToast(); // Toast is used inside mutations
+    const { showToast } = useToast();
     const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
     const [selectedCommand, setSelectedCommand] = useState<CommandType | null>(null);
     const [filters, setFilters] = useState({
@@ -643,6 +656,20 @@ export default function Endpoints() {
 
     const agents = data?.data || [];
     const total = data?.pagination?.total || 0;
+
+    const patchBusinessContextMutation = useMutation({
+        mutationFn: ({ agentId, criticality }: { agentId: string; criticality: 'low' | 'medium' | 'high' | 'critical' }) =>
+            agentsApi.patchBusinessContext(agentId, { criticality }),
+        onSuccess: () => {
+            showToast('Asset criticality updated', 'success');
+            queryClient.invalidateQueries({ queryKey: ['agents'] });
+            queryClient.invalidateQueries({ queryKey: ['vuln-findings'] });
+            queryClient.invalidateQueries({ queryKey: ['vuln-stats'] });
+        },
+        onError: (error: Error) => {
+            showToast(error.message || 'Failed to update criticality', 'error');
+        },
+    });
 
     const toggleSelectAll = () => {
         setSelectedIds((prev) => {
@@ -1023,6 +1050,7 @@ export default function Endpoints() {
                                     <th className="py-3 px-3 min-w-[180px]">Name</th>
                                     <th className="py-3 px-2">Status</th>
                                     <th className="py-3 px-2">Health</th>
+                                    <th className="py-3 px-2">Criticality</th>
                                     <th className="py-3 px-2">Profile</th>
                                     <th className="py-3 px-2">Active components</th>
                                     <th className="py-3 px-2">Customer</th>
@@ -1075,6 +1103,27 @@ export default function Endpoints() {
                                             </td>
                                             <td className="py-3 px-2 align-middle max-w-[120px]">
                                                 <HealthScoreBar score={agent.health_score} />
+                                            </td>
+                                            <td className="py-3 px-2 align-middle">
+                                                {authApi.canManageEndpoints() ? (
+                                                    <select
+                                                        value={(agent.criticality || 'medium').toLowerCase()}
+                                                        onChange={(e) => patchBusinessContextMutation.mutate({
+                                                            agentId: agent.id,
+                                                            criticality: e.target.value as 'low' | 'medium' | 'high' | 'critical',
+                                                        })}
+                                                        className="w-28 appearance-none bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-primary-500/50"
+                                                    >
+                                                        <option value="low">Low</option>
+                                                        <option value="medium">Medium</option>
+                                                        <option value="high">High</option>
+                                                        <option value="critical">Critical</option>
+                                                    </select>
+                                                ) : (
+                                                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full border text-[11px] font-semibold ${criticalityPillClass(agent.criticality)}`}>
+                                                        {(agent.criticality || 'medium').toLowerCase()}
+                                                    </span>
+                                                )}
                                             </td>
                                             <td className="py-3 px-2 align-middle text-xs text-slate-600 dark:text-slate-300 max-w-[100px] truncate" title={dmProfile(agent)}>
                                                 {dmProfile(agent)}

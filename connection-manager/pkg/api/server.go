@@ -114,6 +114,7 @@ func (s *Server) RegisterRoutes(handlers *Handlers) {
 	agents.GET("/stats", handlers.GetAgentStats, handlers.RequirePermission("endpoints", "read"))
 	agents.GET("/:id", handlers.GetAgent, handlers.RequirePermission("endpoints", "read"))
 	agents.PATCH("/:id", handlers.UpdateAgent, handlers.RequirePermission("endpoints", "manage"))
+	agents.PATCH("/:id/business-context", handlers.PatchAgentBusinessContext, handlers.RequirePermission("endpoints", "manage"))
 	agents.DELETE("/:id", handlers.DeleteAgent, handlers.RequirePermission("endpoints", "manage"))
 	agents.GET("/:id/events", handlers.GetAgentEvents, handlers.RequirePermission("endpoints", "read"))
 	agents.GET("/:id/quarantine", handlers.ListAgentQuarantine, handlers.RequirePermission("responses", "read"))
@@ -177,6 +178,7 @@ func (s *Server) RegisterRoutes(handlers *Handlers) {
 	vuln.GET("/findings/:id", handlers.GetVulnerabilityFinding, handlers.RequirePermission("endpoints", "read"))
 	vuln.PATCH("/findings/:id", handlers.PatchVulnerabilityFindingStatus, handlers.RequirePermission("endpoints", "manage"))
 	vuln.POST("/findings/bulk", handlers.BulkImportVulnerabilityFindings, handlers.RequirePermission("endpoints", "manage"))
+	vuln.POST("/scanners/ingest", handlers.IngestScannerReport, handlers.RequirePermission("endpoints", "manage"))
 	vuln.POST("/kev/sync", handlers.SyncKEVCatalog, handlers.RequirePermission("endpoints", "manage"))
 	vuln.GET("/stats", handlers.GetVulnerabilityStats, handlers.RequirePermission("endpoints", "read"))
 

@@ -247,6 +247,23 @@ func startPlatformCollectors(ctx context.Context, a *Agent) {
 		logger.Debug("ProcessAccess collector disabled by config")
 	}
 
+	// Vulnerability scanner collector (Trivy/Grype) — periodic local scans that
+	// emit normalized vulnerability_finding telemetry events.
+	if cfg.Collectors.VulnScanEnabled {
+		vs := collectors.NewVulnerabilityScannerCollector(cfg.Collectors, eventChan, logger)
+		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					logger.Errorf("Vulnerability scanner collector panicked and was safely recovered: %v", r)
+				}
+			}()
+			vs.Start(ctx)
+		}()
+		logger.Infof("Vulnerability scanner collector enabled (scanner=%s interval=%v)", cfg.Collectors.VulnScannerType, cfg.Collectors.VulnScanInterval)
+	} else {
+		logger.Debug("Vulnerability scanner collector disabled by config")
+	}
+
 	// NOTE: File monitoring and Image Load detection are now handled by
 	// the ETW collector above (EVENT_TRACE_FLAG_FILE_IO_INIT and
 	// EVENT_TRACE_FLAG_IMAGE_LOAD). They fire real-time from the kernel

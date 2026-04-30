@@ -23,6 +23,7 @@ const (
 	EventTypeProcessAccess EventType = "process_access"
 	EventTypeWMI           EventType = "wmi"
 	EventTypeClipboard     EventType = "clipboard"
+	EventTypeVulnerability EventType = "vulnerability_finding"
 )
 
 // Severity represents event severity level.

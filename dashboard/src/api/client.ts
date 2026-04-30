@@ -263,6 +263,10 @@ export interface Agent {
     updated_at: string;
     sysmon_installed?: boolean;
     sysmon_running?: boolean;
+    // Phase 3 — Asset Criticality & Risk Scoring
+    criticality?: 'low' | 'medium' | 'high' | 'critical';
+    business_unit?: string;
+    environment?: string;
 }
 
 // Filter policy for dynamic agent-side event filtering
@@ -576,6 +580,11 @@ export const agentsApi = {
         const response = await connectionApi.patch(`/api/v1/agents/${id}`, data);
         return response.data;
     },
+    // Phase 3 — Asset Criticality (Risk-Adjusted Scoring)
+    updateBusinessContext: async (id: string, data: { criticality?: 'low' | 'medium' | 'high' | 'critical'; business_unit?: string; environment?: string }) => {
+        const response = await connectionApi.patch<{ data: Agent }>(`/api/v1/agents/${id}/business-context`, data);
+        return response.data.data;
+    },
     delete: async (id: string) => {
         await connectionApi.delete(`/api/v1/agents/${id}`);
     },
@@ -825,6 +834,7 @@ export interface VulnerabilityFinding {
     id: string;
     agent_id: string;
     hostname: string;
+    criticality: 'low' | 'medium' | 'high' | 'critical';
     cve: string;
     title: string;
     description: string;

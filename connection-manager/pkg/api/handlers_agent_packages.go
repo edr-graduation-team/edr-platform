@@ -35,14 +35,13 @@ type CreateAgentPackageRequest struct {
 	// the inbound Host is loopback, server_ip/server_domain from this request
 	// replace localhost so remote agents can reach the API.
 	PublicAPIBaseURL string `json:"public_api_base_url"`
-	// TokenID is ONLY used to locate a legitimate CA-trust anchor during build;
-	// it is NOT injected into the produced binary for an upgrade. An already-enrolled
-	// agent has its own mTLS identity and does not need a new enrollment token.
+	// TokenID is deprecated for upgrade flow and ignored when provided.
+	// Kept only for backward compatibility with older dashboard clients.
 	TokenID       string `json:"token_id"`
 	SkipConfig    bool   `json:"skip_config"`
 	InstallSysmon bool   `json:"install_sysmon"`
 
-	ExpiresInSeconds int `json:"expires_in_seconds"` // default 900
+	ExpiresInSeconds int `json:"expires_in_seconds"` // default 900, max 7200 (2h)
 }
 
 type CreateAgentPackageResponse struct {
@@ -86,8 +85,8 @@ func (h *Handlers) CreateAgentPackage(c echo.Context) error {
 	if exp <= 0 {
 		exp = 900
 	}
-	if exp > 86400 {
-		exp = 86400
+	if exp > 7200 {
+		exp = 7200
 	}
 	expiresAt := time.Now().Add(time.Duration(exp) * time.Second)
 

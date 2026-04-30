@@ -1163,7 +1163,8 @@ export interface CreateAgentPackageRequest {
     server_port?: string;
     /** Base URL (scheme://host[:port]) the agent can reach; defaults to browser origin in UI */
     public_api_base_url?: string;
-    token_id: string;
+    /** Deprecated for upgrade flow; ignored by backend. */
+    token_id?: string;
     skip_config: boolean;
     install_sysmon?: boolean;
     expires_in_seconds?: number;

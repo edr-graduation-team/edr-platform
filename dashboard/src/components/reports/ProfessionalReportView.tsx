@@ -33,6 +33,7 @@ interface ProfessionalReportViewProps {
     format: ReportFormat;
     onDownload: (format: ReportFormat) => void;
     isGenerating: boolean;
+    customSections?: string[];
 }
 
 const CHART_COLORS = {
@@ -56,7 +57,8 @@ export function ProfessionalReportView({
     template, 
     format, 
     onDownload, 
-    isGenerating 
+    isGenerating,
+    customSections
 }: ProfessionalReportViewProps) {
     const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set(['summary', 'kpis']));
     const config = REPORT_TEMPLATES[template];
@@ -69,6 +71,12 @@ export function ProfessionalReportView({
             newSet.add(sectionId);
         }
         setExpandedSections(newSet);
+    };
+
+    // Helper to check if section should be shown
+    const shouldShowSection = (sectionId: string) => {
+        if (template !== 'custom') return true; // All sections shown for non-custom templates
+        return customSections?.includes(sectionId) ?? true;
     };
 
     if (!data) {
@@ -123,13 +131,13 @@ export function ProfessionalReportView({
             {/* Preview Content */}
             <div className="p-6 space-y-6 max-h-[600px] overflow-y-auto">
                 {/* Executive Summary */}
-                <ReportSection 
-                    title="Executive Summary"
-                    icon={CheckCircle}
-                    color={config.colorScheme.success}
-                    isExpanded={expandedSections.has('summary')}
-                    onToggle={() => toggleSection('summary')}
-                >
+                {shouldShowSection('summary') && <ReportSection 
+                        title="Executive Summary"
+                        icon={CheckCircle}
+                        color={config.colorScheme.success}
+                        isExpanded={expandedSections.has('summary')}
+                        onToggle={() => toggleSection('summary')}
+                    >
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
                         <KpiCard 
                             title="Total Alerts" 
@@ -163,10 +171,10 @@ export function ProfessionalReportView({
                             Critical attention is required for <strong>{data.summary.criticalCount}</strong> high-risk alerts.
                         </p>
                     </div>
-                </ReportSection>
+                </ReportSection>}
 
                 {/* KPI Cards */}
-                <ReportSection
+                {shouldShowSection('kpis') && <ReportSection
                     title="Key Performance Indicators"
                     icon={Activity}
                     color={config.colorScheme.primary}
@@ -180,10 +188,10 @@ export function ProfessionalReportView({
                         <StatPill label="Medium" value={data.summary.mediumCount} color="bg-yellow-500" />
                         <StatPill label="Low" value={data.summary.lowCount} color="bg-blue-400" />
                     </div>
-                </ReportSection>
+                </ReportSection>}
 
                 {/* Charts */}
-                {data.charts.timeline.length > 0 && (
+                {shouldShowSection('trends') && data.charts.timeline.length > 0 && (
                     <ReportSection
                         title="Trend Analysis (7 Days)"
                         icon={TrendingUp}
@@ -216,7 +224,7 @@ export function ProfessionalReportView({
                 )}
 
                 {/* Severity Distribution */}
-                {data.charts.severityDistribution.length > 0 && (
+                {shouldShowSection('severity') && data.charts.severityDistribution.length > 0 && (
                     <ReportSection
                         title="Alert Severity Distribution"
                         icon={PieChart}
@@ -265,7 +273,7 @@ export function ProfessionalReportView({
                 )}
 
                 {/* MITRE Tactics */}
-                {data.charts.topTactics.length > 0 && (
+                {shouldShowSection('mitre') && data.charts.topTactics.length > 0 && (
                     <ReportSection
                         title="MITRE ATT&CK Tactics"
                         icon={Shield}
@@ -288,7 +296,7 @@ export function ProfessionalReportView({
                 )}
 
                 {/* Data Tables Preview */}
-                {data.tables.alerts.length > 0 && (
+                {shouldShowSection('alerts') && data.tables.alerts.length > 0 && (
                     <ReportSection
                         title={`Recent Alerts (${data.tables.alerts.length} shown)`}
                         icon={AlertTriangle}
@@ -331,7 +339,7 @@ export function ProfessionalReportView({
                 )}
 
                 {/* OS Distribution */}
-                {data.charts.osDistribution.length > 0 && (
+                {shouldShowSection('os') && data.charts.osDistribution.length > 0 && (
                     <ReportSection
                         title="Operating System Distribution"
                         icon={Server}

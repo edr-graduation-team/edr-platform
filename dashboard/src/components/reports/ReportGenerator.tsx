@@ -3,7 +3,7 @@
  * Advanced report creation with templates, formats, and data visualization
  */
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { 
     FileText, FileSpreadsheet, FileCode, Download, RefreshCw, 
     Eye, AlertTriangle, Calendar, Filter,
@@ -50,6 +50,9 @@ export function ReportGenerator() {
     const [generatedData, setGeneratedData] = useState<ReportData | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [showPreview, setShowPreview] = useState(false);
+
+    // Custom report sections
+    const [customSections, setCustomSections] = useState<string[]>(['summary', 'kpis', 'charts', 'tables']);
 
     // Fetch agents list
     const agentsQuery = useQuery({
@@ -206,6 +209,30 @@ export function ReportGenerator() {
         }
     };
 
+    // Get available sections for custom report
+    const availableSections = useMemo(() => {
+        return [
+            { id: 'cover', name: 'Cover Page', type: 'text', description: 'Report header with title and date' },
+            { id: 'summary', name: 'Executive Summary', type: 'summary', description: 'Key findings and overview' },
+            { id: 'kpis', name: 'Key Metrics (KPIs)', type: 'kpi', description: 'Critical performance indicators' },
+            { id: 'severity', name: 'Severity Distribution', type: 'chart', description: 'Pie chart of alert severities' },
+            { id: 'trends', name: 'Trend Analysis', type: 'chart', description: '7-day alert trends' },
+            { id: 'mitre', name: 'MITRE ATT&CK Tactics', type: 'chart', description: 'Tactics bar chart' },
+            { id: 'os', name: 'OS Distribution', type: 'chart', description: 'Operating system breakdown' },
+            { id: 'alerts', name: 'Alerts Table', type: 'table', description: 'Detailed alerts list' },
+            { id: 'devices', name: 'Devices Table', type: 'table', description: 'Endpoint inventory' },
+            { id: 'commands', name: 'Commands Table', type: 'table', description: 'Response actions' },
+        ];
+    }, []);
+
+    const toggleCustomSection = (sectionId: string) => {
+        setCustomSections(prev => 
+            prev.includes(sectionId) 
+                ? prev.filter(id => id !== sectionId)
+                : [...prev, sectionId]
+        );
+    };
+
     return (
         <div className="space-y-6">
             {/* Report Builder Panel */}
@@ -258,6 +285,52 @@ export function ReportGenerator() {
                             })}
                         </div>
                     </div>
+
+                    {/* Custom Report Section Selector */}
+                    {selectedTemplate === 'custom' && (
+                        <div className="p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-slate-200 dark:border-slate-700">
+                            <div className="flex items-center gap-2 mb-3">
+                                <Settings className="w-4 h-4 text-violet-500" />
+                                <label className="text-sm font-semibold text-slate-700 dark:text-slate-300">
+                                    Customize Report Sections
+                                </label>
+                            </div>
+                            <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">
+                                Select which sections to include in your custom report:
+                            </p>
+                            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-2">
+                                {availableSections.map((section) => (
+                                    <button
+                                        key={section.id}
+                                        onClick={() => toggleCustomSection(section.id)}
+                                        className={`p-2 rounded-lg border text-left transition-all ${
+                                            customSections.includes(section.id)
+                                                ? 'border-violet-500 bg-violet-50 dark:bg-violet-950/30 text-violet-700 dark:text-violet-300'
+                                                : 'border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600 opacity-60'
+                                        }`}
+                                    >
+                                        <div className="flex items-center gap-2">
+                                            <div className={`w-4 h-4 rounded border flex items-center justify-center ${
+                                                customSections.includes(section.id)
+                                                    ? 'bg-violet-500 border-violet-500'
+                                                    : 'border-slate-300 dark:border-slate-600'
+                                            }`}>
+                                                {customSections.includes(section.id) && (
+                                                    <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                                                    </svg>
+                                                )}
+                                            </div>
+                                            <span className="text-xs font-medium">{section.name}</span>
+                                        </div>
+                                    </button>
+                                ))}
+                            </div>
+                            <p className="text-xs text-slate-500 dark:text-slate-400 mt-2">
+                                Selected: {customSections.length} sections
+                            </p>
+                        </div>
+                    )}
 
                     {/* Format Selection */}
                     <div>
@@ -408,6 +481,7 @@ export function ReportGenerator() {
                     format={selectedFormat}
                     onDownload={handleDownload}
                     isGenerating={isGenerating}
+                    customSections={selectedTemplate === 'custom' ? customSections : undefined}
                 />
             )}
 

@@ -627,7 +627,8 @@ func (h *Handler) quarantineFile(ctx context.Context, params map[string]string) 
 
 // resolveC2IP resolves a hostname or bare IP to a usable IPv4 address.
 // If addr is already a bare IP, it is returned unchanged.
-// If resolution fails, it falls back to using the raw hostname (best-effort).
+// If DNS resolution fails (e.g. "edr.local" not in DNS), falls back to
+// the raw IP in h.serverAddress so isolation still works in lab environments.
 func (h *Handler) resolveC2IP(hostOrIP string) (string, error) {
 	// If it's already a valid IP, return it directly.
 	if ip := net.ParseIP(hostOrIP); ip != nil {
@@ -638,6 +639,17 @@ func (h *Handler) resolveC2IP(hostOrIP string) (string, error) {
 	h.logger.Infof("[Isolate] Resolving hostname %q via DNS...", hostOrIP)
 	addrs, err := net.LookupHost(hostOrIP)
 	if err != nil {
+		// DNS failed — fall back to the IP the agent is currently connected to.
+		// This handles lab environments where the C2 hostname (e.g. "edr.local")
+		// is not registered in DNS but the agent already has a live connection.
+		if h.serverAddress != "" {
+			fallbackHost, _, splitErr := splitHostPort(h.serverAddress)
+			if splitErr == nil && net.ParseIP(fallbackHost) != nil {
+				h.logger.Warnf("[Isolate] DNS failed for %q (%v) — using active connection IP %s as fallback",
+					hostOrIP, err, fallbackHost)
+				return fallbackHost, nil
+			}
+		}
 		return "", fmt.Errorf("DNS resolution of %q failed: %w", hostOrIP, err)
 	}
 	if len(addrs) == 0 {
@@ -900,6 +912,11 @@ func (h *Handler) isolationWatchdog(
 	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
 
+	// Dead-man's switch: if isolated AND unreachable for this many consecutive
+	// ticks (10s each), auto-unisolate to prevent permanent lockout.
+	const maxDisconnectedTicks = 30 // 30 × 10s = 5 minutes
+	disconnectedTicks := 0
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -910,10 +927,29 @@ func (h *Handler) isolationWatchdog(
 			// Is the gRPC stream healthy?
 			if health != nil && health.IsConnected() {
 				h.logger.Debug("[Watchdog] gRPC healthy ✓")
+				disconnectedTicks = 0 // reset dead-man counter on successful contact
 				continue
 			}
 
-			h.logger.Warn("[Watchdog] gRPC appears disconnected — re-resolving C2 hostname...")
+			disconnectedTicks++
+			h.logger.Warnf("[Watchdog] gRPC disconnected (tick %d/%d) — re-resolving C2 hostname...",
+				disconnectedTicks, maxDisconnectedTicks)
+
+			// ── Dead-man's switch ─────────────────────────────────────────
+			// If we've been isolated and unreachable for too long, auto-remove
+			// the firewall block so the agent can reconnect when the server
+			// comes back up. This prevents permanent lockout during server
+			// restarts or lab environment disruptions.
+			if disconnectedTicks >= maxDisconnectedTicks {
+				h.logger.Warnf("[Watchdog] DEAD-MAN SWITCH: isolated but C2 unreachable for %ds — auto-unisolating to prevent permanent lockout",
+					disconnectedTicks*10)
+				if _, err := h.unisolateNetwork(ctx, map[string]string{}); err != nil {
+					h.logger.Errorf("[Watchdog] Dead-man auto-unisolate failed: %v", err)
+				} else {
+					h.logger.Info("[Watchdog] Dead-man auto-unisolate succeeded — firewall restored ✓")
+				}
+				return // watchdog exits; unisolateNetwork cancels it anyway
+			}
 
 			// Re-resolve hostname.
 			newIP, err := h.resolveC2IP(hostname)
@@ -924,9 +960,6 @@ func (h *Handler) isolationWatchdog(
 
 			if newIP == currentIP {
 				h.logger.Infof("[Watchdog] IP unchanged (%s) — transient disconnect; RunReconnector will retry", currentIP)
-				// No firewall change needed. The RunReconnector in grpc/client.go
-				// will re-establish the connection automatically since it loops
-				// on c.connected == false.
 				continue
 			}
 
@@ -947,6 +980,8 @@ func (h *Handler) isolationWatchdog(
 			h.mu.Lock()
 			h.isolationCurrentIP = newIP
 			h.mu.Unlock()
+
+			disconnectedTicks = 0 // reset after successful rule update
 		}
 	}
 }
@@ -1193,6 +1228,15 @@ func (h *Handler) collectForensics(ctx context.Context, params map[string]string
 	logTypes := strings.TrimSpace(params["types"])
 	if logTypes == "" {
 		logTypes = strings.TrimSpace(params["log_types"])
+	}
+	// Accept "event_types" as a UI-friendly alias (used by older playbook seeds).
+	// Map generic category names to real Windows event log channel names.
+	if logTypes == "" {
+		if et := strings.TrimSpace(params["event_types"]); et != "" {
+			// Map to real Windows channels: Security covers auth/network events,
+			// System covers process/file/system events.
+			logTypes = "System,Security"
+		}
 	}
 	filePath := strings.TrimSpace(params["file_path"])
 	if filePath == "" {

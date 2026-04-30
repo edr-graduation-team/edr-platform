@@ -41,14 +41,15 @@ func (s *CommandService) ExecutePlaybookCommand(ctx context.Context, executionID
 	// whitelist (which includes powershell -Command and other safe ops).
 	// This is safe because playbooks are server-authored and RBAC-protected.
 	params := cmd.Parameters
-	if models.CommandType(cmd.Type) == "run_cmd" {
-		if params == nil {
-			params = make(map[string]interface{})
-		}
-		// Only inject when not already present (respect playbook author intent).
-		if _, exists := params["from_playbook"]; !exists {
-			params["from_playbook"] = "true"
-		}
+	if params == nil {
+		params = make(map[string]interface{})
+	}
+	// Inject the playbook-context marker for ALL command types so the agent
+	// knows this was server-authored and RBAC-protected.
+	// For run_cmd this specifically unlocks the extended playbookAllowedCommands
+	// whitelist (powershell -Command, mountvol, etc.).
+	if _, exists := params["from_playbook"]; !exists {
+		params["from_playbook"] = "true"
 	}
 
 	// Convert playbook command to system command

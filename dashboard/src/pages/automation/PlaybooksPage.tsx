@@ -5,24 +5,35 @@ import { UserAssistant } from '../../components/automation/UserAssistant';
 import { Play, Shield, Clock, TrendingUp, AlertTriangle, Plus, Terminal, X, CheckCircle, Target, Trash2 } from 'lucide-react';
 import { automationApi, agentsApi } from '../../api/client';
 
+// Windows event log channels available for collection.
+// These are the exact channel names accepted by wevtutil / Get-WinEvent.
+const LOG_TYPE_OPTIONS = [
+  { value: 'System',      label: 'System',      desc: 'OS & driver events' },
+  { value: 'Security',    label: 'Security',    desc: 'Logon, audit & access' },
+  { value: 'Application', label: 'Application', desc: 'App-level events' },
+  { value: 'Microsoft-Windows-Sysmon/Operational', label: 'Sysmon', desc: 'Process, network, file' },
+  { value: 'Microsoft-Windows-PowerShell/Operational', label: 'PowerShell', desc: 'PS script activity' },
+  { value: 'Microsoft-Windows-TaskScheduler/Operational', label: 'Task Scheduler', desc: 'Scheduled task events' },
+  { value: 'Microsoft-Windows-Windows Defender/Operational', label: 'Defender', desc: 'AV detections' },
+];
+
 // Parameters required by each command type.
-// All fields set to required:false - every command now carries a DB-level default
-// param pre-filled in openExecuteModal. The * only shows when no DB default exists.
-const COMMAND_PARAMS: Record<string, Array<{ key: string; label: string; placeholder: string; required: boolean; defaultValue?: string }>> = {
+// Fields with type:'checklist' render as checkbox grids, not text inputs.
+const COMMAND_PARAMS: Record<string, Array<{ key: string; label: string; placeholder: string; required: boolean; type?: string; defaultValue?: string }>> = {
   terminate_process: [{ key: 'process_name', label: 'Process Name / PID', placeholder: 'e.g., vssadmin.exe  or  PID:1234', required: true  }],
   quarantine_file:   [{ key: 'file_path',    label: 'File Path',    placeholder: 'e.g., C:\\Windows\\Temp\\malware.exe', required: true  }],
-  run_cmd:           [{ key: 'cmd',          label: 'Command',      placeholder: 'e.g., powershell -Command "Get-Volume | Where-Object {$_.DriveType -eq \'Removable\'} | Dismount-Volume -Confirm:$false"',    required: false }],
-  collect_logs:      [{ key: 'log_types',    label: 'Log Types',    placeholder: 'System,Security,Application',        required: false }],
-  scan_file:         [{ key: 'file_path',    label: 'Path to Scan', placeholder: 'e.g., C:\\Windows\\Temp',            required: true  }],
-  update_signatures: [{ key: 'url',          label: 'Signature URL',placeholder: 'https://...',                        required: false }],
+  run_cmd:           [{ key: 'cmd',          label: 'Command',      placeholder: 'e.g., reg query HKLM\\...', required: false }],
+  collect_logs:      [{ key: 'log_types',    label: 'Log Channels', placeholder: '', required: false, type: 'checklist' }],
+  scan_file:         [{ key: 'file_path',    label: 'Path to Scan', placeholder: 'e.g., C:\\Windows\\Temp', required: true  }],
+  update_signatures: [{ key: 'url',          label: 'Signature URL', placeholder: 'https://...', required: false }],
   collect_forensics: [
-    { key: 'event_types', label: 'Event Types', placeholder: 'process,file,network,registry', required: false },
-    { key: 'max_events',  label: 'Max Events',  placeholder: '1000',                          required: false },
+    { key: 'log_types',   label: 'Log Channels', placeholder: '', required: false, type: 'checklist' },
+    { key: 'max_events',  label: 'Max Events',   placeholder: '500', required: false },
   ],
   filesystem_timeline: [{ key: 'window_hours', label: 'Time Window (hours)', placeholder: '24', required: false }],
   // Legacy type aliases
   process_terminate: [{ key: 'process_name', label: 'Process Name / PID', placeholder: 'e.g., vssadmin.exe  or  PID:1234', required: true  }],
-  yara_scan:         [{ key: 'file_path',    label: 'Path to Scan', placeholder: 'C:\\Windows\\Temp',      required: true  }],
+  yara_scan:         [{ key: 'file_path',    label: 'Path to Scan', placeholder: 'C:\\Windows\\Temp', required: true  }],
 };
 
 // Map API ResponsePlaybook to the component's Playbook interface
@@ -271,7 +282,7 @@ export function PlaybooksPage() {
         case 'run_cmd':            params = { cmd: p('cmd') || String(cmd.params?.cmd || '') }; break;
         case 'collect_logs':       params = { log_types: p('log_types') || String(cmd.params?.log_types || 'System,Security') }; break;
         case 'scan_file':          params = { file_path: p('file_path') || String(cmd.params?.file_path || 'C:\\Windows\\Temp') }; break;
-        case 'collect_forensics':  params = { event_types: p('event_types') || String(cmd.params?.event_types || 'process,file,network,registry'), max_events: p('max_events') || String(cmd.params?.max_events || '1000') }; break;
+        case 'collect_forensics':  params = { log_types: p('log_types') || String(cmd.params?.log_types || 'System,Security'), max_events: p('max_events') || String(cmd.params?.max_events || '500') }; break;
         case 'update_signatures':  params = { url: p('url') || String(cmd.params?.url || '') }; break;
         case 'filesystem_timeline':params = { window_hours: p('window_hours') || String(cmd.params?.window_hours || '24') }; break;
         case 'isolate_network':
@@ -285,11 +296,12 @@ export function PlaybooksPage() {
         // ── Legacy type aliases ─────────────────────────────────────────
         case 'network_isolate':   mappedType = 'isolate_network'; break;
         case 'process_terminate': mappedType = 'terminate_process'; params = { process_name: p('process_name') || String(cmd.params?.process_name || 'suspicious.exe'), kill_tree: 'true' }; break;
-        case 'forensic_dump':     mappedType = 'collect_forensics'; params = { event_types: 'process,file,network,registry', max_events: '1000' }; break;
+        case 'forensic_dump':     mappedType = 'collect_forensics'; params = { log_types: 'System,Security', max_events: '500' }; break;
         case 'device_unmount':    mappedType = 'run_cmd'; params = { cmd: '__EJECT_USB__', from_playbook: 'true' }; break;
         case 'log_pull':          mappedType = 'collect_logs'; params = { log_types: 'System,Security' }; break;
         case 'yara_scan':         mappedType = 'scan_file'; params = { file_path: p('file_path') || String(cmd.params?.file_path || 'C:\\Windows\\Temp') }; break;
-        case 'registry_query':    mappedType = 'run_cmd'; params = { cmd: 'reg query HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Run' }; break;
+        // registry_query: use single backslashes — 'HKLM\Software\...' in JS = 'HKLM\Software\...' at runtime (one backslash each)
+        case 'registry_query':    mappedType = 'run_cmd'; params = { cmd: 'reg query HKLM\Software\Microsoft\Windows\CurrentVersion\Run' }; break;
       }
 
       // Inject playbook context marker so the agent routes through the
@@ -618,16 +630,70 @@ export function PlaybooksPage() {
                     const defs = COMMAND_PARAMS[cmd.type] || [];
                     defs.forEach(pd => {
                       const currentVal  = cmdParams[`${idx}_${pd.key}`] || '';
-                      const dbDefault   = String(cmd.params?.[pd.key] || '');
+                      const dbDefault   = String(cmd.params?.[pd.key] || cmd.params?.['log_types'] || '');
                       const hasDbValue  = !!dbDefault && !dbDefault.startsWith('${');
 
-                      // "From Alert": required field, filled from alert context (not from DB)
                       const isFromAlert  = pd.required && !!currentVal && currentVal !== dbDefault;
-                      // "Auto-filled": non-required field that has a DB default (read-only)
                       const isAutoFilled = !pd.required && hasDbValue && currentVal === dbDefault;
-                      // "Empty required": required field with nothing entered yet
                       const isEmpty      = pd.required && !currentVal.trim();
 
+                      // ── Checklist (log channel selector) ──────────────────
+                      if (pd.type === 'checklist') {
+                        const selected = new Set(
+                          (currentVal || 'System,Security').split(',').map(s => s.trim()).filter(Boolean)
+                        );
+                        const toggle = (val: string) => {
+                          const next = new Set(selected);
+                          if (next.has(val)) next.delete(val); else next.add(val);
+                          setCmdParams(prev => ({ ...prev, [`${idx}_${pd.key}`]: [...next].join(',') }));
+                        };
+                        inputs.push(
+                          <div key={`${idx}-${pd.key}`}>
+                            <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">
+                              Step {idx + 1} &mdash; {pd.label}
+                              <span className="text-xs font-normal text-slate-400 ml-2">({cmd.type})</span>
+                            </label>
+                            <div className="grid grid-cols-2 gap-2">
+                              {LOG_TYPE_OPTIONS.map(opt => (
+                                <button
+                                  key={opt.value}
+                                  type="button"
+                                  onClick={() => toggle(opt.value)}
+                                  className={`flex items-center gap-2.5 px-3 py-2 rounded-lg border text-left text-sm transition-all ${
+                                    selected.has(opt.value)
+                                      ? 'bg-indigo-600 border-indigo-600 text-white shadow-sm'
+                                      : 'bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:border-indigo-400'
+                                  }`}
+                                >
+                                  <div className={`w-4 h-4 rounded flex items-center justify-center shrink-0 border ${
+                                    selected.has(opt.value)
+                                      ? 'bg-white border-white'
+                                      : 'border-slate-400 dark:border-slate-600'
+                                  }`}>
+                                    {selected.has(opt.value) && (
+                                      <svg className="w-3 h-3 text-indigo-600" fill="currentColor" viewBox="0 0 12 12">
+                                        <path d="M10 3L5 8.5 2 5.5l-1 1L5 10.5l6-7-1-0.5z"/>
+                                      </svg>
+                                    )}
+                                  </div>
+                                  <div>
+                                    <div className="font-semibold leading-tight">{opt.label}</div>
+                                    <div className={`text-xs leading-tight ${ selected.has(opt.value) ? 'text-indigo-200' : 'text-slate-400' }`}>{opt.desc}</div>
+                                  </div>
+                                </button>
+                              ))}
+                            </div>
+                            {currentVal && (
+                              <p className="text-xs text-slate-500 mt-2">
+                                Selected: <span className="font-mono text-indigo-600 dark:text-indigo-400">{currentVal}</span>
+                              </p>
+                            )}
+                          </div>
+                        );
+                        return;
+                      }
+
+                      // ── Standard text input ───────────────────────────────
                       inputs.push(
                         <div key={`${idx}-${pd.key}`}>
                           <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-1.5">

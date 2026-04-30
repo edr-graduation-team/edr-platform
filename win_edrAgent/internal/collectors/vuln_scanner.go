@@ -154,10 +154,11 @@ func (c *VulnerabilityScannerCollector) buildCommand() (string, []string) {
 	}
 	// Safe defaults: scan filesystem root and emit JSON.
 	if st == "grype" {
-		return bin, []string{"dir:C:\\", "-o", "json"}
+		// Focus on installed application directories by default (not full disk).
+		return bin, []string{"dir:C:\\Program Files", "dir:C:\\Program Files (x86)", "-o", "json"}
 	}
 	return bin, []string{
-		"fs", "C:\\",
+		"fs", "C:\\Program Files", "C:\\Program Files (x86)",
 		"--format", "json",
 		"--quiet",
 		"--cache-dir", trivyCacheDir(),

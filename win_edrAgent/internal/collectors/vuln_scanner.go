@@ -156,7 +156,18 @@ func (c *VulnerabilityScannerCollector) buildCommand() (string, []string) {
 	if st == "grype" {
 		return bin, []string{"dir:C:\\", "-o", "json"}
 	}
-	return bin, []string{"fs", "C:\\", "--format", "json", "--quiet", "--cache-dir", trivyCacheDir()}
+	return bin, []string{
+		"fs", "C:\\",
+		"--format", "json",
+		"--quiet",
+		"--cache-dir", trivyCacheDir(),
+		// Windows hosts often contain locked system files that cause Trivy fs scans
+		// to exit with status=1. Skip them so scanning remains resilient.
+		"--skip-files", `C:\DumpStack.log.tmp`,
+		"--skip-files", `C:\pagefile.sys`,
+		"--skip-files", `C:\hiberfil.sys`,
+		"--skip-files", `C:\swapfile.sys`,
+	}
 }
 
 type vulnFinding struct {

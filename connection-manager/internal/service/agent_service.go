@@ -46,6 +46,10 @@ type AgentService interface {
 
 	// SetIsolation updates the is_isolated flag for an agent.
 	SetIsolation(ctx context.Context, id uuid.UUID, isolated bool) error
+
+	// UpdateBusinessContext updates the agent's asset-context fields (criticality, business_unit, environment).
+	// Triggers automatic recompute of vulnerability priority_score for the agent's findings.
+	UpdateBusinessContext(ctx context.Context, id uuid.UUID, ctxFields repository.AgentBusinessContext) error
 }
 
 // RegisterAgentRequest contains registration request data.
@@ -455,4 +459,10 @@ func (s *agentServiceImpl) Approve(ctx context.Context, id uuid.UUID, approvedBy
 // SetIsolation updates the is_isolated flag for an agent.
 func (s *agentServiceImpl) SetIsolation(ctx context.Context, id uuid.UUID, isolated bool) error {
 	return s.agentRepo.SetIsolation(ctx, id, isolated)
+}
+
+// UpdateBusinessContext updates asset-context fields (criticality, business_unit, environment).
+// The DB trigger on criticality auto-recomputes priority_score for vulnerability findings.
+func (s *agentServiceImpl) UpdateBusinessContext(ctx context.Context, id uuid.UUID, ctxFields repository.AgentBusinessContext) error {
+	return s.agentRepo.UpdateBusinessContext(ctx, id, ctxFields)
 }

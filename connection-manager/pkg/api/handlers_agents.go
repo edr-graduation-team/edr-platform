@@ -206,6 +206,70 @@ func (h *Handlers) UpdateAgent(c echo.Context) error {
 	})
 }
 
+// agentBusinessContextRequest is the body for PATCH /api/v1/agents/:id/business-context
+// All fields are optional; only provided ones are updated.
+type agentBusinessContextRequest struct {
+	Criticality  *string `json:"criticality,omitempty"`   // low | medium | high | critical
+	BusinessUnit *string `json:"business_unit,omitempty"` // free-form
+	Environment  *string `json:"environment,omitempty"`   // production | staging | development | ''
+}
+
+// PatchAgentBusinessContext updates an agent's asset-context fields.
+// A DB trigger on `criticality` automatically recomputes priority_score for the
+// agent's vulnerability findings (Phase 3 — Risk-Adjusted Scoring).
+//
+// PATCH /api/v1/agents/:id/business-context
+func (h *Handlers) PatchAgentBusinessContext(c echo.Context) error {
+	if h.agentSvc == nil {
+		return errorResponse(c, http.StatusServiceUnavailable, "DB_UNAVAILABLE", "Agent service is not available")
+	}
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		return errorResponse(c, http.StatusBadRequest, "INVALID_ID", "Invalid agent ID format")
+	}
+
+	var body agentBusinessContextRequest
+	if err := c.Bind(&body); err != nil {
+		return errorResponse(c, http.StatusBadRequest, "INVALID_BODY", "Invalid JSON body")
+	}
+	if body.Criticality == nil && body.BusinessUnit == nil && body.Environment == nil {
+		return errorResponse(c, http.StatusBadRequest, "EMPTY_PATCH", "Provide at least one of: criticality, business_unit, environment")
+	}
+
+	if body.Criticality != nil {
+		switch strings.ToLower(strings.TrimSpace(*body.Criticality)) {
+		case "low", "medium", "high", "critical":
+			normalized := strings.ToLower(strings.TrimSpace(*body.Criticality))
+			body.Criticality = &normalized
+		default:
+			return errorResponse(c, http.StatusBadRequest, "INVALID_CRITICALITY", "criticality must be one of: low, medium, high, critical")
+		}
+	}
+
+	err = h.agentSvc.UpdateBusinessContext(c.Request().Context(), id, repository.AgentBusinessContext{
+		Criticality:  body.Criticality,
+		BusinessUnit: body.BusinessUnit,
+		Environment:  body.Environment,
+	})
+	if err != nil {
+		if err == repository.ErrNotFound {
+			return errorResponse(c, http.StatusNotFound, "NOT_FOUND", "Agent not found")
+		}
+		h.logger.WithError(err).Error("Failed to update agent business context")
+		return errorResponse(c, http.StatusInternalServerError, "INTERNAL_ERROR", err.Error())
+	}
+
+	// Return the refreshed agent so the dashboard can reflect the change immediately.
+	updated, err := h.agentSvc.GetByID(c.Request().Context(), id)
+	if err != nil {
+		return c.JSON(http.StatusOK, map[string]interface{}{"data": map[string]string{"id": id.String()}, "meta": responseMeta(c)})
+	}
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"data": updated,
+		"meta": responseMeta(c),
+	})
+}
+
 // DeleteAgent removes an agent.
 func (h *Handlers) DeleteAgent(c echo.Context) error {
 	idStr := c.Param("id")

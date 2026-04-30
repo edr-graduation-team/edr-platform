@@ -50,6 +50,12 @@ type Agent struct {
 	Tags     map[string]string `db:"tags" json:"tags"`
 	Metadata map[string]string `db:"metadata" json:"metadata"`
 
+	// Asset criticality (Phase 3 — Risk-adjusted prioritization)
+	// Drives the priority_score formula on linked vulnerability findings.
+	Criticality   string `db:"criticality" json:"criticality"`     // low, medium, high, critical
+	BusinessUnit  string `db:"business_unit" json:"business_unit"` // free-form (e.g. "Finance", "Engineering")
+	Environment   string `db:"environment" json:"environment"`     // production, staging, development, ''
+
 	// Timestamps
 	CreatedAt time.Time `db:"created_at" json:"created_at"`
 	UpdatedAt time.Time `db:"updated_at" json:"updated_at"`

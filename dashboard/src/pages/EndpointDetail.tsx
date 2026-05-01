@@ -904,7 +904,7 @@ function OverviewTab({
                                             <option key={v} value={v}>{v.charAt(0).toUpperCase()+v.slice(1)}</option>
                                         ))}
                                     </select>
-                                    <button onClick={() => bCtxMutation.mutate({ criticality: pendingCrit })} disabled={bCtxMutation.isPending}
+                                    <button onClick={() => bCtxMutation.mutate({ criticality: pendingCrit as 'low' | 'medium' | 'high' | 'critical' })} disabled={bCtxMutation.isPending}
                                         className="p-1 text-emerald-600 hover:text-emerald-700 disabled:opacity-50"><Check className="w-3.5 h-3.5" /></button>
                                     <button onClick={() => { setCritEdit(false); setPendingCrit(currentCrit); }}
                                         className="p-1 text-slate-400 hover:text-slate-600"><XIcon className="w-3.5 h-3.5" /></button>

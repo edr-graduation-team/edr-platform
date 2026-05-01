@@ -698,15 +698,27 @@ function OverviewTab({
     const [pendingBU, setPendingBU] = useState(agent.business_unit || '');
     const [envEdit, setEnvEdit] = useState(false);
     const [pendingEnv, setPendingEnv] = useState(agent.environment || '');
+    const [profileEdit, setProfileEdit] = useState(false);
+    const [pendingProfile, setPendingProfile] = useState(agent.tags?.profile || '');
+    const [customerEdit, setCustomerEdit] = useState(false);
+    const [pendingCustomer, setPendingCustomer] = useState(agent.tags?.customer || '');
+    const [lastUserEdit, setLastUserEdit] = useState(false);
+    const [pendingLastUser, setPendingLastUser] = useState(agent.tags?.logged_in_user || '');
 
     const bCtxMutation = useMutation({
-        mutationFn: (d: { criticality?: string; business_unit?: string; environment?: string }) =>
-            agentsApi.patchBusinessContext(agent.id, d as any),
+        mutationFn: (d: Parameters<typeof agentsApi.patchBusinessContext>[1]) =>
+            agentsApi.patchBusinessContext(agent.id, d),
         onSuccess: (_, vars) => {
-            const field = vars.criticality ? 'Criticality' : vars.business_unit !== undefined ? 'Business unit' : 'Environment';
+            const field = vars.criticality ? 'Criticality'
+                : vars.business_unit !== undefined ? 'Business unit'
+                : vars.environment !== undefined ? 'Environment'
+                : vars.profile !== undefined ? 'Profile'
+                : vars.customer !== undefined ? 'Customer'
+                : 'Last logged in user';
             showToast(`${field} updated`, 'success');
             queryClient.invalidateQueries({ queryKey: ['agent', agent.id] });
             setCritEdit(false); setBuEdit(false); setEnvEdit(false);
+            setProfileEdit(false); setCustomerEdit(false); setLastUserEdit(false);
         },
         onError: (e: Error) => showToast(e.message || 'Update failed', 'error'),
     });
@@ -979,6 +991,117 @@ function OverviewTab({
                                             <button onClick={() => { setPendingEnv(agent.environment || ''); setEnvEdit(true); }}
                                                 className="p-1 text-slate-300 hover:text-slate-500 dark:hover:text-slate-200 transition-colors"
                                                 title="Edit environment">
+                                                <Pencil className="w-3 h-3" />
+                                            </button>
+                                        )}
+                                    </>
+                                )}
+                            </dd>
+                        </div>
+                    )}
+
+                    {/* Profile — show only if has value OR user can manage */}
+                    {(agent.tags?.profile || canManage) && (
+                        <div className="flex items-center justify-between gap-4 py-1 border-t border-slate-100 dark:border-slate-700/40">
+                            <dt className="text-slate-500 flex items-center gap-1 shrink-0"><Server className="w-3.5 h-3.5" /> Profile</dt>
+                            <dd className="flex items-center gap-2">
+                                {profileEdit ? (
+                                    <>
+                                        <select
+                                            autoFocus
+                                            value={pendingProfile}
+                                            onChange={e => setPendingProfile(e.target.value)}
+                                            className="text-xs rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 px-2 py-1 focus:outline-none focus:ring-2 focus:ring-violet-500/40"
+                                        >
+                                            <option value="">Not set</option>
+                                            <option value="Workstation">Workstation</option>
+                                            <option value="Laptop">Laptop</option>
+                                            <option value="Server">Server</option>
+                                            <option value="Domain Controller">Domain Controller</option>
+                                            <option value="Cloud Instance">Cloud Instance</option>
+                                        </select>
+                                        <button onClick={() => bCtxMutation.mutate({ profile: pendingProfile })} disabled={bCtxMutation.isPending}
+                                            className="p-1 text-emerald-600 hover:text-emerald-700 disabled:opacity-50"><Check className="w-3.5 h-3.5" /></button>
+                                        <button onClick={() => { setProfileEdit(false); setPendingProfile(agent.tags?.profile || ''); }}
+                                            className="p-1 text-slate-400 hover:text-slate-600"><XIcon className="w-3.5 h-3.5" /></button>
+                                    </>
+                                ) : (
+                                    <>
+                                        <span className="font-medium text-slate-800 dark:text-slate-200">{agent.tags?.profile || <span className="text-slate-400 italic text-xs">Not set</span>}</span>
+                                        {canManage && (
+                                            <button onClick={() => { setPendingProfile(agent.tags?.profile || ''); setProfileEdit(true); }}
+                                                className="p-1 text-slate-300 hover:text-slate-500 dark:hover:text-slate-200 transition-colors"
+                                                title="Edit profile">
+                                                <Pencil className="w-3 h-3" />
+                                            </button>
+                                        )}
+                                    </>
+                                )}
+                            </dd>
+                        </div>
+                    )}
+
+                    {/* Customer — show only if has value OR user can manage */}
+                    {(agent.tags?.customer || canManage) && (
+                        <div className="flex items-center justify-between gap-4 py-1 border-t border-slate-100 dark:border-slate-700/40">
+                            <dt className="text-slate-500 flex items-center gap-1 shrink-0"><Building2 className="w-3.5 h-3.5" /> Customer</dt>
+                            <dd className="flex items-center gap-2">
+                                {customerEdit ? (
+                                    <>
+                                        <input
+                                            autoFocus
+                                            value={pendingCustomer}
+                                            onChange={e => setPendingCustomer(e.target.value)}
+                                            placeholder="e.g. ACME Corp"
+                                            className="text-xs rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 px-2 py-1 w-40 focus:outline-none focus:ring-2 focus:ring-violet-500/40"
+                                        />
+                                        <button onClick={() => bCtxMutation.mutate({ customer: pendingCustomer })} disabled={bCtxMutation.isPending}
+                                            className="p-1 text-emerald-600 hover:text-emerald-700 disabled:opacity-50"><Check className="w-3.5 h-3.5" /></button>
+                                        <button onClick={() => { setCustomerEdit(false); setPendingCustomer(agent.tags?.customer || ''); }}
+                                            className="p-1 text-slate-400 hover:text-slate-600"><XIcon className="w-3.5 h-3.5" /></button>
+                                    </>
+                                ) : (
+                                    <>
+                                        <span className="font-medium text-slate-800 dark:text-slate-200">{agent.tags?.customer || <span className="text-slate-400 italic text-xs">Not set</span>}</span>
+                                        {canManage && (
+                                            <button onClick={() => { setPendingCustomer(agent.tags?.customer || ''); setCustomerEdit(true); }}
+                                                className="p-1 text-slate-300 hover:text-slate-500 dark:hover:text-slate-200 transition-colors"
+                                                title="Edit customer">
+                                                <Pencil className="w-3 h-3" />
+                                            </button>
+                                        )}
+                                    </>
+                                )}
+                            </dd>
+                        </div>
+                    )}
+
+                    {/* Last Logged In User — show only if has value OR user can manage */}
+                    {(agent.tags?.logged_in_user || canManage) && (
+                        <div className="flex items-center justify-between gap-4 py-1 border-t border-slate-100 dark:border-slate-700/40">
+                            <dt className="text-slate-500 flex items-center gap-1 shrink-0"><Activity className="w-3.5 h-3.5" /> Last Logged In User</dt>
+                            <dd className="flex items-center gap-2">
+                                {lastUserEdit ? (
+                                    <>
+                                        <input
+                                            autoFocus
+                                            value={pendingLastUser}
+                                            onChange={e => setPendingLastUser(e.target.value)}
+                                            placeholder="e.g. DOMAIN\\username"
+                                            className="text-xs rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 px-2 py-1 w-44 focus:outline-none focus:ring-2 focus:ring-violet-500/40"
+                                        />
+                                        <button onClick={() => bCtxMutation.mutate({ logged_in_user: pendingLastUser })} disabled={bCtxMutation.isPending}
+                                            className="p-1 text-emerald-600 hover:text-emerald-700 disabled:opacity-50"><Check className="w-3.5 h-3.5" /></button>
+                                        <button onClick={() => { setLastUserEdit(false); setPendingLastUser(agent.tags?.logged_in_user || ''); }}
+                                            className="p-1 text-slate-400 hover:text-slate-600"><XIcon className="w-3.5 h-3.5" /></button>
+                                    </>
+                                ) : (
+                                    <>
+                                        <span className="font-medium text-slate-800 dark:text-slate-200 font-mono text-xs">{agent.tags?.logged_in_user || <span className="text-slate-400 italic not-italic text-xs font-sans">Not set</span>}</span>
+                                        {canManage && (
+                                            <button onClick={() => { setPendingLastUser(agent.tags?.logged_in_user || ''); setLastUserEdit(true); }}
+                                                className="p-1 text-slate-300 hover:text-slate-500 dark:hover:text-slate-200 transition-colors"
+                                                title="Edit last logged in user">
                                                 <Pencil className="w-3 h-3" />
                                             </button>
                                         )}

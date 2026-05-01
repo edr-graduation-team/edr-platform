@@ -559,13 +559,20 @@ type AgentBusinessContext struct {
 	Criticality  *string // low | medium | high | critical
 	BusinessUnit *string
 	Environment  *string
+	// Tag-based fields: written into the agents.tags JSONB column.
+	Profile      *string // e.g. "Server", "Workstation", "Laptop"
+	Customer     *string // e.g. "ACME Corp"
+	LoggedInUser *string // last known logged-in user
 }
 
 // UpdateBusinessContext updates the agent's asset-context fields (criticality,
-// business unit, environment). The DB trigger on agents.criticality automatically
-// recomputes the priority_score of all linked vulnerability_findings.
+// business unit, environment, and tag-based profile/customer/logged_in_user).
+// The DB trigger on agents.criticality automatically recomputes the priority_score
+// of all linked vulnerability_findings.
 func (r *PostgresAgentRepository) UpdateBusinessContext(ctx context.Context, id uuid.UUID, ctxFields AgentBusinessContext) error {
-	if ctxFields.Criticality == nil && ctxFields.BusinessUnit == nil && ctxFields.Environment == nil {
+	hasColumn := ctxFields.Criticality != nil || ctxFields.BusinessUnit != nil || ctxFields.Environment != nil
+	hasTag := ctxFields.Profile != nil || ctxFields.Customer != nil || ctxFields.LoggedInUser != nil
+	if !hasColumn && !hasTag {
 		return nil
 	}
 	if ctxFields.Criticality != nil {
@@ -592,6 +599,26 @@ func (r *PostgresAgentRepository) UpdateBusinessContext(ctx context.Context, id 
 	if ctxFields.Environment != nil {
 		sets = append(sets, fmt.Sprintf("environment = $%d", idx))
 		args = append(args, *ctxFields.Environment)
+		idx++
+	}
+	// Merge tag-based fields into the existing JSONB tags column.
+	if hasTag {
+		tagPatch := map[string]string{}
+		if ctxFields.Profile != nil {
+			tagPatch["profile"] = *ctxFields.Profile
+		}
+		if ctxFields.Customer != nil {
+			tagPatch["customer"] = *ctxFields.Customer
+		}
+		if ctxFields.LoggedInUser != nil {
+			tagPatch["logged_in_user"] = *ctxFields.LoggedInUser
+		}
+		tagJSON, err := json.Marshal(tagPatch)
+		if err != nil {
+			return fmt.Errorf("failed to marshal tag patch: %w", err)
+		}
+		sets = append(sets, fmt.Sprintf("tags = COALESCE(tags, '{}') || $%d::jsonb", idx))
+		args = append(args, string(tagJSON))
 		idx++
 	}
 	sets = append(sets, "updated_at = NOW()")

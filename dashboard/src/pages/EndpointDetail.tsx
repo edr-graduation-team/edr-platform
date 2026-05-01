@@ -699,8 +699,8 @@ function OverviewTab({
     const [envEdit, setEnvEdit] = useState(false);
     const [pendingEnv, setPendingEnv] = useState(agent.environment || 'unknown');
 
-    const displayBU = (!agent.business_unit || agent.business_unit === 'unknown') ? 'غير محدد' : agent.business_unit;
-    const displayEnv = (!agent.environment || agent.environment === 'unknown') ? 'غير معرف'
+    const displayBU = (!agent.business_unit || agent.business_unit === 'unknown') ? 'Unknown' : agent.business_unit;
+    const displayEnv = (!agent.environment || agent.environment === 'unknown') ? 'Unknown'
         : agent.environment.charAt(0).toUpperCase() + agent.environment.slice(1);
     const displayProfile = agent.tags?.profile || agent.metadata?.profile || '';
     const displayLastUser = agent.metadata?.logged_in_user || agent.tags?.logged_in_user || '';
@@ -948,7 +948,7 @@ function OverviewTab({
                                 </>
                             ) : (
                                 <>
-                                    <span className={`font-medium ${displayBU === 'غير محدد' ? 'text-slate-400 italic text-xs' : 'text-slate-800 dark:text-slate-200'}`}>{displayBU}</span>
+                                    <span className={`font-medium ${displayBU === 'Unknown' ? 'text-slate-400 italic text-xs' : 'text-slate-800 dark:text-slate-200'}`}>{displayBU}</span>
                                     {canManage && (
                                         <button onClick={() => { setPendingBU(agent.business_unit || 'unknown'); setBuEdit(true); }}
                                             className="p-1 text-slate-300 hover:text-slate-500 dark:hover:text-slate-200 transition-colors"
@@ -973,7 +973,7 @@ function OverviewTab({
                                         onChange={e => setPendingEnv(e.target.value)}
                                         className="text-xs rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 px-2 py-1 focus:outline-none focus:ring-2 focus:ring-violet-500/40"
                                     >
-                                        <option value="unknown">غير معرف</option>
+                                        <option value="unknown">Unknown</option>
                                         <option value="production">Production</option>
                                         <option value="staging">Staging</option>
                                         <option value="development">Development</option>
@@ -985,7 +985,7 @@ function OverviewTab({
                                 </>
                             ) : (
                                 <>
-                                    <span className={`font-medium ${displayEnv === 'غير معرف' ? 'text-slate-400 italic text-xs' : 'text-slate-800 dark:text-slate-200 capitalize'}`}>{displayEnv}</span>
+                                    <span className={`font-medium ${displayEnv === 'Unknown' ? 'text-slate-400 italic text-xs' : 'text-slate-800 dark:text-slate-200 capitalize'}`}>{displayEnv}</span>
                                     {canManage && (
                                         <button onClick={() => { setPendingEnv(agent.environment || 'unknown'); setEnvEdit(true); }}
                                             className="p-1 text-slate-300 hover:text-slate-500 dark:hover:text-slate-200 transition-colors"

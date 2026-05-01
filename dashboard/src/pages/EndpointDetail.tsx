@@ -77,6 +77,7 @@ const RESPONSE_OPTIONS: { value: CommandType; label: string; destructive?: boole
     { value: 'scan_memory', label: 'Scan memory (file hash)' },
     { value: 'update_signatures', label: 'Update signatures' },
     { value: 'update_config', label: 'Update config (hot reload)' },
+    { value: 'update_vuln_config', label: 'Update vulnerability scanner config' },
     { value: 'update_filter_policy', label: 'Update filter policy (JSON)' },
     { value: 'restart_agent', label: 'Restart agent' },
     { value: 'restart_service', label: 'Restart agent service' },
@@ -154,6 +155,19 @@ function buildCommandParameters(cmd: CommandType, f: Record<string, string>): Re
             const v = (f.config_value || '').trim();
             if (!k) return {};
             return { [k]: v };
+        }
+        case 'update_vuln_config': {
+            const p: Record<string, string> = {};
+            if (f.vuln_scan_enabled !== undefined && f.vuln_scan_enabled !== '') p.vuln_scan_enabled = f.vuln_scan_enabled;
+            if (f.vuln_scan_interval?.trim()) p.vuln_scan_interval = f.vuln_scan_interval.trim();
+            if (f.vuln_scanner_type?.trim()) p.vuln_scanner_type = f.vuln_scanner_type.trim();
+            if (f.vuln_scanner_path?.trim()) p.vuln_scanner_path = f.vuln_scanner_path.trim();
+            if (f.vuln_scan_timeout?.trim()) p.vuln_scan_timeout = f.vuln_scan_timeout.trim();
+            if (f.vuln_scan_args?.trim()) p.vuln_scan_args = f.vuln_scan_args.trim();
+            if (f.process_prevention_mode?.trim()) p.process_prevention_mode = f.process_prevention_mode.trim();
+            if (f.process_auto_kill_enabled !== undefined && f.process_auto_kill_enabled !== '') p.process_auto_kill_enabled = f.process_auto_kill_enabled;
+            if (f.auto_quarantine !== undefined && f.auto_quarantine !== '') p.auto_quarantine = f.auto_quarantine;
+            return p;
         }
         case 'update_filter_policy':
             return { policy: f.policy_json?.trim() || '{}' };
@@ -2050,6 +2064,13 @@ function ResponseTab({
             showToast('Please enter both a configuration key and value.', 'error');
             return;
         }
+        if (cmdType === 'update_vuln_config') {
+            const p = buildCommandParameters('update_vuln_config', fields);
+            if (Object.keys(p).length === 0) {
+                showToast('Please fill in at least one vulnerability scanner setting.', 'error');
+                return;
+            }
+        }
         if (isCriticalAsset && fields.manual_approval !== 'true') {
             showToast('This is a critical asset. Manual approval confirmation is required before executing commands.', 'error');
             return;
@@ -2322,6 +2343,73 @@ function ResponseTab({
                                         <input className="input w-full font-mono text-xs" placeholder="collectors.etw_enabled" value={fields.config_key || ''} onChange={(e) => patch('config_key', e.target.value)} disabled={!canExec} />
                                         <label className="text-[10px] text-slate-500 uppercase">Value</label>
                                         <input className="input w-full text-xs" placeholder="false" value={fields.config_value || ''} onChange={(e) => patch('config_value', e.target.value)} disabled={!canExec} />
+                                    </div>
+                                )}
+
+                                {cmdType === 'update_vuln_config' && (
+                                    <div className="mt-3 space-y-4">
+                                        <p className="text-[10px] text-slate-500 uppercase font-semibold tracking-wider border-b border-slate-200 dark:border-slate-700 pb-1">Vulnerability Scanner</p>
+                                        <div className="grid grid-cols-2 gap-3">
+                                            <div>
+                                                <label className="text-[10px] text-slate-500 uppercase">Enabled</label>
+                                                <select className="input w-full text-xs" value={fields.vuln_scan_enabled ?? ''} onChange={(e) => patch('vuln_scan_enabled', e.target.value)} disabled={!canExec}>
+                                                    <option value="">— no change —</option>
+                                                    <option value="true">true (enabled)</option>
+                                                    <option value="false">false (disabled)</option>
+                                                </select>
+                                            </div>
+                                            <div>
+                                                <label className="text-[10px] text-slate-500 uppercase">Scanner Type</label>
+                                                <select className="input w-full text-xs" value={fields.vuln_scanner_type || ''} onChange={(e) => patch('vuln_scanner_type', e.target.value)} disabled={!canExec}>
+                                                    <option value="">— no change —</option>
+                                                    <option value="trivy">trivy</option>
+                                                    <option value="grype">grype</option>
+                                                </select>
+                                            </div>
+                                            <div>
+                                                <label className="text-[10px] text-slate-500 uppercase">Scan Interval</label>
+                                                <input className="input w-full text-xs" placeholder="6h / 12h / 24h" value={fields.vuln_scan_interval || ''} onChange={(e) => patch('vuln_scan_interval', e.target.value)} disabled={!canExec} />
+                                            </div>
+                                            <div>
+                                                <label className="text-[10px] text-slate-500 uppercase">Scan Timeout</label>
+                                                <input className="input w-full text-xs" placeholder="20m / 30m" value={fields.vuln_scan_timeout || ''} onChange={(e) => patch('vuln_scan_timeout', e.target.value)} disabled={!canExec} />
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <label className="text-[10px] text-slate-500 uppercase">Scanner Path (optional)</label>
+                                            <input className="input w-full font-mono text-xs" placeholder="C:\ProgramData\EDR\tools\trivy\trivy.exe" value={fields.vuln_scanner_path || ''} onChange={(e) => patch('vuln_scanner_path', e.target.value)} disabled={!canExec} />
+                                        </div>
+                                        <div>
+                                            <label className="text-[10px] text-slate-500 uppercase">Extra Args (comma-separated)</label>
+                                            <input className="input w-full font-mono text-xs" placeholder="--skip-db-update,--offline-scan" value={fields.vuln_scan_args || ''} onChange={(e) => patch('vuln_scan_args', e.target.value)} disabled={!canExec} />
+                                        </div>
+                                        <p className="text-[10px] text-slate-500 uppercase font-semibold tracking-wider border-b border-slate-200 dark:border-slate-700 pb-1 mt-2">Response Settings</p>
+                                        <div className="grid grid-cols-2 gap-3">
+                                            <div>
+                                                <label className="text-[10px] text-slate-500 uppercase">Process Prevention Mode</label>
+                                                <select className="input w-full text-xs" value={fields.process_prevention_mode || ''} onChange={(e) => patch('process_prevention_mode', e.target.value)} disabled={!canExec}>
+                                                    <option value="">— no change —</option>
+                                                    <option value="auto_kill_then_override">auto_kill_then_override (active)</option>
+                                                    <option value="detect_only">detect_only (passive)</option>
+                                                </select>
+                                            </div>
+                                            <div>
+                                                <label className="text-[10px] text-slate-500 uppercase">Auto-Quarantine</label>
+                                                <select className="input w-full text-xs" value={fields.auto_quarantine ?? ''} onChange={(e) => patch('auto_quarantine', e.target.value)} disabled={!canExec}>
+                                                    <option value="">— no change —</option>
+                                                    <option value="true">true (enabled)</option>
+                                                    <option value="false">false (disabled)</option>
+                                                </select>
+                                            </div>
+                                            <div>
+                                                <label className="text-[10px] text-slate-500 uppercase">Process Auto-Kill</label>
+                                                <select className="input w-full text-xs" value={fields.process_auto_kill_enabled ?? ''} onChange={(e) => patch('process_auto_kill_enabled', e.target.value)} disabled={!canExec}>
+                                                    <option value="">— no change —</option>
+                                                    <option value="true">true (enabled)</option>
+                                                    <option value="false">false (disabled)</option>
+                                                </select>
+                                            </div>
+                                        </div>
                                     </div>
                                 )}
 

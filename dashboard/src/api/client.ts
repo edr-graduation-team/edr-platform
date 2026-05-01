@@ -70,7 +70,7 @@ export type CommandType = 'kill_process' | 'terminate_process' | 'quarantine_fil
     'restart_agent' | 'restart_service' | 'stop_agent' | 'start_agent' |
     'isolate_network' | 'restore_network' | 'scan_file' | 'scan_memory' | 'custom' |
     'restart_machine' | 'shutdown_machine' | 'update_filter_policy' |
-    'run_cmd' | 'block_ip' | 'unblock_ip' | 'block_domain' | 'unblock_domain' | 'update_signatures' | 'update_config' |
+    'run_cmd' | 'block_ip' | 'unblock_ip' | 'block_domain' | 'unblock_domain' | 'update_signatures' | 'update_config' | 'update_vuln_config' |
     'unisolate_network' | 'restore_quarantine_file' | 'delete_quarantine_file' |
     'enable_sysmon' | 'disable_sysmon' | 'update_agent' | 'uninstall_agent';
 export type CommandStatus = 'pending' | 'sent' | 'acknowledged' | 'executing' | 'completed' | 'failed' | 'timeout' | 'cancelled';

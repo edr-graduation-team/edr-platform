@@ -1509,10 +1509,43 @@ function ConfigurationTab({ agent, canExec }: { agent: Agent; canExec: boolean }
     const [sysmonConfigXml, setSysmonConfigXml] = useState(DEFAULT_SYSMON_XML);
 
     // ── Effective values (resolve custom inputs) ──────────────────────────────
-    const effectiveBatchSize = batchSize === 'custom' ? (customBatchSize.trim() || '200') : batchSize;
-    const effectiveBatchInterval = batchInterval === 'custom' ? (customBatchInterval.trim() || '1s') : batchInterval;
-    const effectiveVulnInterval = vulnInterval === 'custom' ? (customVulnInterval.trim() || '6h') : vulnInterval;
-    const effectiveVulnTimeout = vulnTimeout === 'custom' ? (customVulnTimeout.trim() || '20m') : vulnTimeout;
+    const effectiveBatchSize = batchSize === 'custom' ? customBatchSize.trim() : batchSize;
+    const effectiveBatchInterval = batchInterval === 'custom' ? customBatchInterval.trim() : batchInterval;
+    const effectiveVulnInterval = vulnInterval === 'custom' ? customVulnInterval.trim() : vulnInterval;
+    const effectiveVulnTimeout = vulnTimeout === 'custom' ? customVulnTimeout.trim() : vulnTimeout;
+
+    // ── Validation ────────────────────────────────────────────────────────────
+    const [errors, setErrors] = useState<Record<string, string>>({});
+    const isValidDuration = (v: string) => /^\d+(\.\d+)?(ms|s|m|h)$/.test(v.trim());
+    const isValidPosInt = (v: string) => /^\d+$/.test(v.trim()) && parseInt(v.trim(), 10) > 0;
+
+    const validateOp = (): boolean => {
+        const e: Record<string, string> = {};
+        if (batchSize === 'custom') {
+            if (!customBatchSize.trim()) e.batchSize = 'Required — enter a positive integer';
+            else if (!isValidPosInt(customBatchSize)) e.batchSize = 'Must be a positive integer, e.g. 300';
+        }
+        if (batchInterval === 'custom') {
+            if (!customBatchInterval.trim()) e.batchInterval = 'Required — enter a Go duration';
+            else if (!isValidDuration(customBatchInterval)) e.batchInterval = 'Invalid format — use: 500ms · 1s · 2s · 30s · 1m';
+        }
+        setErrors(e);
+        return Object.keys(e).length === 0;
+    };
+
+    const validateVuln = (): boolean => {
+        const e: Record<string, string> = {};
+        if (vulnInterval === 'custom') {
+            if (!customVulnInterval.trim()) e.vulnInterval = 'Required — enter a Go duration';
+            else if (!isValidDuration(customVulnInterval)) e.vulnInterval = 'Invalid format — use: 1h · 6h · 12h · 24h · 48h';
+        }
+        if (vulnTimeout === 'custom') {
+            if (!customVulnTimeout.trim()) e.vulnTimeout = 'Required — enter a Go duration';
+            else if (!isValidDuration(customVulnTimeout)) e.vulnTimeout = 'Invalid format — use: 10m · 20m · 30m · 1h';
+        }
+        setErrors(prev => ({ ...prev, ...e }));
+        return Object.keys(e).length === 0;
+    };
 
     const invalidate = () => {
         queryClient.invalidateQueries({ queryKey: ['agent', agent.id] });
@@ -1656,7 +1689,12 @@ function ConfigurationTab({ agent, canExec }: { agent: Agent; canExec: boolean }
                                     <option value="custom">Custom…</option>
                                 </select>
                                 {batchSize === 'custom' && (
-                                    <input className={`${inp} mt-1.5`} type="number" min="1" placeholder="e.g. 300" value={customBatchSize} onChange={e => setCustomBatchSize(e.target.value)} disabled={!canExec} />
+                                    <div className="mt-1.5">
+                                        <input className={`${inp} ${errors.batchSize ? 'border-rose-400 ring-1 ring-rose-400' : ''}`} type="number" min="1" placeholder="e.g. 300" value={customBatchSize} onChange={e => { setCustomBatchSize(e.target.value); setErrors(p => ({ ...p, batchSize: '' })); }} disabled={!canExec} />
+                                        {errors.batchSize
+                                            ? <p className="text-[10px] text-rose-500 mt-0.5">{errors.batchSize}</p>
+                                            : <p className="text-[10px] text-slate-400 mt-0.5">Positive integer — number of events per batch (e.g. 100–5 000)</p>}
+                                    </div>
                                 )}
                             </div>
                             <div>
@@ -1669,7 +1707,12 @@ function ConfigurationTab({ agent, canExec }: { agent: Agent; canExec: boolean }
                                     <option value="custom">Custom…</option>
                                 </select>
                                 {batchInterval === 'custom' && (
-                                    <input className={`${inp} mt-1.5`} placeholder="e.g. 3s / 750ms" value={customBatchInterval} onChange={e => setCustomBatchInterval(e.target.value)} disabled={!canExec} />
+                                    <div className="mt-1.5">
+                                        <input className={`${inp} ${errors.batchInterval ? 'border-rose-400 ring-1 ring-rose-400' : ''}`} placeholder="e.g. 500ms · 1s · 2s" value={customBatchInterval} onChange={e => { setCustomBatchInterval(e.target.value); setErrors(p => ({ ...p, batchInterval: '' })); }} disabled={!canExec} />
+                                        {errors.batchInterval
+                                            ? <p className="text-[10px] text-rose-500 mt-0.5">{errors.batchInterval}</p>
+                                            : <p className="text-[10px] text-slate-400 mt-0.5">Go duration — e.g. <code>500ms</code> (0.5 s) · <code>1s</code> · <code>30s</code> · <code>1m</code> (60 s)</p>}
+                                    </div>
                                 )}
                             </div>
                             <div>
@@ -1681,7 +1724,7 @@ function ConfigurationTab({ agent, canExec }: { agent: Agent; canExec: boolean }
                             </div>
                         </div>
                         <div className="flex justify-end">
-                            <button type="button" className={applyBtn} disabled={!canExec || opMutation.isPending} onClick={() => opMutation.mutate()}>
+                            <button type="button" className={applyBtn} disabled={!canExec || opMutation.isPending} onClick={() => { if (validateOp()) opMutation.mutate(); }}>
                                 {opMutation.isPending ? 'Sending…' : 'Apply'}
                             </button>
                         </div>
@@ -1713,7 +1756,12 @@ function ConfigurationTab({ agent, canExec }: { agent: Agent; canExec: boolean }
                                     <option value="custom">Custom…</option>
                                 </select>
                                 {vulnInterval === 'custom' && (
-                                    <input className={`${inp} mt-1.5`} placeholder="e.g. 48h / 3h" value={customVulnInterval} onChange={e => setCustomVulnInterval(e.target.value)} disabled={!canExec} />
+                                    <div className="mt-1.5">
+                                        <input className={`${inp} ${errors.vulnInterval ? 'border-rose-400 ring-1 ring-rose-400' : ''}`} placeholder="e.g. 6h · 12h · 48h" value={customVulnInterval} onChange={e => { setCustomVulnInterval(e.target.value); setErrors(p => ({ ...p, vulnInterval: '' })); }} disabled={!canExec} />
+                                        {errors.vulnInterval
+                                            ? <p className="text-[10px] text-rose-500 mt-0.5">{errors.vulnInterval}</p>
+                                            : <p className="text-[10px] text-slate-400 mt-0.5">Go duration — e.g. <code>1h</code> (60 min) · <code>6h</code> · <code>24h</code> (1 day) · <code>48h</code> (2 days)</p>}
+                                    </div>
                                 )}
                             </div>
                             <div>
@@ -1725,12 +1773,17 @@ function ConfigurationTab({ agent, canExec }: { agent: Agent; canExec: boolean }
                                     <option value="custom">Custom…</option>
                                 </select>
                                 {vulnTimeout === 'custom' && (
-                                    <input className={`${inp} mt-1.5`} placeholder="e.g. 45m / 1h" value={customVulnTimeout} onChange={e => setCustomVulnTimeout(e.target.value)} disabled={!canExec} />
+                                    <div className="mt-1.5">
+                                        <input className={`${inp} ${errors.vulnTimeout ? 'border-rose-400 ring-1 ring-rose-400' : ''}`} placeholder="e.g. 10m · 30m · 1h" value={customVulnTimeout} onChange={e => { setCustomVulnTimeout(e.target.value); setErrors(p => ({ ...p, vulnTimeout: '' })); }} disabled={!canExec} />
+                                        {errors.vulnTimeout
+                                            ? <p className="text-[10px] text-rose-500 mt-0.5">{errors.vulnTimeout}</p>
+                                            : <p className="text-[10px] text-slate-400 mt-0.5">Go duration — e.g. <code>10m</code> (10 min) · <code>30m</code> · <code>1h</code> (60 min)</p>}
+                                    </div>
                                 )}
                             </div>
                         </div>
                         <div className="flex justify-end">
-                            <button type="button" className={applyBtn} disabled={!canExec || vulnMutation.isPending} onClick={() => vulnMutation.mutate()}>
+                            <button type="button" className={applyBtn} disabled={!canExec || vulnMutation.isPending} onClick={() => { if (validateVuln()) vulnMutation.mutate(); }}>
                                 {vulnMutation.isPending ? 'Sending…' : 'Apply'}
                             </button>
                         </div>

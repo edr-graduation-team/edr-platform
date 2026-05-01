@@ -695,15 +695,15 @@ function OverviewTab({
     const [critEdit, setCritEdit] = useState(false);
     const [pendingCrit, setPendingCrit] = useState(currentCrit);
     const [buEdit, setBuEdit] = useState(false);
-    const [pendingBU, setPendingBU] = useState(agent.business_unit || '');
+    const [pendingBU, setPendingBU] = useState(agent.business_unit || 'unknown');
     const [envEdit, setEnvEdit] = useState(false);
-    const [pendingEnv, setPendingEnv] = useState(agent.environment || '');
-    const [profileEdit, setProfileEdit] = useState(false);
-    const [pendingProfile, setPendingProfile] = useState(agent.tags?.profile || '');
-    const [customerEdit, setCustomerEdit] = useState(false);
-    const [pendingCustomer, setPendingCustomer] = useState(agent.tags?.customer || '');
-    const [lastUserEdit, setLastUserEdit] = useState(false);
-    const [pendingLastUser, setPendingLastUser] = useState(agent.tags?.logged_in_user || '');
+    const [pendingEnv, setPendingEnv] = useState(agent.environment || 'unknown');
+
+    const displayBU = (!agent.business_unit || agent.business_unit === 'unknown') ? 'غير محدد' : agent.business_unit;
+    const displayEnv = (!agent.environment || agent.environment === 'unknown') ? 'غير معرف'
+        : agent.environment.charAt(0).toUpperCase() + agent.environment.slice(1);
+    const displayProfile = agent.tags?.profile || agent.metadata?.profile || '';
+    const displayLastUser = agent.metadata?.logged_in_user || agent.tags?.logged_in_user || '';
 
     const bCtxMutation = useMutation({
         mutationFn: (d: Parameters<typeof agentsApi.patchBusinessContext>[1]) =>
@@ -711,14 +711,10 @@ function OverviewTab({
         onSuccess: (_, vars) => {
             const field = vars.criticality ? 'Criticality'
                 : vars.business_unit !== undefined ? 'Business unit'
-                : vars.environment !== undefined ? 'Environment'
-                : vars.profile !== undefined ? 'Profile'
-                : vars.customer !== undefined ? 'Customer'
-                : 'Last logged in user';
+                : 'Environment';
             showToast(`${field} updated`, 'success');
             queryClient.invalidateQueries({ queryKey: ['agent', agent.id] });
             setCritEdit(false); setBuEdit(false); setEnvEdit(false);
-            setProfileEdit(false); setCustomerEdit(false); setLastUserEdit(false);
         },
         onError: (e: Error) => showToast(e.message || 'Update failed', 'error'),
     });
@@ -926,187 +922,99 @@ function OverviewTab({
                         </dd>
                     </div>
 
-                    {/* Business Unit — show only if has value OR user can manage */}
-                    {(agent.business_unit || canManage) && (
-                        <div className="flex items-center justify-between gap-4 py-1 border-t border-slate-100 dark:border-slate-700/40">
-                            <dt className="text-slate-500 flex items-center gap-1 shrink-0"><Building2 className="w-3.5 h-3.5" /> Business Unit</dt>
-                            <dd className="flex items-center gap-2">
-                                {buEdit ? (
-                                    <>
-                                        <input
-                                            autoFocus
-                                            value={pendingBU}
-                                            onChange={e => setPendingBU(e.target.value)}
-                                            placeholder="e.g. Finance, Engineering"
-                                            className="text-xs rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 px-2 py-1 w-40 focus:outline-none focus:ring-2 focus:ring-violet-500/40"
-                                        />
-                                        <button onClick={() => bCtxMutation.mutate({ business_unit: pendingBU })} disabled={bCtxMutation.isPending}
-                                            className="p-1 text-emerald-600 hover:text-emerald-700 disabled:opacity-50"><Check className="w-3.5 h-3.5" /></button>
-                                        <button onClick={() => { setBuEdit(false); setPendingBU(agent.business_unit || ''); }}
-                                            className="p-1 text-slate-400 hover:text-slate-600"><XIcon className="w-3.5 h-3.5" /></button>
-                                    </>
-                                ) : (
-                                    <>
-                                        <span className="font-medium text-slate-800 dark:text-slate-200">{agent.business_unit || <span className="text-slate-400 italic text-xs">Not set</span>}</span>
-                                        {canManage && (
-                                            <button onClick={() => { setPendingBU(agent.business_unit || ''); setBuEdit(true); }}
-                                                className="p-1 text-slate-300 hover:text-slate-500 dark:hover:text-slate-200 transition-colors"
-                                                title="Edit business unit">
-                                                <Pencil className="w-3 h-3" />
-                                            </button>
-                                        )}
-                                    </>
-                                )}
-                            </dd>
-                        </div>
-                    )}
+                    {/* Business Unit — always shown, editable (datalist: Finance / Engineering / HR or free text) */}
+                    <div className="flex items-center justify-between gap-4 py-1 border-t border-slate-100 dark:border-slate-700/40">
+                        <dt className="text-slate-500 flex items-center gap-1 shrink-0"><Building2 className="w-3.5 h-3.5" /> Business Unit</dt>
+                        <dd className="flex items-center gap-2">
+                            {buEdit ? (
+                                <>
+                                    <input
+                                        autoFocus
+                                        list="bu-options"
+                                        value={pendingBU === 'unknown' ? '' : pendingBU}
+                                        onChange={e => setPendingBU(e.target.value.trim() || 'unknown')}
+                                        placeholder="Finance, Engineering, HR…"
+                                        className="text-xs rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 px-2 py-1 w-44 focus:outline-none focus:ring-2 focus:ring-violet-500/40"
+                                    />
+                                    <datalist id="bu-options">
+                                        <option value="Finance" />
+                                        <option value="Engineering" />
+                                        <option value="HR" />
+                                    </datalist>
+                                    <button onClick={() => bCtxMutation.mutate({ business_unit: pendingBU })} disabled={bCtxMutation.isPending}
+                                        className="p-1 text-emerald-600 hover:text-emerald-700 disabled:opacity-50"><Check className="w-3.5 h-3.5" /></button>
+                                    <button onClick={() => { setBuEdit(false); setPendingBU(agent.business_unit || 'unknown'); }}
+                                        className="p-1 text-slate-400 hover:text-slate-600"><XIcon className="w-3.5 h-3.5" /></button>
+                                </>
+                            ) : (
+                                <>
+                                    <span className={`font-medium ${displayBU === 'غير محدد' ? 'text-slate-400 italic text-xs' : 'text-slate-800 dark:text-slate-200'}`}>{displayBU}</span>
+                                    {canManage && (
+                                        <button onClick={() => { setPendingBU(agent.business_unit || 'unknown'); setBuEdit(true); }}
+                                            className="p-1 text-slate-300 hover:text-slate-500 dark:hover:text-slate-200 transition-colors"
+                                            title="Edit business unit">
+                                            <Pencil className="w-3 h-3" />
+                                        </button>
+                                    )}
+                                </>
+                            )}
+                        </dd>
+                    </div>
 
-                    {/* Environment — show only if has value OR user can manage */}
-                    {(agent.environment || canManage) && (
-                        <div className="flex items-center justify-between gap-4 py-1 border-t border-slate-100 dark:border-slate-700/40">
-                            <dt className="text-slate-500 flex items-center gap-1 shrink-0"><Globe className="w-3.5 h-3.5" /> Environment</dt>
-                            <dd className="flex items-center gap-2">
-                                {envEdit ? (
-                                    <>
-                                        <select
-                                            autoFocus
-                                            value={pendingEnv}
-                                            onChange={e => setPendingEnv(e.target.value)}
-                                            className="text-xs rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 px-2 py-1 focus:outline-none focus:ring-2 focus:ring-violet-500/40"
-                                        >
-                                            <option value="">Not set</option>
-                                            <option value="production">Production</option>
-                                            <option value="staging">Staging</option>
-                                            <option value="development">Development</option>
-                                        </select>
-                                        <button onClick={() => bCtxMutation.mutate({ environment: pendingEnv })} disabled={bCtxMutation.isPending}
-                                            className="p-1 text-emerald-600 hover:text-emerald-700 disabled:opacity-50"><Check className="w-3.5 h-3.5" /></button>
-                                        <button onClick={() => { setEnvEdit(false); setPendingEnv(agent.environment || ''); }}
-                                            className="p-1 text-slate-400 hover:text-slate-600"><XIcon className="w-3.5 h-3.5" /></button>
-                                    </>
-                                ) : (
-                                    <>
-                                        <span className="font-medium text-slate-800 dark:text-slate-200 capitalize">{agent.environment || <span className="text-slate-400 italic text-xs">Not set</span>}</span>
-                                        {canManage && (
-                                            <button onClick={() => { setPendingEnv(agent.environment || ''); setEnvEdit(true); }}
-                                                className="p-1 text-slate-300 hover:text-slate-500 dark:hover:text-slate-200 transition-colors"
-                                                title="Edit environment">
-                                                <Pencil className="w-3 h-3" />
-                                            </button>
-                                        )}
-                                    </>
-                                )}
-                            </dd>
-                        </div>
-                    )}
+                    {/* Environment — always shown, select: production / staging / development */}
+                    <div className="flex items-center justify-between gap-4 py-1 border-t border-slate-100 dark:border-slate-700/40">
+                        <dt className="text-slate-500 flex items-center gap-1 shrink-0"><Globe className="w-3.5 h-3.5" /> Environment</dt>
+                        <dd className="flex items-center gap-2">
+                            {envEdit ? (
+                                <>
+                                    <select
+                                        autoFocus
+                                        value={pendingEnv}
+                                        onChange={e => setPendingEnv(e.target.value)}
+                                        className="text-xs rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 px-2 py-1 focus:outline-none focus:ring-2 focus:ring-violet-500/40"
+                                    >
+                                        <option value="unknown">غير معرف</option>
+                                        <option value="production">Production</option>
+                                        <option value="staging">Staging</option>
+                                        <option value="development">Development</option>
+                                    </select>
+                                    <button onClick={() => bCtxMutation.mutate({ environment: pendingEnv })} disabled={bCtxMutation.isPending}
+                                        className="p-1 text-emerald-600 hover:text-emerald-700 disabled:opacity-50"><Check className="w-3.5 h-3.5" /></button>
+                                    <button onClick={() => { setEnvEdit(false); setPendingEnv(agent.environment || 'unknown'); }}
+                                        className="p-1 text-slate-400 hover:text-slate-600"><XIcon className="w-3.5 h-3.5" /></button>
+                                </>
+                            ) : (
+                                <>
+                                    <span className={`font-medium ${displayEnv === 'غير معرف' ? 'text-slate-400 italic text-xs' : 'text-slate-800 dark:text-slate-200 capitalize'}`}>{displayEnv}</span>
+                                    {canManage && (
+                                        <button onClick={() => { setPendingEnv(agent.environment || 'unknown'); setEnvEdit(true); }}
+                                            className="p-1 text-slate-300 hover:text-slate-500 dark:hover:text-slate-200 transition-colors"
+                                            title="Edit environment">
+                                            <Pencil className="w-3 h-3" />
+                                        </button>
+                                    )}
+                                </>
+                            )}
+                        </dd>
+                    </div>
 
-                    {/* Profile — show only if has value OR user can manage */}
-                    {(agent.tags?.profile || canManage) && (
+                    {/* Profile — read-only, populated automatically by the agent */}
+                    {displayProfile && (
                         <div className="flex items-center justify-between gap-4 py-1 border-t border-slate-100 dark:border-slate-700/40">
                             <dt className="text-slate-500 flex items-center gap-1 shrink-0"><Server className="w-3.5 h-3.5" /> Profile</dt>
-                            <dd className="flex items-center gap-2">
-                                {profileEdit ? (
-                                    <>
-                                        <select
-                                            autoFocus
-                                            value={pendingProfile}
-                                            onChange={e => setPendingProfile(e.target.value)}
-                                            className="text-xs rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 px-2 py-1 focus:outline-none focus:ring-2 focus:ring-violet-500/40"
-                                        >
-                                            <option value="">Not set</option>
-                                            <option value="Workstation">Workstation</option>
-                                            <option value="Laptop">Laptop</option>
-                                            <option value="Server">Server</option>
-                                            <option value="Domain Controller">Domain Controller</option>
-                                            <option value="Cloud Instance">Cloud Instance</option>
-                                        </select>
-                                        <button onClick={() => bCtxMutation.mutate({ profile: pendingProfile })} disabled={bCtxMutation.isPending}
-                                            className="p-1 text-emerald-600 hover:text-emerald-700 disabled:opacity-50"><Check className="w-3.5 h-3.5" /></button>
-                                        <button onClick={() => { setProfileEdit(false); setPendingProfile(agent.tags?.profile || ''); }}
-                                            className="p-1 text-slate-400 hover:text-slate-600"><XIcon className="w-3.5 h-3.5" /></button>
-                                    </>
-                                ) : (
-                                    <>
-                                        <span className="font-medium text-slate-800 dark:text-slate-200">{agent.tags?.profile || <span className="text-slate-400 italic text-xs">Not set</span>}</span>
-                                        {canManage && (
-                                            <button onClick={() => { setPendingProfile(agent.tags?.profile || ''); setProfileEdit(true); }}
-                                                className="p-1 text-slate-300 hover:text-slate-500 dark:hover:text-slate-200 transition-colors"
-                                                title="Edit profile">
-                                                <Pencil className="w-3 h-3" />
-                                            </button>
-                                        )}
-                                    </>
-                                )}
+                            <dd>
+                                <span className="font-medium text-slate-800 dark:text-slate-200">{displayProfile}</span>
                             </dd>
                         </div>
                     )}
 
-                    {/* Customer — show only if has value OR user can manage */}
-                    {(agent.tags?.customer || canManage) && (
-                        <div className="flex items-center justify-between gap-4 py-1 border-t border-slate-100 dark:border-slate-700/40">
-                            <dt className="text-slate-500 flex items-center gap-1 shrink-0"><Building2 className="w-3.5 h-3.5" /> Customer</dt>
-                            <dd className="flex items-center gap-2">
-                                {customerEdit ? (
-                                    <>
-                                        <input
-                                            autoFocus
-                                            value={pendingCustomer}
-                                            onChange={e => setPendingCustomer(e.target.value)}
-                                            placeholder="e.g. ACME Corp"
-                                            className="text-xs rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 px-2 py-1 w-40 focus:outline-none focus:ring-2 focus:ring-violet-500/40"
-                                        />
-                                        <button onClick={() => bCtxMutation.mutate({ customer: pendingCustomer })} disabled={bCtxMutation.isPending}
-                                            className="p-1 text-emerald-600 hover:text-emerald-700 disabled:opacity-50"><Check className="w-3.5 h-3.5" /></button>
-                                        <button onClick={() => { setCustomerEdit(false); setPendingCustomer(agent.tags?.customer || ''); }}
-                                            className="p-1 text-slate-400 hover:text-slate-600"><XIcon className="w-3.5 h-3.5" /></button>
-                                    </>
-                                ) : (
-                                    <>
-                                        <span className="font-medium text-slate-800 dark:text-slate-200">{agent.tags?.customer || <span className="text-slate-400 italic text-xs">Not set</span>}</span>
-                                        {canManage && (
-                                            <button onClick={() => { setPendingCustomer(agent.tags?.customer || ''); setCustomerEdit(true); }}
-                                                className="p-1 text-slate-300 hover:text-slate-500 dark:hover:text-slate-200 transition-colors"
-                                                title="Edit customer">
-                                                <Pencil className="w-3 h-3" />
-                                            </button>
-                                        )}
-                                    </>
-                                )}
-                            </dd>
-                        </div>
-                    )}
 
-                    {/* Last Logged In User — show only if has value OR user can manage */}
-                    {(agent.tags?.logged_in_user || canManage) && (
+                    {/* Last Logged In User — read-only, populated automatically by the agent */}
+                    {displayLastUser && (
                         <div className="flex items-center justify-between gap-4 py-1 border-t border-slate-100 dark:border-slate-700/40">
                             <dt className="text-slate-500 flex items-center gap-1 shrink-0"><Activity className="w-3.5 h-3.5" /> Last Logged In User</dt>
-                            <dd className="flex items-center gap-2">
-                                {lastUserEdit ? (
-                                    <>
-                                        <input
-                                            autoFocus
-                                            value={pendingLastUser}
-                                            onChange={e => setPendingLastUser(e.target.value)}
-                                            placeholder="e.g. DOMAIN\\username"
-                                            className="text-xs rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 px-2 py-1 w-44 focus:outline-none focus:ring-2 focus:ring-violet-500/40"
-                                        />
-                                        <button onClick={() => bCtxMutation.mutate({ logged_in_user: pendingLastUser })} disabled={bCtxMutation.isPending}
-                                            className="p-1 text-emerald-600 hover:text-emerald-700 disabled:opacity-50"><Check className="w-3.5 h-3.5" /></button>
-                                        <button onClick={() => { setLastUserEdit(false); setPendingLastUser(agent.tags?.logged_in_user || ''); }}
-                                            className="p-1 text-slate-400 hover:text-slate-600"><XIcon className="w-3.5 h-3.5" /></button>
-                                    </>
-                                ) : (
-                                    <>
-                                        <span className="font-medium text-slate-800 dark:text-slate-200 font-mono text-xs">{agent.tags?.logged_in_user || <span className="text-slate-400 italic not-italic text-xs font-sans">Not set</span>}</span>
-                                        {canManage && (
-                                            <button onClick={() => { setPendingLastUser(agent.tags?.logged_in_user || ''); setLastUserEdit(true); }}
-                                                className="p-1 text-slate-300 hover:text-slate-500 dark:hover:text-slate-200 transition-colors"
-                                                title="Edit last logged in user">
-                                                <Pencil className="w-3 h-3" />
-                                            </button>
-                                        )}
-                                    </>
-                                )}
+                            <dd>
+                                <span className="font-medium text-slate-800 dark:text-slate-200 font-mono text-xs">{displayLastUser}</span>
                             </dd>
                         </div>
                     )}

@@ -19,6 +19,7 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/keepalive"
+	"google.golang.org/grpc/metadata"
 	grpcstatus "google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/emptypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -616,6 +617,16 @@ func (c *Client) SendHeartbeat(req *HeartbeatRequest) (*HeartbeatResponse, error
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+
+	// Attach device context as gRPC metadata (avoids proto schema changes).
+	// The server reads these headers to update the agent's tags in the DB.
+	if req.Profile != "" || req.LoggedInUser != "" {
+		md := metadata.Pairs(
+			"x-agent-profile", req.Profile,
+			"x-agent-logged-in-user", req.LoggedInUser,
+		)
+		ctx = metadata.NewOutgoingContext(ctx, md)
+	}
 
 	protoResp, err := sc.Heartbeat(ctx, protoReq)
 	if err != nil {

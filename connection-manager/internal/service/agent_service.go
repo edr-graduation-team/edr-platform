@@ -50,6 +50,10 @@ type AgentService interface {
 	// UpdateBusinessContext updates the agent's asset-context fields (criticality, business_unit, environment).
 	// Triggers automatic recompute of vulnerability priority_score for the agent's findings.
 	UpdateBusinessContext(ctx context.Context, id uuid.UUID, ctxFields repository.AgentBusinessContext) error
+
+	// UpdateDeviceInfo persists device-reported tags (profile, logged_in_user) received
+	// from the agent via heartbeat gRPC metadata. Non-empty values only.
+	UpdateDeviceInfo(ctx context.Context, id uuid.UUID, profile, loggedInUser string) error
 }
 
 // RegisterAgentRequest contains registration request data.
@@ -475,4 +479,9 @@ func (s *agentServiceImpl) SetIsolation(ctx context.Context, id uuid.UUID, isola
 // The DB trigger on criticality auto-recomputes priority_score for vulnerability findings.
 func (s *agentServiceImpl) UpdateBusinessContext(ctx context.Context, id uuid.UUID, ctxFields repository.AgentBusinessContext) error {
 	return s.agentRepo.UpdateBusinessContext(ctx, id, ctxFields)
+}
+
+// UpdateDeviceInfo persists agent-reported tags (profile, logged_in_user) to the DB.
+func (s *agentServiceImpl) UpdateDeviceInfo(ctx context.Context, id uuid.UUID, profile, loggedInUser string) error {
+	return s.agentRepo.UpdateDeviceInfo(ctx, id, profile, loggedInUser)
 }

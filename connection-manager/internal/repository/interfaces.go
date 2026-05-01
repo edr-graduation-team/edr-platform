@@ -59,6 +59,11 @@ type AgentRepository interface {
 	// A DB trigger on criticality auto-recomputes priority_score for all linked vulnerability findings.
 	UpdateBusinessContext(ctx context.Context, id uuid.UUID, ctxFields AgentBusinessContext) error
 
+	// UpdateDeviceInfo updates the agent's device-reported tags (profile, logged_in_user)
+	// received from the agent via heartbeat gRPC metadata.
+	// Only non-empty values overwrite existing entries; other tags are preserved.
+	UpdateDeviceInfo(ctx context.Context, id uuid.UUID, profile, loggedInUser string) error
+
 	// UpsertByHostname performs an INSERT ... ON CONFLICT (hostname) DO UPDATE,
 	// atomically creating or replacing the agent record for the given hostname.
 	// On collision (re-install / re-image scenario), the old agent ID is replaced

@@ -11,6 +11,8 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
+	"google.golang.org/grpc/metadata"
+
 	"github.com/edr-platform/connection-manager/internal/cache"
 	"github.com/edr-platform/connection-manager/internal/service"
 	"github.com/edr-platform/connection-manager/pkg/contextkeys"
@@ -138,7 +140,34 @@ func (h *HeartbeatHandler) Heartbeat(ctx context.Context, req *edrv1.HeartbeatRe
 		}
 	}
 
-	// 7. Prepare response
+	// 7. Update device-reported tags (profile, logged_in_user) from gRPC metadata.
+	// The agent sends these as x-agent-* headers to avoid proto schema changes.
+	// The DB update runs in a goroutine so it never delays the heartbeat response.
+	if h.agentService != nil {
+		if md, ok := metadata.FromIncomingContext(ctx); ok {
+			profile := ""
+			loggedInUser := ""
+			if vals := md.Get("x-agent-profile"); len(vals) > 0 {
+				profile = vals[0]
+			}
+			if vals := md.Get("x-agent-logged-in-user"); len(vals) > 0 {
+				loggedInUser = vals[0]
+			}
+			if profile != "" || loggedInUser != "" {
+				if agentUUID, parseErr := uuid.Parse(agentID); parseErr == nil {
+					go func(id uuid.UUID, p, u string) {
+						upCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+						defer cancel()
+						if err := h.agentService.UpdateDeviceInfo(upCtx, id, p, u); err != nil {
+							logger.WithError(err).Warn("Failed to update device info tags")
+						}
+					}(agentUUID, profile, loggedInUser)
+				}
+			}
+		}
+	}
+
+	// 8. Prepare response
 	return &edrv1.HeartbeatResponse{
 		AgentId:             agentID,
 		ServerTimestamp:     timestamppb.Now(),
@@ -175,21 +204,21 @@ func mapAgentStatus(status edrv1.AgentStatus) string {
 //
 // Unified Industry-Standard Health Model (NIST SP 800-137 aligned):
 //
-//   health_score = delivery×0.40 + status×0.30 + dropRate×0.20 + resource×0.10
+//	health_score = delivery×0.40 + status×0.30 + dropRate×0.20 + resource×0.10
 //
 // Factor breakdown:
-//   1. Delivery Quality (40%): events_sent / events_generated × 100
-//      - Measures telemetry pipeline integrity. Low delivery indicates
-//        buffer overflow, network failure, or potential attacker interference.
-//   2. Operational Status (30%): maps reported agent status to a 0–100 score
-//      - Online=100, Degraded=80, Critical=50, Unknown=60, Offline=0
-//   3. Drop Rate Penalty (20%): penalizes high event drop ratios
-//      - >20% drops: score=0 (potential blinding attack per MITRE T1562)
-//      - 5–20%: linear degradation from 100→0
-//      - <5%: score=100 (acceptable operational loss)
-//   4. Resource Pressure (10%): CPU and memory utilization
-//      - >90% CPU or >95% memory: score=0 (resource exhaustion)
-//      - Linear scale from 100→0 as utilization increases
+//  1. Delivery Quality (40%): events_sent / events_generated × 100
+//     - Measures telemetry pipeline integrity. Low delivery indicates
+//     buffer overflow, network failure, or potential attacker interference.
+//  2. Operational Status (30%): maps reported agent status to a 0–100 score
+//     - Online=100, Degraded=80, Critical=50, Unknown=60, Offline=0
+//  3. Drop Rate Penalty (20%): penalizes high event drop ratios
+//     - >20% drops: score=0 (potential blinding attack per MITRE T1562)
+//     - 5–20%: linear degradation from 100→0
+//     - <5%: score=100 (acceptable operational loss)
+//  4. Resource Pressure (10%): CPU and memory utilization
+//     - >90% CPU or >95% memory: score=0 (resource exhaustion)
+//     - Linear scale from 100→0 as utilization increases
 //
 // This unified formula is used for:
 //   - Real-time health display in the dashboard

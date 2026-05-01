@@ -54,6 +54,11 @@ type Heartbeat struct {
 	// Heartbeat counters
 	heartbeatsSent atomic.Uint64
 	lastHeartbeat  time.Time
+
+	// Device context — refreshed every 5 min by background goroutine
+	deviceProfile string
+	loggedInUser  string
+	deviceInfoMu  sync.RWMutex
 }
 
 // HeartbeatRequest represents data sent in heartbeat.
@@ -79,6 +84,10 @@ type HeartbeatRequest struct {
 	// Sysmon telemetry
 	SysmonInstalled bool `json:"sysmon_installed"`
 	SysmonRunning   bool `json:"sysmon_running"`
+
+	// Device context — detected via WMI and sent as gRPC metadata
+	Profile      string `json:"profile,omitempty"`
+	LoggedInUser string `json:"logged_in_user,omitempty"`
 }
 
 // HeartbeatResponse represents server response.
@@ -154,6 +163,10 @@ func (h *Heartbeat) heartbeatLoop(ctx context.Context, sendFunc func(*HeartbeatR
 	ticker := time.NewTicker(h.interval)
 	defer ticker.Stop()
 
+	// Kick off background device-info refresh (profile + logged-in user).
+	// Runs async so slow WMI calls never block the heartbeat RPC timeout.
+	go h.refreshDeviceInfoLoop(ctx)
+
 	// Send initial heartbeat
 	h.sendHeartbeat(sendFunc)
 
@@ -191,6 +204,36 @@ func (h *Heartbeat) sendHeartbeat(sendFunc func(*HeartbeatRequest) (*HeartbeatRe
 		req.SysmonInstalled, req.SysmonRunning)
 }
 
+// refreshDeviceInfoLoop fetches device profile and logged-in user every 5 minutes.
+// Runs as a background goroutine to avoid blocking the heartbeat timeout.
+func (h *Heartbeat) refreshDeviceInfoLoop(ctx context.Context) {
+	h.refreshDeviceInfo()
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			h.refreshDeviceInfo()
+		}
+	}
+}
+
+// refreshDeviceInfo fetches profile and logged-in user via WMI and caches them.
+func (h *Heartbeat) refreshDeviceInfo() {
+	profile := getDeviceProfile()
+	user := getLoggedInUser()
+	h.deviceInfoMu.Lock()
+	if profile != "" {
+		h.deviceProfile = profile
+	}
+	if user != "" {
+		h.loggedInUser = user
+	}
+	h.deviceInfoMu.Unlock()
+}
+
 // buildRequest creates a heartbeat request with current metrics.
 func (h *Heartbeat) buildRequest() *HeartbeatRequest {
 	// Get ACTUAL system memory (not Go runtime memory)
@@ -204,6 +247,11 @@ func (h *Heartbeat) buildRequest() *HeartbeatRequest {
 
 	sysmonInstalled, sysmonRunning := checkSysmonStatus()
 
+	h.deviceInfoMu.RLock()
+	profile := h.deviceProfile
+	loggedInUser := h.loggedInUser
+	h.deviceInfoMu.RUnlock()
+
 	req := &HeartbeatRequest{
 		AgentID:         h.cfg.Agent.ID,
 		Timestamp:       time.Now().UTC(),
@@ -216,6 +264,8 @@ func (h *Heartbeat) buildRequest() *HeartbeatRequest {
 		CPUCount:        cpuCount,
 		SysmonInstalled: sysmonInstalled,
 		SysmonRunning:   sysmonRunning,
+		Profile:         profile,
+		LoggedInUser:    loggedInUser,
 	}
 
 	// Get metrics from collectors

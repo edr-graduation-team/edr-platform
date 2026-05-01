@@ -649,66 +649,47 @@ func joinStrings(parts []string, sep string) string {
 	return out
 }
 
-// UpsertByHostname atomically creates or replaces the agent record for the given hostname.
+// UpsertByHostname atomically creates or updates the agent record for the given hostname.
 //
-// Re-enrollment strategy:
+// Re-enrollment strategy (data-preserving):
 //
-//	When a re-image or re-install sends a new registration request for an existing
-//	hostname, this method uses PostgreSQL's ON CONFLICT (hostname) DO UPDATE to
-//	overwrite the old row in place.  Key design choices:
+//	When a re-install sends a new registration request for an existing hostname,
+//	this method REUSES the existing agent UUID so that all FK-linked historical
+//	data (vulnerability_findings, alerts, events, playbook_runs, etc.) stays
+//	attached to the device. Key design choices:
 //
-//	  • The old agent UUID is captured into metadata["previous_agent_id"] before
-//	    being overwritten — providing a full audit trail without a separate history table.
-//	  • status is reset to "pending" so the admin dashboard shows the re-enrolled
-//	    endpoint as requiring re-approval (same UX as a brand-new agent).
-//	  • Telemetry counters (events_collected, etc.) are reset to zero because they
-//	    belong to the previous install's lifecycle.
-//	  • installed_date is updated to now() to reflect the new imaging time.
-//	  • All other fields (os_type, os_version, cpu_count, memory_mb, agent_version,
-//	    tags, ip_addresses) are refreshed from the incoming request.
+//	  • The agent ID is NOT changed on conflict — the service layer sets
+//	    agent.ID = existing.ID before calling this method.
+//	  • Only security/operational tables are cleared: certificates, csrs,
+//	    installation_tokens, and command_queue (pending commands).
+//	    Historical tables are preserved: vulnerability_findings, alerts, events,
+//	    playbook_runs, forensic_collections, etc.
+//	  • Business context (criticality, business_unit, environment) and
+//	    custom tags (profile, customer, logged_in_user) are preserved via
+//	    COALESCE / JSONB merge — so data entered in the dashboard survives reinstall.
+//	  • Telemetry counters are reset to zero (new install cycle).
+//	  • installed_date is updated to reflect the new imaging time.
 //
-// The operation runs inside a single implicit transaction (pgxpool.Exec is atomic).
+// The operation runs inside a transaction for atomicity.
 func (r *PostgresAgentRepository) UpsertByHostname(ctx context.Context, agent *models.Agent) error {
 	now := time.Now()
 
-	// Use a transaction: we must delete FK-dependent rows from ALL child tables
-	// before the UPSERT can safely change the agent's primary key (id).
-	//
-	// Child tables with FK → agents(id):
-	//   certificates, installation_tokens, csrs,
-	//   policy_agent_assignments, alerts, commands, command_queue
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
 	defer tx.Rollback(ctx)
 
-	// 1. Delete ALL FK-dependent rows referencing the previous agent with this hostname.
-	//    Each table has agent_id → agents(id) (or otherwise blocks changing agents.id),
-	//    so all must be cleared before the ON CONFLICT DO UPDATE can replace the id.
-	//
-	//    Order: tables with secondary FKs to other agent-scoped tables first (e.g. ioc_enrichment
-	//    → playbook_runs), then the rest. Must include *every* child of agents — omitting
-	//    e.g. "events" caused 23503 on re-enrollment.
-	childTables := []string{
-		"ioc_enrichment",
-		"triage_snapshots",
-		"forensic_collections",
-		"playbook_runs",
-		"events",
-		"enrollment_token_consumptions",
-		"vulnerability_findings",
-		"agent_quarantine_items",
-		"agent_patch_profiles",
-		"certificates",
-		"installation_tokens",
-		"csrs",
-		"policy_agent_assignments",
-		"alerts",
-		"commands",
-		"command_queue",
+	// 1. Clear only security/operational tables that are invalid after a reinstall.
+	//    Historical data tables (vulnerability_findings, alerts, events, etc.) are
+	//    intentionally preserved — the agent ID is reused so no FK violation occurs.
+	securityTables := []string{
+		"certificates",        // old cert is revoked by reinstall
+		"csrs",                // old CSR is no longer valid
+		"installation_tokens", // per-agent install tokens
+		"command_queue",       // pending commands from the old install are irrelevant
 	}
-	for _, table := range childTables {
+	for _, table := range securityTables {
 		_, err = tx.Exec(ctx, fmt.Sprintf(`
 			DELETE FROM %s
 			WHERE agent_id IN (
@@ -719,7 +700,7 @@ func (r *PostgresAgentRepository) UpsertByHostname(ctx context.Context, agent *m
 		}
 	}
 
-	// Unbind per-agent download rows without deleting the shared package (see 023 migration).
+	// Unbind per-agent download rows without deleting the shared package.
 	_, err = tx.Exec(ctx, `
 		UPDATE agent_packages
 		SET agent_id = NULL, consumed_at = NULL
@@ -729,7 +710,13 @@ func (r *PostgresAgentRepository) UpsertByHostname(ctx context.Context, agent *m
 		return fmt.Errorf("failed to unbind agent_packages for re-enrollment: %w", err)
 	}
 
-	// 2. UPSERT the agent row — now safe to change the id (no FK references remain).
+	// 2. UPSERT the agent row.
+	//    On conflict (same hostname = same device reinstalled):
+	//      - id is NOT changed (agent.ID is already existing.ID, set by service layer)
+	//      - business context is preserved via COALESCE (keep non-empty existing values)
+	//      - tags are merged: existing dashboard-entered tags take precedence over
+	//        the fresh agent's tags so profile/customer/logged_in_user survive reinstall
+	//      - operational metrics are reset to zero for the new install cycle
 	query := `
 		INSERT INTO agents (
 			id, hostname, status, os_type, os_version, hardware_id, cpu_count, memory_mb,
@@ -742,7 +729,6 @@ func (r *PostgresAgentRepository) UpsertByHostname(ctx context.Context, agent *m
 			$12, $13, $14, $14
 		)
 		ON CONFLICT (hostname) DO UPDATE SET
-			id             = EXCLUDED.id,
 			status         = EXCLUDED.status,
 			os_type        = EXCLUDED.os_type,
 			os_version     = EXCLUDED.os_version,
@@ -762,8 +748,11 @@ func (r *PostgresAgentRepository) UpsertByHostname(ctx context.Context, agent *m
 			is_isolated    = false,
 			current_cert_id = NULL,
 			cert_expires_at = NULL,
-			tags           = EXCLUDED.tags,
-			metadata       = EXCLUDED.metadata,
+			criticality    = COALESCE(NULLIF(agents.criticality, ''), EXCLUDED.criticality),
+			business_unit  = COALESCE(NULLIF(agents.business_unit, ''), EXCLUDED.business_unit),
+			environment    = COALESCE(NULLIF(agents.environment, ''), EXCLUDED.environment),
+			tags           = COALESCE(EXCLUDED.tags, '{}') || COALESCE(agents.tags, '{}'),
+			metadata       = COALESCE(EXCLUDED.metadata, '{}') || COALESCE(agents.metadata, '{}'),
 			updated_at     = EXCLUDED.updated_at`
 
 	_, err = tx.Exec(ctx, query,

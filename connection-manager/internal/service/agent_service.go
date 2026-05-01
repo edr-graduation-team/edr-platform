@@ -219,8 +219,18 @@ func (s *agentServiceImpl) Register(ctx context.Context, req *RegisterAgentReque
 		}).Info("Re-enrollment detected: will replace existing agent with same hostname")
 	}
 
-	// 3. Generate agent ID
+	// 3. Generate agent ID.
+	//    On re-enrollment (same hostname), reuse the existing UUID so that all
+	//    FK-linked historical data (vulnerability_findings, alerts, events, etc.)
+	//    stays attached to this device instead of becoming orphaned.
 	agentID := uuid.New()
+	if existing != nil {
+		agentID = existing.ID
+		s.logger.WithFields(logrus.Fields{
+			"agent_id": agentID,
+			"hostname": req.Hostname,
+		}).Info("Re-enrollment: reusing existing agent ID to preserve historical data")
+	}
 	now := time.Now()
 
 	// 4. Create/replace agent record using UPSERT.
@@ -290,8 +300,8 @@ func (s *agentServiceImpl) Register(ctx context.Context, req *RegisterAgentReque
 			inserted, err := s.enrollmentTokenRepo.RecordConsumption(ctx, enrollmentToken.ID, req.HardwareID, agentID)
 			if err != nil {
 				s.logger.WithError(err).WithFields(logrus.Fields{
-					"token_id":     enrollmentToken.ID,
-					"agent_id":     agentID,
+					"token_id":            enrollmentToken.ID,
+					"agent_id":            agentID,
 					"hardware_id_present": strings.TrimSpace(req.HardwareID) != "",
 				}).Error("Failed to record enrollment token consumption")
 				return nil, fmt.Errorf("failed to record enrollment token consumption: %w", err)

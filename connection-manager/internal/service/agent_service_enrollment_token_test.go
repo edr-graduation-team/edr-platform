@@ -37,23 +37,38 @@ func (r *fakeAgentRepo) Delete(ctx context.Context, id uuid.UUID) error { return
 func (r *fakeAgentRepo) List(ctx context.Context, filter repository.AgentFilter) ([]*models.Agent, error) {
 	return nil, nil
 }
-func (r *fakeAgentRepo) Count(ctx context.Context, filter repository.AgentFilter) (int64, error) { return 0, nil }
-func (r *fakeAgentRepo) GetOnlineAgents(ctx context.Context) ([]*models.Agent, error) { return nil, nil }
+func (r *fakeAgentRepo) Count(ctx context.Context, filter repository.AgentFilter) (int64, error) {
+	return 0, nil
+}
+func (r *fakeAgentRepo) GetOnlineAgents(ctx context.Context) ([]*models.Agent, error) {
+	return nil, nil
+}
 func (r *fakeAgentRepo) GetAgentsNeedingCertRenewal(ctx context.Context, within time.Duration) ([]*models.Agent, error) {
 	return nil, nil
 }
-func (r *fakeAgentRepo) MarkStaleOffline(ctx context.Context, threshold time.Duration) (int64, error) { return 0, nil }
-func (r *fakeAgentRepo) SetIsolation(ctx context.Context, id uuid.UUID, isolated bool) error { return nil }
+func (r *fakeAgentRepo) MarkStaleOffline(ctx context.Context, threshold time.Duration) (int64, error) {
+	return 0, nil
+}
+func (r *fakeAgentRepo) SetIsolation(ctx context.Context, id uuid.UUID, isolated bool) error {
+	return nil
+}
 func (r *fakeAgentRepo) UpsertByHostname(ctx context.Context, agent *models.Agent) error { return nil }
+func (r *fakeAgentRepo) UpdateBusinessContext(ctx context.Context, id uuid.UUID, ctxFields repository.AgentBusinessContext) error {
+	return nil
+}
 
 type fakeTokenRepo struct{}
 
-func (r *fakeTokenRepo) Create(ctx context.Context, token *models.InstallationToken) error { return nil }
+func (r *fakeTokenRepo) Create(ctx context.Context, token *models.InstallationToken) error {
+	return nil
+}
 func (r *fakeTokenRepo) GetByValue(ctx context.Context, value string) (*models.InstallationToken, error) {
 	return nil, repository.ErrNotFound
 }
-func (r *fakeTokenRepo) MarkUsed(ctx context.Context, id uuid.UUID, agentID uuid.UUID) error { return nil }
-func (r *fakeTokenRepo) Delete(ctx context.Context, id uuid.UUID) error { return nil }
+func (r *fakeTokenRepo) MarkUsed(ctx context.Context, id uuid.UUID, agentID uuid.UUID) error {
+	return nil
+}
+func (r *fakeTokenRepo) Delete(ctx context.Context, id uuid.UUID) error   { return nil }
 func (r *fakeTokenRepo) DeleteExpired(ctx context.Context) (int64, error) { return 0, nil }
 
 type fakeAuditRepo struct{}
@@ -65,7 +80,9 @@ func (r *fakeAuditRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.Audi
 func (r *fakeAuditRepo) List(ctx context.Context, filter repository.AuditLogFilter) ([]*models.AuditLog, error) {
 	return nil, nil
 }
-func (r *fakeAuditRepo) Count(ctx context.Context, filter repository.AuditLogFilter) (int64, error) { return 0, nil }
+func (r *fakeAuditRepo) Count(ctx context.Context, filter repository.AuditLogFilter) (int64, error) {
+	return 0, nil
+}
 
 type fakeEnrollmentTokenRepo struct {
 	t            *models.EnrollmentToken
@@ -282,4 +299,3 @@ func TestRegister_MultiUseEnrollmentToken_IdempotentPerHardwareID(t *testing.T) 
 		t.Fatalf("expected ErrExpiredToken/ErrInvalidToken for device C, got: %v", err)
 	}
 }
-

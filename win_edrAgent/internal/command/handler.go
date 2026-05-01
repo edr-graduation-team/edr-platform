@@ -2052,16 +2052,23 @@ func (h *Handler) updateAgent(ctx context.Context, params map[string]string) (st
 // relaunches with the OLD binary before rename+copy completes.
 //
 // Sequence:
-//   1. Disable SCM recovery (sc failure … actions= //)
-//   2. sc stop + wait for process death (loop-based, not fixed timeout)
-//   3. Rename old → .old, copy patch → dest
-//   4. sc start
-//   5. Re-enable SCM recovery
-//   6. Self-delete the script
+//
+//	0. Grace period (5s) — lets SendCommandResult ACK reach the server before the stream dies
+//	1. Disable SCM recovery (sc failure … actions= //)
+//	2. sc stop + wait for process death (loop-based, not fixed timeout)
+//	3. Rename old → .old, copy patch → dest
+//	4. sc start
+//	5. Re-enable SCM recovery
+//	6. Self-delete the script
 func writeAgentPatchApplyScript(scriptPath, dstExe, patchExe string) error {
 	var b strings.Builder
 	b.WriteString("@echo off\r\n")
 	b.WriteString("setlocal EnableExtensions\r\n")
+	b.WriteString("\r\n")
+	b.WriteString(":: ── Step 0: Grace period — let SendCommandResult ACK reach the server ──\r\n")
+	b.WriteString(":: The agent sends SUCCESS before this script fires. We wait 5s so the\r\n")
+	b.WriteString(":: gRPC result has time to traverse the connection before the stream dies.\r\n")
+	b.WriteString("timeout /t 5 /nobreak >nul\r\n")
 	b.WriteString("\r\n")
 	b.WriteString(":: ── Step 1: Disable SCM recovery so the service does NOT auto-restart ──\r\n")
 	b.WriteString("sc failure EDRAgent reset= 0 actions= // >nul 2>&1\r\n")

@@ -611,6 +611,16 @@ func (h *Handlers) ExecuteAgentCommand(c echo.Context) error {
 		}
 		req.Parameters["mode"] = "restart" // agent: sc stop → sc start
 		// start_agent mode already injected in the offline-safe block above
+	case "enable_sysmon":
+		if req.Parameters == nil {
+			req.Parameters = map[string]string{}
+		}
+		req.Parameters["mode"] = "enable_sysmon"
+	case "disable_sysmon":
+		if req.Parameters == nil {
+			req.Parameters = map[string]string{}
+		}
+		req.Parameters["mode"] = "disable_sysmon"
 	case "isolate", "isolate_network", "unisolate", "unisolate_network", "restore_network":
 		// Auto-inject the C2 server address so the agent builds correct ALLOW
 		// firewall rules. The agent falls back to config.server.address when

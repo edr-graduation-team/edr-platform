@@ -1528,6 +1528,29 @@ func timeRangeToMs(timeRange string) int64 {
 //  3. Call the registered configUpdateFn (agent.UpdateConfig) which validates,
 //     saves to disk, and hot-swaps the running config.
 func (h *Handler) updateConfig(ctx context.Context, params map[string]string) (string, error) {
+	// ── Sysmon management commands ─────────────────────────────────────────
+	// The dashboard's Configuration tab sends enable_sysmon / disable_sysmon.
+	// The server maps them to COMMAND_TYPE_UPDATE_CONFIG and injects
+	// mode=enable_sysmon or mode=disable_sysmon in parameters.
+	switch strings.TrimSpace(params["mode"]) {
+	case "enable_sysmon":
+		// If the dashboard sent inline XML (from the sysmonconfig editor),
+		// write it to the config path before enabling so enableSysmon picks
+		// it up instead of downloading from config_url or using the default.
+		if xml := strings.TrimSpace(params["sysmon_config_xml"]); xml != "" {
+			if err := os.MkdirAll(sysmonToolDir(), 0755); err != nil {
+				return "", fmt.Errorf("create sysmon dir for inline XML: %w", err)
+			}
+			if err := os.WriteFile(sysmonConfigPath(), []byte(xml), 0644); err != nil {
+				return "", fmt.Errorf("write inline sysmon config XML: %w", err)
+			}
+			h.logger.Info("[C2] Sysmon inline XML config written from dashboard")
+		}
+		return h.enableSysmon(ctx, params)
+	case "disable_sysmon":
+		return h.disableSysmon(ctx, params)
+	}
+
 	configYAML := strings.TrimSpace(params["config"])
 
 	// ── Case 1: Full YAML payload ─────────────────────────────────────────────

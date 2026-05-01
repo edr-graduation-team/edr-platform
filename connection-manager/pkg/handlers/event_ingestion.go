@@ -556,9 +556,10 @@ func mapDBCommandTypeToProto(cmdType string) edrv1.CommandType {
 	case "restart_service", "restart_agent", "start_agent", "start_service", "stop_agent", "stop_service":
 		return edrv1.CommandType_COMMAND_TYPE_RESTART_SERVICE
 	case "enable_sysmon", "disable_sysmon":
-		// Sysmon management is executed on the agent using the existing service-control
-		// command channel. The agent interprets parameters["mode"] accordingly.
-		return edrv1.CommandType_COMMAND_TYPE_RESTART_SERVICE
+		// Sysmon management routes through UPDATE_CONFIG on the agent side.
+		// The agent's updateConfig handler checks params["mode"] and delegates
+		// to enableSysmon() / disableSysmon() accordingly.
+		return edrv1.CommandType_COMMAND_TYPE_UPDATE_CONFIG
 	case "update_agent":
 		return edrv1.CommandType_COMMAND_TYPE_UPDATE_AGENT
 	case "uninstall_agent":

@@ -1442,6 +1442,35 @@ function ForensicsTab({ agentId }: { agentId: string }) {
     );
 }
 
+const DEFAULT_SYSMON_XML = `<!--
+  Minimal Sysmon configuration for EDR Platform.
+  This is intentionally conservative (low noise) and safe as a default.
+  You can replace it with a stricter config later (e.g. SwiftOnSecurity).
+-->
+<Sysmon schemaversion="4.90">
+  <HashAlgorithms>sha256</HashAlgorithms>
+  <EventFiltering>
+    <!-- Process Create -->
+    <ProcessCreate onmatch="include" />
+    <!-- Network Connect -->
+    <NetworkConnect onmatch="include" />
+    <!-- File Create Time -->
+    <FileCreateTime onmatch="include" />
+    <!-- Image Loaded -->
+    <ImageLoad onmatch="include" />
+    <!-- Create Remote Thread -->
+    <CreateRemoteThread onmatch="include" />
+    <!-- Registry events -->
+    <RegistryEvent onmatch="include" />
+    <!-- DNS Query -->
+    <DnsQuery onmatch="include" />
+    <!-- File create -->
+    <FileCreate onmatch="include" />
+    <!-- Process Terminate -->
+    <ProcessTerminate onmatch="include" />
+  </EventFiltering>
+</Sysmon>`;
+
 function ConfigurationTab({ agent, canExec }: { agent: Agent; canExec: boolean }) {
     const { showToast } = useToast();
     const canPushPolicy = authApi.canPushPolicy();
@@ -1449,14 +1478,17 @@ function ConfigurationTab({ agent, canExec }: { agent: Agent; canExec: boolean }
 
     // ── Operational settings ──────────────────────────────────────────────────
     const [batchSize, setBatchSize] = useState('200');
+    const [customBatchSize, setCustomBatchSize] = useState('');
     const [batchInterval, setBatchInterval] = useState('1s');
+    const [customBatchInterval, setCustomBatchInterval] = useState('');
     const [compression, setCompression] = useState('snappy');
 
     // ── Vulnerability scanner ─────────────────────────────────────────────────
     const [vulnEnabled, setVulnEnabled] = useState(true);
-    const [vulnScanner, setVulnScanner] = useState<'trivy' | 'grype'>('trivy');
     const [vulnInterval, setVulnInterval] = useState('6h');
+    const [customVulnInterval, setCustomVulnInterval] = useState('');
     const [vulnTimeout, setVulnTimeout] = useState('20m');
+    const [customVulnTimeout, setCustomVulnTimeout] = useState('');
 
     // ── Response policy ───────────────────────────────────────────────────────
     const [autoQuarantine, setAutoQuarantine] = useState(true);
@@ -1474,7 +1506,13 @@ function ConfigurationTab({ agent, canExec }: { agent: Agent; canExec: boolean }
     const [exceptionReason, setExceptionReason] = useState('');
 
     // ── Sysmon ────────────────────────────────────────────────────────────────
-    const [sysmonConfigUrl, setSysmonConfigUrl] = useState('');
+    const [sysmonConfigXml, setSysmonConfigXml] = useState(DEFAULT_SYSMON_XML);
+
+    // ── Effective values (resolve custom inputs) ──────────────────────────────
+    const effectiveBatchSize = batchSize === 'custom' ? (customBatchSize.trim() || '200') : batchSize;
+    const effectiveBatchInterval = batchInterval === 'custom' ? (customBatchInterval.trim() || '1s') : batchInterval;
+    const effectiveVulnInterval = vulnInterval === 'custom' ? (customVulnInterval.trim() || '6h') : vulnInterval;
+    const effectiveVulnTimeout = vulnTimeout === 'custom' ? (customVulnTimeout.trim() || '20m') : vulnTimeout;
 
     const invalidate = () => {
         queryClient.invalidateQueries({ queryKey: ['agent', agent.id] });
@@ -1485,7 +1523,7 @@ function ConfigurationTab({ agent, canExec }: { agent: Agent; canExec: boolean }
     const opMutation = useMutation({
         mutationFn: () => agentsApi.executeCommand(agent.id, {
             command_type: 'update_config',
-            parameters: { config: `agent:\n  batch_size: ${batchSize}\n  batch_interval: ${batchInterval}\n  compression: ${compression}\n` },
+            parameters: { config: `agent:\n  batch_size: ${effectiveBatchSize}\n  batch_interval: ${effectiveBatchInterval}\n  compression: ${compression}\n` },
             timeout: 30,
         } as any),
         onSuccess: () => { showToast('Operational settings queued — batch settings apply immediately ⚡', 'success'); invalidate(); },
@@ -1495,7 +1533,7 @@ function ConfigurationTab({ agent, canExec }: { agent: Agent; canExec: boolean }
     const vulnMutation = useMutation({
         mutationFn: () => agentsApi.executeCommand(agent.id, {
             command_type: 'update_vuln_config',
-            parameters: { vuln_scan_enabled: String(vulnEnabled), vuln_scanner_type: vulnScanner, vuln_scan_interval: vulnInterval, vuln_scan_timeout: vulnTimeout },
+            parameters: { vuln_scan_enabled: String(vulnEnabled), vuln_scanner_type: 'trivy', vuln_scan_interval: effectiveVulnInterval, vuln_scan_timeout: effectiveVulnTimeout },
             timeout: 30,
         } as any),
         onSuccess: () => { showToast('Vulnerability scanner config queued 🔄 (effective after restart)', 'success'); invalidate(); },
@@ -1534,7 +1572,7 @@ function ConfigurationTab({ agent, canExec }: { agent: Agent; canExec: boolean }
     const sysmonEnableMutation = useMutation({
         mutationFn: () => agentsApi.executeCommand(agent.id, {
             command_type: 'enable_sysmon',
-            parameters: sysmonConfigUrl.trim() ? { mode: 'enable_sysmon', config_url: sysmonConfigUrl.trim() } : { mode: 'enable_sysmon' },
+            parameters: { mode: 'enable_sysmon', sysmon_config_xml: sysmonConfigXml },
             timeout: 180,
         } as any),
         onSuccess: () => { showToast('Sysmon enable command queued', 'success'); invalidate(); },
@@ -1615,7 +1653,11 @@ function ConfigurationTab({ agent, canExec }: { agent: Agent; canExec: boolean }
                                     <option value="200">200 events (default)</option>
                                     <option value="500">500 events</option>
                                     <option value="1000">1 000 events</option>
+                                    <option value="custom">Custom…</option>
                                 </select>
+                                {batchSize === 'custom' && (
+                                    <input className={`${inp} mt-1.5`} type="number" min="1" placeholder="e.g. 300" value={customBatchSize} onChange={e => setCustomBatchSize(e.target.value)} disabled={!canExec} />
+                                )}
                             </div>
                             <div>
                                 <label className={lbl}>Batch Interval</label>
@@ -1624,14 +1666,17 @@ function ConfigurationTab({ agent, canExec }: { agent: Agent; canExec: boolean }
                                     <option value="1s">1 s (default)</option>
                                     <option value="2s">2 s</option>
                                     <option value="5s">5 s</option>
+                                    <option value="custom">Custom…</option>
                                 </select>
+                                {batchInterval === 'custom' && (
+                                    <input className={`${inp} mt-1.5`} placeholder="e.g. 3s / 750ms" value={customBatchInterval} onChange={e => setCustomBatchInterval(e.target.value)} disabled={!canExec} />
+                                )}
                             </div>
                             <div>
                                 <label className={lbl}>Compression</label>
                                 <select className={sel} value={compression} onChange={e => setCompression(e.target.value)} disabled={!canExec}>
                                     <option value="snappy">snappy (default)</option>
                                     <option value="gzip">gzip</option>
-                                    <option value="none">none</option>
                                 </select>
                             </div>
                         </div>
@@ -1656,14 +1701,7 @@ function ConfigurationTab({ agent, canExec }: { agent: Agent; canExec: boolean }
                             </div>
                             <div>
                                 <label className={lbl}>Scanner</label>
-                                <div className="flex gap-4">
-                                    {(['trivy', 'grype'] as const).map(s => (
-                                        <label key={s} className="flex items-center gap-1.5 text-xs cursor-pointer select-none">
-                                            <input type="radio" className="accent-cyan-500" checked={vulnScanner === s} onChange={() => setVulnScanner(s)} disabled={!canExec} />
-                                            {s}
-                                        </label>
-                                    ))}
-                                </div>
+                                <p className="text-xs font-mono font-semibold text-slate-700 dark:text-slate-200 mt-1">trivy</p>
                             </div>
                             <div>
                                 <label className={lbl}>Scan Interval</label>
@@ -1672,7 +1710,11 @@ function ConfigurationTab({ agent, canExec }: { agent: Agent; canExec: boolean }
                                     <option value="6h">Every 6 hours (default)</option>
                                     <option value="12h">Every 12 hours</option>
                                     <option value="24h">Every 24 hours</option>
+                                    <option value="custom">Custom…</option>
                                 </select>
+                                {vulnInterval === 'custom' && (
+                                    <input className={`${inp} mt-1.5`} placeholder="e.g. 48h / 3h" value={customVulnInterval} onChange={e => setCustomVulnInterval(e.target.value)} disabled={!canExec} />
+                                )}
                             </div>
                             <div>
                                 <label className={lbl}>Scan Timeout</label>
@@ -1680,7 +1722,11 @@ function ConfigurationTab({ agent, canExec }: { agent: Agent; canExec: boolean }
                                     <option value="10m">10 minutes</option>
                                     <option value="20m">20 minutes (default)</option>
                                     <option value="30m">30 minutes</option>
+                                    <option value="custom">Custom…</option>
                                 </select>
+                                {vulnTimeout === 'custom' && (
+                                    <input className={`${inp} mt-1.5`} placeholder="e.g. 45m / 1h" value={customVulnTimeout} onChange={e => setCustomVulnTimeout(e.target.value)} disabled={!canExec} />
+                                )}
                             </div>
                         </div>
                         <div className="flex justify-end">
@@ -1820,8 +1866,18 @@ function ConfigurationTab({ agent, canExec }: { agent: Agent; canExec: boolean }
                         </div>
                     </div>
                     <div>
-                        <label className={lbl}>Config URL (optional)</label>
-                        <input className={inp} value={sysmonConfigUrl} onChange={e => setSysmonConfigUrl(e.target.value)} placeholder="https://example.com/sysmonconfig.xml" disabled={!canExec} />
+                        <div className="flex items-center justify-between mb-1">
+                            <label className={lbl} style={{marginBottom: 0}}>Sysmon Config XML</label>
+                            <span className="text-[10px] text-slate-400 font-mono">assets/sysmonconfig.xml</span>
+                        </div>
+                        <textarea
+                            className="w-full rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-950 px-3 py-2 text-xs font-mono min-h-[220px] focus:outline-none focus:ring-1 focus:ring-cyan-500 resize-y"
+                            value={sysmonConfigXml}
+                            onChange={e => setSysmonConfigXml(e.target.value)}
+                            spellCheck={false}
+                            disabled={!canExec}
+                        />
+                        <p className="text-[10px] text-slate-400 mt-1">This XML is sent to the agent when you click “Enable Sysmon”. Edit to customise event filters.</p>
                     </div>
                     <div className="flex gap-2 justify-end">
                         <button type="button" disabled={!canExec || sysmonDisableMutation.isPending}

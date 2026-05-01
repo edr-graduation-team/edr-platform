@@ -5,7 +5,8 @@ import {
     ArrowLeft, Activity, Terminal, Shield, HardDrive, Loader2,
     Server, Network, AlertTriangle, CheckCircle2, XCircle, Settings,
     RefreshCw, ChevronLeft, ChevronRight, FileText, List, Package,
-    ShieldAlert, Pencil, Check, X as XIcon, Building2, Globe
+    ShieldAlert, Pencil, Check, X as XIcon, Building2, Globe,
+    Eye, ShieldCheck, Tag, Zap
 } from 'lucide-react';
 import {
     agentPackagesApi,
@@ -75,17 +76,11 @@ const RESPONSE_OPTIONS: { value: CommandType; label: string; destructive?: boole
     { value: 'collect_logs', label: 'Collect logs' },
     { value: 'collect_forensics', label: 'Collect forensics' },
     { value: 'scan_memory', label: 'Scan memory (file hash)' },
-    { value: 'update_signatures', label: 'Update signatures' },
-    { value: 'update_config', label: 'Update config (hot reload)' },
-    { value: 'update_vuln_config', label: 'Update vulnerability scanner config' },
-    { value: 'update_filter_policy', label: 'Update filter policy (JSON)' },
     { value: 'restart_agent', label: 'Restart agent' },
     { value: 'restart_service', label: 'Restart agent service' },
     { value: 'start_agent', label: 'Start agent service' },
     { value: 'restart_machine', label: 'Restart machine', destructive: true },
     { value: 'shutdown_machine', label: 'Shutdown machine', destructive: true },
-    { value: 'enable_sysmon', label: 'Enable Sysmon (install + channel)' },
-    { value: 'disable_sysmon', label: 'Disable Sysmon (uninstall)' },
     { value: 'uninstall_agent', label: 'Uninstall agent (permanent)', destructive: true },
 ];
 
@@ -622,7 +617,7 @@ export default function EndpointDetail() {
                             </div>
                         ))}
 
-                    {tab === 'configuration' && <ConfigurationTab agent={agent} />}
+                    {tab === 'configuration' && <ConfigurationTab agent={agent} canExec={canExec} />}
 
                     {tab === 'software' && (
                         <div className="flex flex-col items-center justify-center py-16 text-center">
@@ -1447,171 +1442,432 @@ function ForensicsTab({ agentId }: { agentId: string }) {
     );
 }
 
-function ConfigurationTab({ agent }: { agent: Agent }) {
-    const meta = agent.metadata || {};
-    const filterPolicy = meta.filter_policy_json || meta.filter_policy;
+function ConfigurationTab({ agent, canExec }: { agent: Agent; canExec: boolean }) {
     const { showToast } = useToast();
     const canPushPolicy = authApi.canPushPolicy();
     const queryClient = useQueryClient();
-    const [policyJson, setPolicyJson] = useState(
-        JSON.stringify(
-            {
-                exclude_processes: ['svchost.exe'],
-                exclude_event_ids: [4, 7, 15, 22],
-                trusted_hashes: [],
-                rate_limit: { enabled: true, default_max_eps: 500, critical_bypass: true },
-            },
-            null,
-            2
-        )
+
+    // ── Operational settings ──────────────────────────────────────────────────
+    const [batchSize, setBatchSize] = useState('200');
+    const [batchInterval, setBatchInterval] = useState('1s');
+    const [compression, setCompression] = useState('snappy');
+
+    // ── Vulnerability scanner ─────────────────────────────────────────────────
+    const [vulnEnabled, setVulnEnabled] = useState(true);
+    const [vulnScanner, setVulnScanner] = useState<'trivy' | 'grype'>('trivy');
+    const [vulnInterval, setVulnInterval] = useState('6h');
+    const [vulnTimeout, setVulnTimeout] = useState('20m');
+
+    // ── Response policy ───────────────────────────────────────────────────────
+    const [autoQuarantine, setAutoQuarantine] = useState(true);
+    const [autoKill, setAutoKill] = useState(true);
+    const [preventionMode, setPreventionMode] = useState<'auto_kill_then_override' | 'detect_only'>('auto_kill_then_override');
+
+    // ── Filter policy ─────────────────────────────────────────────────────────
+    const [policyJson, setPolicyJson] = useState(() =>
+        JSON.stringify({ exclude_processes: ['svchost.exe'], exclude_event_ids: [4, 7, 15, 22], trusted_hashes: [], rate_limit: { enabled: true, default_max_eps: 500, critical_bypass: true } }, null, 2)
     );
     const [policyError, setPolicyError] = useState('');
+
+    // ── Process exception ─────────────────────────────────────────────────────
     const [exceptionProcess, setExceptionProcess] = useState('');
     const [exceptionReason, setExceptionReason] = useState('');
 
+    // ── Sysmon ────────────────────────────────────────────────────────────────
+    const [sysmonConfigUrl, setSysmonConfigUrl] = useState('');
+
+    const invalidate = () => {
+        queryClient.invalidateQueries({ queryKey: ['agent', agent.id] });
+        queryClient.invalidateQueries({ queryKey: ['agent-commands', agent.id] });
+    };
+
+    // ── Mutations ─────────────────────────────────────────────────────────────
+    const opMutation = useMutation({
+        mutationFn: () => agentsApi.executeCommand(agent.id, {
+            command_type: 'update_config',
+            parameters: { config: `agent:\n  batch_size: ${batchSize}\n  batch_interval: ${batchInterval}\n  compression: ${compression}\n` },
+            timeout: 30,
+        } as any),
+        onSuccess: () => { showToast('Operational settings queued — batch settings apply immediately ⚡', 'success'); invalidate(); },
+        onError: (e: Error) => showToast(e.message || 'Failed', 'error'),
+    });
+
+    const vulnMutation = useMutation({
+        mutationFn: () => agentsApi.executeCommand(agent.id, {
+            command_type: 'update_vuln_config',
+            parameters: { vuln_scan_enabled: String(vulnEnabled), vuln_scanner_type: vulnScanner, vuln_scan_interval: vulnInterval, vuln_scan_timeout: vulnTimeout },
+            timeout: 30,
+        } as any),
+        onSuccess: () => { showToast('Vulnerability scanner config queued 🔄 (effective after restart)', 'success'); invalidate(); },
+        onError: (e: Error) => showToast(e.message || 'Failed', 'error'),
+    });
+
     const policyMutation = useMutation({
+        mutationFn: () => agentsApi.executeCommand(agent.id, {
+            command_type: 'update_vuln_config',
+            parameters: { auto_quarantine: String(autoQuarantine), process_auto_kill_enabled: String(autoKill), process_prevention_mode: preventionMode },
+            timeout: 30,
+        } as any),
+        onSuccess: () => { showToast('Response policy queued 🔄 (effective after restart)', 'success'); invalidate(); },
+        onError: (e: Error) => showToast(e.message || 'Failed', 'error'),
+    });
+
+    const filterMutation = useMutation({
         mutationFn: async () => {
             const parsed = JSON.parse(policyJson);
             return agentsApi.updateFilterPolicy(agent.id, parsed);
         },
-        onSuccess: (data) => {
-            showToast(`Filter policy pushed (Command ID: ${data.command_id})`, 'success');
-            queryClient.invalidateQueries({ queryKey: ['agent', agent.id] });
-            queryClient.invalidateQueries({ queryKey: ['agent-commands', agent.id] });
-        },
+        onSuccess: (data: any) => { showToast(`Filter policy applied immediately ⚡ (${(data?.command_id || '').slice(0, 8)})`, 'success'); invalidate(); },
         onError: (e: Error) => showToast(e.message || 'Policy push failed', 'error'),
     });
+
     const exceptionMutation = useMutation({
         mutationFn: async () => {
             const pn = exceptionProcess.trim();
             if (!pn) throw new Error('process_name is required');
             return agentsApi.addProcessException(agent.id, { process_name: pn, reason: exceptionReason.trim() || undefined });
         },
-        onSuccess: (data) => {
-            showToast(`Process exception pushed (Command ID: ${data.command_id})`, 'success');
-            setExceptionProcess('');
-            setExceptionReason('');
-            queryClient.invalidateQueries({ queryKey: ['agent', agent.id] });
-            queryClient.invalidateQueries({ queryKey: ['agent-commands', agent.id] });
-        },
-        onError: (e: Error) => showToast(e.message || 'Failed to push process exception', 'error'),
+        onSuccess: () => { showToast('Process exception applied ⚡', 'success'); setExceptionProcess(''); setExceptionReason(''); invalidate(); },
+        onError: (e: Error) => showToast(e.message || 'Failed', 'error'),
     });
 
+    const sysmonEnableMutation = useMutation({
+        mutationFn: () => agentsApi.executeCommand(agent.id, {
+            command_type: 'enable_sysmon',
+            parameters: sysmonConfigUrl.trim() ? { mode: 'enable_sysmon', config_url: sysmonConfigUrl.trim() } : { mode: 'enable_sysmon' },
+            timeout: 180,
+        } as any),
+        onSuccess: () => { showToast('Sysmon enable command queued', 'success'); invalidate(); },
+        onError: (e: Error) => showToast(e.message || 'Failed', 'error'),
+    });
+
+    const sysmonDisableMutation = useMutation({
+        mutationFn: () => agentsApi.executeCommand(agent.id, {
+            command_type: 'disable_sysmon',
+            parameters: { mode: 'disable_sysmon' },
+            timeout: 120,
+        } as any),
+        onSuccess: () => { showToast('Sysmon disable command queued', 'success'); invalidate(); },
+        onError: (e: Error) => showToast(e.message || 'Failed', 'error'),
+    });
+
+    const signaturesMutation = useMutation({
+        mutationFn: () => agentsApi.executeCommand(agent.id, {
+            command_type: 'update_signatures',
+            parameters: {},
+            timeout: 180,
+        } as any),
+        onSuccess: () => { showToast('Signature update queued', 'success'); invalidate(); },
+        onError: (e: Error) => showToast(e.message || 'Failed', 'error'),
+    });
+
+    // ── UI helpers ────────────────────────────────────────────────────────────
+    const HotBadge = () => (
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/40">
+            <Zap className="w-2.5 h-2.5" /> Hot-reload
+        </span>
+    );
+    const RestartBadge = () => (
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800/40">
+            <RefreshCw className="w-2.5 h-2.5" /> After restart
+        </span>
+    );
+    const Toggle = ({ value, onChange, disabled }: { value: boolean; onChange: (v: boolean) => void; disabled?: boolean }) => (
+        <button type="button" onClick={() => !disabled && onChange(!value)} disabled={disabled}
+            className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors disabled:opacity-40 ${value ? 'bg-cyan-500' : 'bg-slate-300 dark:bg-slate-600'}`}>
+            <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${value ? 'translate-x-[18px]' : 'translate-x-0.5'}`} />
+        </button>
+    );
+    const card = 'rounded-xl border border-slate-200 dark:border-slate-700/60 p-5 bg-white/60 dark:bg-slate-900/40 space-y-4';
+    const lbl = 'block text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-1';
+    const sel = 'w-full rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-950 px-2.5 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-cyan-500';
+    const inp = 'w-full rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-950 px-2.5 py-1.5 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-cyan-500';
+    const applyBtn = 'px-3 py-1.5 rounded-lg text-xs font-semibold bg-cyan-600 hover:bg-cyan-700 text-white disabled:opacity-40 transition-colors';
+    const sectionHead = 'text-sm font-bold text-slate-800 dark:text-slate-100 mb-3 flex items-center gap-2';
+
     return (
-        <div className="space-y-6 text-sm">
-            <p className="text-slate-600 dark:text-slate-400">
-                Read-only view of labels and metadata. Full policy editing belongs on the Response tab.
-            </p>
-            <div>
-                <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100 mb-2 flex items-center gap-2">
-                    <Settings className="w-4 h-4" /> Tags
-                </h3>
-                {Object.keys(agent.tags || {}).length === 0 ? (
-                    <p className="text-slate-500">No tags.</p>
-                ) : (
-                    <pre className="text-xs bg-slate-100 dark:bg-slate-900 p-3 rounded-lg overflow-auto max-h-40">
-                        {JSON.stringify(agent.tags, null, 2)}
-                    </pre>
-                )}
-            </div>
-            <div>
-                <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100 mb-2">Metadata</h3>
-                {Object.keys(meta).length === 0 ? (
-                    <p className="text-slate-500">No metadata.</p>
-                ) : (
-                    <pre className="text-xs bg-slate-100 dark:bg-slate-900 p-3 rounded-lg overflow-auto max-h-64">
-                        {JSON.stringify(meta, null, 2)}
-                    </pre>
-                )}
-            </div>
-            {filterPolicy && (
-                <div>
-                    <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100 mb-2">Filter policy hint</h3>
-                    <p className="text-xs text-slate-500 mb-1">If the agent stores a serialized policy in metadata, it is shown here for review.</p>
-                    <pre className="text-xs bg-slate-100 dark:bg-slate-900 p-3 rounded-lg overflow-auto max-h-48 whitespace-pre-wrap break-all">
-                        {typeof filterPolicy === 'string' ? filterPolicy : JSON.stringify(filterPolicy, null, 2)}
-                    </pre>
-                </div>
-            )}
+        <div className="space-y-8 text-sm">
 
-            <div className="rounded-lg border border-slate-200 dark:border-slate-700 p-4 bg-white/60 dark:bg-slate-900/40">
-                <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100 mb-2">Filter policy</h3>
-                <p className="text-xs text-slate-500 mb-2">
-                    Push a new policy to the agent.
-                </p>
-                <textarea
-                    className="w-full rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-950 px-3 py-2 text-xs font-mono min-h-[180px]"
-                    value={policyJson}
-                    onChange={(e) => {
-                        setPolicyJson(e.target.value);
-                        setPolicyError('');
-                    }}
-                    spellCheck={false}
-                    disabled={!canPushPolicy}
-                />
-                {policyError ? <p className="text-xs text-rose-600 mt-2">{policyError}</p> : null}
-                <div className="flex items-center justify-end gap-2 mt-3">
-                    {!canPushPolicy ? (
-                        <span className="text-xs text-slate-500">Missing permission to push policy.</span>
-                    ) : null}
-                    <button
-                        type="button"
-                        disabled={!canPushPolicy || policyMutation.isPending}
-                        onClick={() => {
-                            try {
-                                JSON.parse(policyJson);
-                            } catch {
-                                setPolicyError('Invalid JSON — check syntax before pushing');
-                                return;
-                            }
-                            policyMutation.mutate();
-                        }}
-                        className="px-3 py-2 rounded-lg text-xs font-semibold bg-cyan-600 hover:bg-cyan-700 text-white disabled:opacity-50"
-                    >
-                        {policyMutation.isPending ? 'Pushing…' : 'Push policy to agent'}
-                    </button>
-                </div>
+            {/* ── Legend ────────────────────────────────────────────────── */}
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-4 py-3 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700/60 text-xs text-slate-500 dark:text-slate-400">
+                <span className="font-semibold text-slate-700 dark:text-slate-300">Legend:</span>
+                <span className="flex items-center gap-1.5"><HotBadge /> — takes effect immediately, no restart needed</span>
+                <span className="flex items-center gap-1.5"><RestartBadge /> — saved to Registry, effective after next service restart</span>
             </div>
 
-            <div className="rounded-lg border border-slate-200 dark:border-slate-700 p-4 bg-white/60 dark:bg-slate-900/40">
-                <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100 mb-2">Process exceptions</h3>
-                <p className="text-xs text-slate-500 mb-3">
-                    Allow a process name to bypass <strong>process auto-response</strong>. This calls{' '}
-                    an internal exception update and pushes{' '}
-                    <code className="text-xs">exclude_process</code> to the agent at runtime.
-                </p>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                    <div className="md:col-span-1">
-                        <label className="block text-[10px] font-semibold uppercase tracking-wide text-slate-500 mb-1">Process name</label>
-                        <input
-                            className="w-full rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-950 px-3 py-2 text-sm font-mono"
-                            value={exceptionProcess}
-                            onChange={(e) => setExceptionProcess(e.target.value)}
-                            placeholder="e.g. powershell.exe"
-                            disabled={!canPushPolicy}
-                        />
+            {/* ══════════════ CONFIGURATION ══════════════════════════════ */}
+            <div>
+                <h2 className={sectionHead}><Settings className="w-4 h-4 text-cyan-500" /> Configuration</h2>
+                <div className="space-y-4">
+
+                    {/* Operational settings */}
+                    <div className={card}>
+                        <div className="flex items-center justify-between flex-wrap gap-2">
+                            <h3 className="text-xs font-semibold text-slate-700 dark:text-slate-200">Operational Settings</h3>
+                            <HotBadge />
+                        </div>
+                        <p className="text-xs text-slate-500">Batch pipeline parameters. Changes apply immediately via batcher hot-swap — no service restart required.</p>
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                            <div>
+                                <label className={lbl}>Batch Size</label>
+                                <select className={sel} value={batchSize} onChange={e => setBatchSize(e.target.value)} disabled={!canExec}>
+                                    <option value="100">100 events</option>
+                                    <option value="200">200 events (default)</option>
+                                    <option value="500">500 events</option>
+                                    <option value="1000">1 000 events</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label className={lbl}>Batch Interval</label>
+                                <select className={sel} value={batchInterval} onChange={e => setBatchInterval(e.target.value)} disabled={!canExec}>
+                                    <option value="500ms">500 ms</option>
+                                    <option value="1s">1 s (default)</option>
+                                    <option value="2s">2 s</option>
+                                    <option value="5s">5 s</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label className={lbl}>Compression</label>
+                                <select className={sel} value={compression} onChange={e => setCompression(e.target.value)} disabled={!canExec}>
+                                    <option value="snappy">snappy (default)</option>
+                                    <option value="gzip">gzip</option>
+                                    <option value="none">none</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div className="flex justify-end">
+                            <button type="button" className={applyBtn} disabled={!canExec || opMutation.isPending} onClick={() => opMutation.mutate()}>
+                                {opMutation.isPending ? 'Sending…' : 'Apply'}
+                            </button>
+                        </div>
                     </div>
-                    <div className="md:col-span-2">
-                        <label className="block text-[10px] font-semibold uppercase tracking-wide text-slate-500 mb-1">Reason (optional)</label>
-                        <input
-                            className="w-full rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-950 px-3 py-2 text-sm"
-                            value={exceptionReason}
-                            onChange={(e) => setExceptionReason(e.target.value)}
-                            placeholder="approved automation / known good"
-                            disabled={!canPushPolicy}
-                        />
+
+                    {/* Vulnerability scanner */}
+                    <div className={card}>
+                        <div className="flex items-center justify-between flex-wrap gap-2">
+                            <h3 className="text-xs font-semibold text-slate-700 dark:text-slate-200">Vulnerability Scanner</h3>
+                            <RestartBadge />
+                        </div>
+                        <p className="text-xs text-slate-500">Scanner settings are saved to Registry and take effect after the next service restart.</p>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div className="flex items-center gap-3">
+                                <Toggle value={vulnEnabled} onChange={setVulnEnabled} disabled={!canExec} />
+                                <span className="text-xs text-slate-600 dark:text-slate-300">Vuln scan enabled</span>
+                            </div>
+                            <div>
+                                <label className={lbl}>Scanner</label>
+                                <div className="flex gap-4">
+                                    {(['trivy', 'grype'] as const).map(s => (
+                                        <label key={s} className="flex items-center gap-1.5 text-xs cursor-pointer select-none">
+                                            <input type="radio" className="accent-cyan-500" checked={vulnScanner === s} onChange={() => setVulnScanner(s)} disabled={!canExec} />
+                                            {s}
+                                        </label>
+                                    ))}
+                                </div>
+                            </div>
+                            <div>
+                                <label className={lbl}>Scan Interval</label>
+                                <select className={sel} value={vulnInterval} onChange={e => setVulnInterval(e.target.value)} disabled={!canExec}>
+                                    <option value="1h">Every 1 hour</option>
+                                    <option value="6h">Every 6 hours (default)</option>
+                                    <option value="12h">Every 12 hours</option>
+                                    <option value="24h">Every 24 hours</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label className={lbl}>Scan Timeout</label>
+                                <select className={sel} value={vulnTimeout} onChange={e => setVulnTimeout(e.target.value)} disabled={!canExec}>
+                                    <option value="10m">10 minutes</option>
+                                    <option value="20m">20 minutes (default)</option>
+                                    <option value="30m">30 minutes</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div className="flex justify-end">
+                            <button type="button" className={applyBtn} disabled={!canExec || vulnMutation.isPending} onClick={() => vulnMutation.mutate()}>
+                                {vulnMutation.isPending ? 'Sending…' : 'Apply'}
+                            </button>
+                        </div>
                     </div>
                 </div>
-                <div className="flex items-center justify-end gap-2 mt-3">
-                    {!canPushPolicy ? <span className="text-xs text-slate-500">Missing permission to push exceptions.</span> : null}
-                    <button
-                        type="button"
-                        disabled={!canPushPolicy || exceptionMutation.isPending}
-                        onClick={() => exceptionMutation.mutate()}
-                        className="px-3 py-2 rounded-lg text-xs font-semibold bg-cyan-600 hover:bg-cyan-700 text-white disabled:opacity-50"
-                    >
-                        {exceptionMutation.isPending ? 'Pushing…' : 'Add process exception'}
-                    </button>
+            </div>
+
+            {/* ══════════════ POLICY ═════════════════════════════════════ */}
+            <div>
+                <h2 className={sectionHead}><Shield className="w-4 h-4 text-violet-500" /> Policy</h2>
+                <div className="space-y-4">
+
+                    {/* Response policy */}
+                    <div className={card}>
+                        <div className="flex items-center justify-between flex-wrap gap-2">
+                            <h3 className="text-xs font-semibold text-slate-700 dark:text-slate-200">Response Policy</h3>
+                            <RestartBadge />
+                        </div>
+                        <p className="text-xs text-slate-500">Controls how the agent reacts to detected threats. Saved to Registry — effective after next service restart.</p>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div className="flex items-center gap-3">
+                                <Toggle value={autoQuarantine} onChange={setAutoQuarantine} disabled={!canExec} />
+                                <div>
+                                    <p className="text-xs font-medium text-slate-700 dark:text-slate-200">Auto Quarantine</p>
+                                    <p className="text-[10px] text-slate-400">Automatically quarantine detected malicious files</p>
+                                </div>
+                            </div>
+                            <div className="flex items-center gap-3">
+                                <Toggle value={autoKill} onChange={setAutoKill} disabled={!canExec} />
+                                <div>
+                                    <p className="text-xs font-medium text-slate-700 dark:text-slate-200">Process Auto-Kill</p>
+                                    <p className="text-[10px] text-slate-400">Terminate processes flagged as malicious</p>
+                                </div>
+                            </div>
+                            <div className="sm:col-span-2">
+                                <label className={lbl}>Prevention Mode</label>
+                                <div className="flex gap-6 mt-1">
+                                    {([
+                                        ['auto_kill_then_override', 'Active — auto-kill + override', 'Blocks and terminates malicious activity automatically'],
+                                        ['detect_only', 'Passive — detect only', 'Logs and alerts without taking automated action'],
+                                    ] as const).map(([v, title, desc]) => (
+                                        <label key={v} className="flex items-start gap-2 cursor-pointer select-none">
+                                            <input type="radio" className="accent-cyan-500 mt-0.5" checked={preventionMode === v} onChange={() => setPreventionMode(v)} disabled={!canExec} />
+                                            <div>
+                                                <p className="text-xs font-medium text-slate-700 dark:text-slate-200">{title}</p>
+                                                <p className="text-[10px] text-slate-400">{desc}</p>
+                                            </div>
+                                        </label>
+                                    ))}
+                                </div>
+                            </div>
+                        </div>
+                        <div className="flex justify-end">
+                            <button type="button" className={applyBtn} disabled={!canExec || policyMutation.isPending} onClick={() => policyMutation.mutate()}>
+                                {policyMutation.isPending ? 'Sending…' : 'Apply'}
+                            </button>
+                        </div>
+                    </div>
+
+                    {/* Filter policy */}
+                    <div className={card}>
+                        <div className="flex items-center justify-between flex-wrap gap-2">
+                            <h3 className="text-xs font-semibold text-slate-700 dark:text-slate-200">Filter Policy</h3>
+                            <HotBadge />
+                        </div>
+                        <p className="text-xs text-slate-500">
+                            Define processes, event IDs, and file hashes to exclude from monitoring.
+                            Changes are pushed to the running agent and take effect immediately.
+                        </p>
+                        <textarea
+                            className="w-full rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-950 px-3 py-2 text-xs font-mono min-h-[160px] focus:outline-none focus:ring-1 focus:ring-cyan-500"
+                            value={policyJson}
+                            onChange={e => { setPolicyJson(e.target.value); setPolicyError(''); }}
+                            spellCheck={false}
+                            disabled={!canPushPolicy}
+                        />
+                        {policyError && <p className="text-xs text-rose-500">{policyError}</p>}
+                        <div className="flex items-center justify-end gap-2">
+                            {!canPushPolicy && <span className="text-xs text-slate-500">Missing policy push permission.</span>}
+                            <button type="button" className={applyBtn} disabled={!canPushPolicy || filterMutation.isPending}
+                                onClick={() => {
+                                    try { JSON.parse(policyJson); } catch { setPolicyError('Invalid JSON — check syntax before pushing'); return; }
+                                    filterMutation.mutate();
+                                }}>
+                                {filterMutation.isPending ? 'Pushing…' : 'Push filter policy'}
+                            </button>
+                        </div>
+                    </div>
+
+                    {/* Process exceptions */}
+                    <div className={card}>
+                        <div className="flex items-center justify-between flex-wrap gap-2">
+                            <h3 className="text-xs font-semibold text-slate-700 dark:text-slate-200">Process Exceptions</h3>
+                            <HotBadge />
+                        </div>
+                        <p className="text-xs text-slate-500">Allow a process to bypass process auto-response rules. Applied immediately.</p>
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                            <div>
+                                <label className={lbl}>Process name</label>
+                                <input className={inp} value={exceptionProcess} onChange={e => setExceptionProcess(e.target.value)} placeholder="e.g. powershell.exe" disabled={!canPushPolicy} />
+                            </div>
+                            <div className="md:col-span-2">
+                                <label className={lbl}>Reason (optional)</label>
+                                <input className={sel} value={exceptionReason} onChange={e => setExceptionReason(e.target.value)} placeholder="approved automation / known good" disabled={!canPushPolicy} />
+                            </div>
+                        </div>
+                        <div className="flex items-center justify-end gap-2">
+                            {!canPushPolicy && <span className="text-xs text-slate-500">Missing permission.</span>}
+                            <button type="button" className={applyBtn} disabled={!canPushPolicy || exceptionMutation.isPending} onClick={() => exceptionMutation.mutate()}>
+                                {exceptionMutation.isPending ? 'Pushing…' : 'Add exception'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            {/* ══════════════ SYSMON ═════════════════════════════════════ */}
+            <div>
+                <h2 className={sectionHead}><Eye className="w-4 h-4 text-indigo-500" /> Sysmon</h2>
+                <div className={card}>
+                    <div className="flex items-center gap-6 flex-wrap">
+                        <div className="flex items-center gap-2">
+                            <span className="text-[10px] font-semibold uppercase text-slate-400">Installed</span>
+                            {agent.sysmon_installed
+                                ? <span className="flex items-center gap-1 text-xs font-semibold text-emerald-600 dark:text-emerald-400"><CheckCircle2 className="w-3.5 h-3.5" /> Yes</span>
+                                : <span className="text-xs font-semibold text-slate-400">No</span>}
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <span className="text-[10px] font-semibold uppercase text-slate-400">Running</span>
+                            {agent.sysmon_running
+                                ? <span className="flex items-center gap-1 text-xs font-semibold text-emerald-600 dark:text-emerald-400"><CheckCircle2 className="w-3.5 h-3.5" /> Yes</span>
+                                : <span className="flex items-center gap-1 text-xs font-semibold text-rose-500"><XCircle className="w-3.5 h-3.5" /> No</span>}
+                        </div>
+                    </div>
+                    <div>
+                        <label className={lbl}>Config URL (optional)</label>
+                        <input className={inp} value={sysmonConfigUrl} onChange={e => setSysmonConfigUrl(e.target.value)} placeholder="https://example.com/sysmonconfig.xml" disabled={!canExec} />
+                    </div>
+                    <div className="flex gap-2 justify-end">
+                        <button type="button" disabled={!canExec || sysmonDisableMutation.isPending}
+                            onClick={() => sysmonDisableMutation.mutate()}
+                            className="px-3 py-1.5 rounded-lg text-xs font-semibold border border-rose-300 dark:border-rose-700/50 text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-900/20 disabled:opacity-40 transition-colors">
+                            {sysmonDisableMutation.isPending ? 'Sending…' : 'Disable Sysmon'}
+                        </button>
+                        <button type="button" className={applyBtn} disabled={!canExec || sysmonEnableMutation.isPending} onClick={() => sysmonEnableMutation.mutate()}>
+                            {sysmonEnableMutation.isPending ? 'Sending…' : 'Enable Sysmon'}
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            {/* ══════════════ SIGNATURES ═════════════════════════════════ */}
+            <div>
+                <h2 className={sectionHead}><ShieldCheck className="w-4 h-4 text-emerald-500" /> Signatures</h2>
+                <div className={card}>
+                    <p className="text-xs text-slate-500">Trigger a malware signature database update on this agent. The agent will fetch the latest signatures from its configured feed URL.</p>
+                    <div className="flex justify-end">
+                        <button type="button" className={applyBtn} disabled={!canExec || signaturesMutation.isPending} onClick={() => signaturesMutation.mutate()}>
+                            {signaturesMutation.isPending ? 'Queuing…' : 'Update signatures'}
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            {/* ══════════════ TAGS (read-only) ═══════════════════════════ */}
+            <div>
+                <h2 className={sectionHead}>
+                    <Tag className="w-4 h-4 text-slate-400" /> Agent Tags
+                    <span className="text-[10px] font-normal text-slate-400 dark:text-slate-500 ml-1">(read-only — populated by agent)</span>
+                </h2>
+                <div className={card}>
+                    {Object.keys(agent.tags || {}).length === 0 ? (
+                        <p className="text-xs text-slate-400">No tags yet.</p>
+                    ) : (
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                            {Object.entries(agent.tags || {}).map(([k, v]) => (
+                                <div key={k} className="bg-slate-50 dark:bg-slate-800/60 rounded-lg p-3">
+                                    <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400 mb-0.5">{k.replace(/_/g, ' ')}</p>
+                                    <p className="text-xs font-mono text-slate-700 dark:text-slate-200 break-all">{String(v)}</p>
+                                </div>
+                            ))}
+                        </div>
+                    )}
                 </div>
             </div>
         </div>
@@ -2242,17 +2498,6 @@ function ResponseTab({
             showToast('Please enter a file path to scan.', 'error');
             return;
         }
-        if (cmdType === 'update_config' && (!fields.config_key?.trim() || !fields.config_value?.trim())) {
-            showToast('Please enter both a configuration key and value.', 'error');
-            return;
-        }
-        if (cmdType === 'update_vuln_config') {
-            const p = buildCommandParameters('update_vuln_config', fields);
-            if (Object.keys(p).length === 0) {
-                showToast('Please fill in at least one vulnerability scanner setting.', 'error');
-                return;
-            }
-        }
         if (isCriticalAsset && fields.manual_approval !== 'true') {
             showToast('This is a critical asset. Manual approval confirmation is required before executing commands.', 'error');
             return;
@@ -2497,114 +2742,6 @@ function ResponseTab({
                                     <p className="text-xs text-slate-500 mt-3 p-3 bg-slate-100 dark:bg-slate-800/40 rounded-xl">
                                         No additional parameters needed. The agent service will be managed automatically.
                                     </p>
-                                )}
-
-                                {cmdType === 'enable_sysmon' && (
-                                    <div className="mt-3 space-y-3">
-                                        <label className="text-[10px] text-slate-500 uppercase">Sysmon config URL (optional)</label>
-                                        <input
-                                            className="input w-full font-mono text-xs"
-                                            placeholder="https://example.com/sysmonconfig.xml"
-                                            value={fields.sysmon_config_url || ''}
-                                            onChange={(e) => patch('sysmon_config_url', e.target.value)}
-                                            disabled={!canExec}
-                                        />
-                                    </div>
-                                )}
-
-                                {cmdType === 'update_signatures' && (
-                                    <div className="mt-3 space-y-3">
-                                        <label className="text-[10px] text-slate-500 uppercase">Feed URL</label>
-                                        <input className="input w-full text-xs" value={fields.sig_url || ''} onChange={(e) => patch('sig_url', e.target.value)} disabled={!canExec} />
-                                    </div>
-                                )}
-
-                                {cmdType === 'update_config' && (
-                                    <div className="mt-3 space-y-3">
-                                        <label className="text-[10px] text-slate-500 uppercase">Key (dot path)</label>
-                                        <input className="input w-full font-mono text-xs" placeholder="collectors.etw_enabled" value={fields.config_key || ''} onChange={(e) => patch('config_key', e.target.value)} disabled={!canExec} />
-                                        <label className="text-[10px] text-slate-500 uppercase">Value</label>
-                                        <input className="input w-full text-xs" placeholder="false" value={fields.config_value || ''} onChange={(e) => patch('config_value', e.target.value)} disabled={!canExec} />
-                                    </div>
-                                )}
-
-                                {cmdType === 'update_vuln_config' && (
-                                    <div className="mt-3 space-y-4">
-                                        <p className="text-[10px] text-slate-500 uppercase font-semibold tracking-wider border-b border-slate-200 dark:border-slate-700 pb-1">Vulnerability Scanner</p>
-                                        <div className="grid grid-cols-2 gap-3">
-                                            <div>
-                                                <label className="text-[10px] text-slate-500 uppercase">Enabled</label>
-                                                <select className="input w-full text-xs" value={fields.vuln_scan_enabled ?? ''} onChange={(e) => patch('vuln_scan_enabled', e.target.value)} disabled={!canExec}>
-                                                    <option value="">— no change —</option>
-                                                    <option value="true">true (enabled)</option>
-                                                    <option value="false">false (disabled)</option>
-                                                </select>
-                                            </div>
-                                            <div>
-                                                <label className="text-[10px] text-slate-500 uppercase">Scanner Type</label>
-                                                <select className="input w-full text-xs" value={fields.vuln_scanner_type || ''} onChange={(e) => patch('vuln_scanner_type', e.target.value)} disabled={!canExec}>
-                                                    <option value="">— no change —</option>
-                                                    <option value="trivy">trivy</option>
-                                                    <option value="grype">grype</option>
-                                                </select>
-                                            </div>
-                                            <div>
-                                                <label className="text-[10px] text-slate-500 uppercase">Scan Interval</label>
-                                                <input className="input w-full text-xs" placeholder="6h / 12h / 24h" value={fields.vuln_scan_interval || ''} onChange={(e) => patch('vuln_scan_interval', e.target.value)} disabled={!canExec} />
-                                            </div>
-                                            <div>
-                                                <label className="text-[10px] text-slate-500 uppercase">Scan Timeout</label>
-                                                <input className="input w-full text-xs" placeholder="20m / 30m" value={fields.vuln_scan_timeout || ''} onChange={(e) => patch('vuln_scan_timeout', e.target.value)} disabled={!canExec} />
-                                            </div>
-                                        </div>
-                                        <div>
-                                            <label className="text-[10px] text-slate-500 uppercase">Scanner Path (optional)</label>
-                                            <input className="input w-full font-mono text-xs" placeholder="C:\ProgramData\EDR\tools\trivy\trivy.exe" value={fields.vuln_scanner_path || ''} onChange={(e) => patch('vuln_scanner_path', e.target.value)} disabled={!canExec} />
-                                        </div>
-                                        <div>
-                                            <label className="text-[10px] text-slate-500 uppercase">Extra Args (comma-separated)</label>
-                                            <input className="input w-full font-mono text-xs" placeholder="--skip-db-update,--offline-scan" value={fields.vuln_scan_args || ''} onChange={(e) => patch('vuln_scan_args', e.target.value)} disabled={!canExec} />
-                                        </div>
-                                        <p className="text-[10px] text-slate-500 uppercase font-semibold tracking-wider border-b border-slate-200 dark:border-slate-700 pb-1 mt-2">Response Settings</p>
-                                        <div className="grid grid-cols-2 gap-3">
-                                            <div>
-                                                <label className="text-[10px] text-slate-500 uppercase">Process Prevention Mode</label>
-                                                <select className="input w-full text-xs" value={fields.process_prevention_mode || ''} onChange={(e) => patch('process_prevention_mode', e.target.value)} disabled={!canExec}>
-                                                    <option value="">— no change —</option>
-                                                    <option value="auto_kill_then_override">auto_kill_then_override (active)</option>
-                                                    <option value="detect_only">detect_only (passive)</option>
-                                                </select>
-                                            </div>
-                                            <div>
-                                                <label className="text-[10px] text-slate-500 uppercase">Auto-Quarantine</label>
-                                                <select className="input w-full text-xs" value={fields.auto_quarantine ?? ''} onChange={(e) => patch('auto_quarantine', e.target.value)} disabled={!canExec}>
-                                                    <option value="">— no change —</option>
-                                                    <option value="true">true (enabled)</option>
-                                                    <option value="false">false (disabled)</option>
-                                                </select>
-                                            </div>
-                                            <div>
-                                                <label className="text-[10px] text-slate-500 uppercase">Process Auto-Kill</label>
-                                                <select className="input w-full text-xs" value={fields.process_auto_kill_enabled ?? ''} onChange={(e) => patch('process_auto_kill_enabled', e.target.value)} disabled={!canExec}>
-                                                    <option value="">— no change —</option>
-                                                    <option value="true">true (enabled)</option>
-                                                    <option value="false">false (disabled)</option>
-                                                </select>
-                                            </div>
-                                        </div>
-                                    </div>
-                                )}
-
-                                {cmdType === 'update_filter_policy' && (
-                                    <div className="mt-3 space-y-3">
-                                        <label className="text-[10px] text-slate-500 uppercase">Policy JSON</label>
-                                        <textarea
-                                            className="w-full min-h-[120px] font-mono text-xs rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-900 p-2"
-                                            value={fields.policy_json || '{\n  "exclude_processes": []\n}'}
-                                            onChange={(e) => patch('policy_json', e.target.value)}
-                                            disabled={!canExec}
-                                        />
-                                    </div>
                                 )}
 
                                 {(cmdType === 'restart_machine' || cmdType === 'shutdown_machine') && (

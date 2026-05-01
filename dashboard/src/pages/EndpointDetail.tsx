@@ -5,7 +5,7 @@ import {
     ArrowLeft, Activity, Terminal, Shield, HardDrive, Loader2,
     Server, Network, AlertTriangle, CheckCircle2, XCircle, Settings,
     RefreshCw, ChevronLeft, ChevronRight, FileText, List, Package,
-    ShieldAlert
+    ShieldAlert, Pencil, Check, X as XIcon, Building2, Globe
 } from 'lucide-react';
 import {
     agentPackagesApi,
@@ -663,6 +663,13 @@ export default function EndpointDetail() {
     );
 }
 
+const CRIT_CONFIG: Record<string, { label: string; badge: string }> = {
+    critical: { label: 'Critical', badge: 'bg-rose-500/10 text-rose-700 dark:text-rose-300 border-rose-500/30' },
+    high:     { label: 'High',     badge: 'bg-orange-500/10 text-orange-700 dark:text-orange-300 border-orange-500/30' },
+    medium:   { label: 'Medium',   badge: 'bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/30' },
+    low:      { label: 'Low',      badge: 'bg-slate-500/10 text-slate-600 dark:text-slate-300 border-slate-500/20' },
+};
+
 function OverviewTab({
     agent,
     eff,
@@ -680,6 +687,30 @@ function OverviewTab({
     overviewAlertsLoading: boolean;
     cmEvents: CmEventSummary[];
 }) {
+    const queryClient = useQueryClient();
+    const { showToast } = useToast();
+    const canManage = authApi.canExecuteCommands();
+
+    const currentCrit = (agent.criticality || 'medium') as string;
+    const [critEdit, setCritEdit] = useState(false);
+    const [pendingCrit, setPendingCrit] = useState(currentCrit);
+    const [buEdit, setBuEdit] = useState(false);
+    const [pendingBU, setPendingBU] = useState(agent.business_unit || '');
+    const [envEdit, setEnvEdit] = useState(false);
+    const [pendingEnv, setPendingEnv] = useState(agent.environment || '');
+
+    const bCtxMutation = useMutation({
+        mutationFn: (d: { criticality?: string; business_unit?: string; environment?: string }) =>
+            agentsApi.patchBusinessContext(agent.id, d as any),
+        onSuccess: (_, vars) => {
+            const field = vars.criticality ? 'Criticality' : vars.business_unit !== undefined ? 'Business unit' : 'Environment';
+            showToast(`${field} updated`, 'success');
+            queryClient.invalidateQueries({ queryKey: ['agent', agent.id] });
+            setCritEdit(false); setBuEdit(false); setEnvEdit(false);
+        },
+        onError: (e: Error) => showToast(e.message || 'Update failed', 'error'),
+    });
+
     const tagEntries = Object.entries(agent.tags || {});
     const eventsCollected = agent.events_collected || agent.events_delivered || 0;
     const eventsDropped = agent.events_dropped || 0;
@@ -755,7 +786,7 @@ function OverviewTab({
                         <Server className="w-4 h-4 text-cyan-500" /> Device Information
                     </h3>
                     <dl className="text-sm space-y-2.5">
-                        <div className="flex justify-between gap-4 py-1 border-b border-slate-100 dark:border-slate-700/40"><dt className="text-slate-500">Operating System</dt><dd className="text-right font-medium text-slate-800 dark:text-slate-200">{agent.os_type} {agent.os_version}</dd></div>
+                        <div className="flex justify-between gap-4 py-1 border-b border-slate-100 dark:border-slate-700/40"><dt className="text-slate-500">Operating System</dt><dd className="text-right font-medium text-slate-800 dark:text-slate-200">{[agent.os_type, agent.os_version].filter(Boolean).join(' ')}</dd></div>
                         <div className="flex justify-between gap-4 py-1 border-b border-slate-100 dark:border-slate-700/40"><dt className="text-slate-500">Agent Version</dt><dd className="text-right font-medium text-slate-800 dark:text-slate-200">v{agent.agent_version || '—'}</dd></div>
                         <div className="flex justify-between gap-4 py-1 border-b border-slate-100 dark:border-slate-700/40"><dt className="text-slate-500">Last Seen</dt><dd className="text-right font-medium text-slate-800 dark:text-slate-200">{new Date(agent.last_seen).toLocaleString()}</dd></div>
                         <div className="flex justify-between gap-4 py-1 border-b border-slate-100 dark:border-slate-700/40"><dt className="text-slate-500">IP Addresses</dt><dd className="text-right font-medium text-slate-800 dark:text-slate-200 break-all">{(agent.ip_addresses || []).join(', ') || '—'}</dd></div>
@@ -837,6 +868,126 @@ function OverviewTab({
                         ) : null}
                     </div>
                 </div>
+            </div>
+
+            {/* Asset Context Card */}
+            <div className="rounded-xl border border-slate-200 dark:border-slate-700/60 bg-white dark:bg-slate-800/60 p-5">
+                <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4 flex items-center gap-2">
+                    <Shield className="w-4 h-4 text-violet-500" /> Asset Context
+                </h3>
+                <dl className="text-sm space-y-3">
+                    {/* Criticality — always shown, editable */}
+                    <div className="flex items-center justify-between gap-4">
+                        <dt className="text-slate-500 shrink-0">Criticality</dt>
+                        <dd className="flex items-center gap-2">
+                            {critEdit ? (
+                                <>
+                                    <select
+                                        autoFocus
+                                        value={pendingCrit}
+                                        onChange={e => setPendingCrit(e.target.value)}
+                                        className="text-xs rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 px-2 py-1 focus:outline-none focus:ring-2 focus:ring-violet-500/40"
+                                    >
+                                        {['low','medium','high','critical'].map(v => (
+                                            <option key={v} value={v}>{v.charAt(0).toUpperCase()+v.slice(1)}</option>
+                                        ))}
+                                    </select>
+                                    <button onClick={() => bCtxMutation.mutate({ criticality: pendingCrit })} disabled={bCtxMutation.isPending}
+                                        className="p-1 text-emerald-600 hover:text-emerald-700 disabled:opacity-50"><Check className="w-3.5 h-3.5" /></button>
+                                    <button onClick={() => { setCritEdit(false); setPendingCrit(currentCrit); }}
+                                        className="p-1 text-slate-400 hover:text-slate-600"><XIcon className="w-3.5 h-3.5" /></button>
+                                </>
+                            ) : (
+                                <>
+                                    <span className={`px-2 py-0.5 rounded-full text-xs font-semibold border ${(CRIT_CONFIG[currentCrit] || CRIT_CONFIG.medium).badge}`}>
+                                        {(CRIT_CONFIG[currentCrit] || CRIT_CONFIG.medium).label}
+                                    </span>
+                                    {canManage && (
+                                        <button onClick={() => { setPendingCrit(currentCrit); setCritEdit(true); }}
+                                            className="p-1 text-slate-300 hover:text-slate-500 dark:hover:text-slate-200 transition-colors"
+                                            title="Edit criticality">
+                                            <Pencil className="w-3 h-3" />
+                                        </button>
+                                    )}
+                                </>
+                            )}
+                        </dd>
+                    </div>
+
+                    {/* Business Unit — show only if has value OR user can manage */}
+                    {(agent.business_unit || canManage) && (
+                        <div className="flex items-center justify-between gap-4 py-1 border-t border-slate-100 dark:border-slate-700/40">
+                            <dt className="text-slate-500 flex items-center gap-1 shrink-0"><Building2 className="w-3.5 h-3.5" /> Business Unit</dt>
+                            <dd className="flex items-center gap-2">
+                                {buEdit ? (
+                                    <>
+                                        <input
+                                            autoFocus
+                                            value={pendingBU}
+                                            onChange={e => setPendingBU(e.target.value)}
+                                            placeholder="e.g. Finance, Engineering"
+                                            className="text-xs rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 px-2 py-1 w-40 focus:outline-none focus:ring-2 focus:ring-violet-500/40"
+                                        />
+                                        <button onClick={() => bCtxMutation.mutate({ business_unit: pendingBU })} disabled={bCtxMutation.isPending}
+                                            className="p-1 text-emerald-600 hover:text-emerald-700 disabled:opacity-50"><Check className="w-3.5 h-3.5" /></button>
+                                        <button onClick={() => { setBuEdit(false); setPendingBU(agent.business_unit || ''); }}
+                                            className="p-1 text-slate-400 hover:text-slate-600"><XIcon className="w-3.5 h-3.5" /></button>
+                                    </>
+                                ) : (
+                                    <>
+                                        <span className="font-medium text-slate-800 dark:text-slate-200">{agent.business_unit || <span className="text-slate-400 italic text-xs">Not set</span>}</span>
+                                        {canManage && (
+                                            <button onClick={() => { setPendingBU(agent.business_unit || ''); setBuEdit(true); }}
+                                                className="p-1 text-slate-300 hover:text-slate-500 dark:hover:text-slate-200 transition-colors"
+                                                title="Edit business unit">
+                                                <Pencil className="w-3 h-3" />
+                                            </button>
+                                        )}
+                                    </>
+                                )}
+                            </dd>
+                        </div>
+                    )}
+
+                    {/* Environment — show only if has value OR user can manage */}
+                    {(agent.environment || canManage) && (
+                        <div className="flex items-center justify-between gap-4 py-1 border-t border-slate-100 dark:border-slate-700/40">
+                            <dt className="text-slate-500 flex items-center gap-1 shrink-0"><Globe className="w-3.5 h-3.5" /> Environment</dt>
+                            <dd className="flex items-center gap-2">
+                                {envEdit ? (
+                                    <>
+                                        <select
+                                            autoFocus
+                                            value={pendingEnv}
+                                            onChange={e => setPendingEnv(e.target.value)}
+                                            className="text-xs rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 px-2 py-1 focus:outline-none focus:ring-2 focus:ring-violet-500/40"
+                                        >
+                                            <option value="">Not set</option>
+                                            <option value="production">Production</option>
+                                            <option value="staging">Staging</option>
+                                            <option value="development">Development</option>
+                                        </select>
+                                        <button onClick={() => bCtxMutation.mutate({ environment: pendingEnv })} disabled={bCtxMutation.isPending}
+                                            className="p-1 text-emerald-600 hover:text-emerald-700 disabled:opacity-50"><Check className="w-3.5 h-3.5" /></button>
+                                        <button onClick={() => { setEnvEdit(false); setPendingEnv(agent.environment || ''); }}
+                                            className="p-1 text-slate-400 hover:text-slate-600"><XIcon className="w-3.5 h-3.5" /></button>
+                                    </>
+                                ) : (
+                                    <>
+                                        <span className="font-medium text-slate-800 dark:text-slate-200 capitalize">{agent.environment || <span className="text-slate-400 italic text-xs">Not set</span>}</span>
+                                        {canManage && (
+                                            <button onClick={() => { setPendingEnv(agent.environment || ''); setEnvEdit(true); }}
+                                                className="p-1 text-slate-300 hover:text-slate-500 dark:hover:text-slate-200 transition-colors"
+                                                title="Edit environment">
+                                                <Pencil className="w-3 h-3" />
+                                            </button>
+                                        )}
+                                    </>
+                                )}
+                            </dd>
+                        </div>
+                    )}
+                </dl>
             </div>
 
             {/* Network, Health, Resources - Three Column */}

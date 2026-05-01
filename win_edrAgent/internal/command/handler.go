@@ -2046,21 +2046,68 @@ func (h *Handler) updateAgent(ctx context.Context, params map[string]string) (st
 
 // writeAgentPatchApplyScript writes a short-lived .cmd that performs stop → swap →
 // start. Invoked via schtasks with a tiny /TR (Windows limits /TR to 261 chars).
+//
+// CRITICAL: The SCM recovery policy restarts EDRAgent within ~100ms of
+// sc stop. We MUST disable recovery BEFORE stopping; otherwise the service
+// relaunches with the OLD binary before rename+copy completes.
+//
+// Sequence:
+//   1. Disable SCM recovery (sc failure … actions= //)
+//   2. sc stop + wait for process death (loop-based, not fixed timeout)
+//   3. Rename old → .old, copy patch → dest
+//   4. sc start
+//   5. Re-enable SCM recovery
+//   6. Self-delete the script
 func writeAgentPatchApplyScript(scriptPath, dstExe, patchExe string) error {
 	var b strings.Builder
 	b.WriteString("@echo off\r\n")
 	b.WriteString("setlocal EnableExtensions\r\n")
-	b.WriteString("sc stop EDRAgent\r\n")
-	b.WriteString("timeout /t 6 /nobreak >nul\r\n")
-	b.WriteString("taskkill /F /IM edr-agent.exe >nul 2>&1\r\n")
+	b.WriteString("\r\n")
+	b.WriteString(":: ── Step 1: Disable SCM recovery so the service does NOT auto-restart ──\r\n")
+	b.WriteString("sc failure EDRAgent reset= 0 actions= // >nul 2>&1\r\n")
+	b.WriteString("\r\n")
+	b.WriteString(":: ── Step 2: Stop the service ──\r\n")
+	b.WriteString("sc stop EDRAgent >nul 2>&1\r\n")
+	b.WriteString("\r\n")
+	b.WriteString(":: ── Step 3: Wait for the process to fully exit (up to 30s) ──\r\n")
+	b.WriteString("set /a TRIES=0\r\n")
+	b.WriteString(":WAIT_LOOP\r\n")
+	b.WriteString("tasklist /FI \"IMAGENAME eq edr-agent.exe\" 2>nul | find /i \"edr-agent.exe\" >nul\r\n")
+	b.WriteString("if errorlevel 1 goto PROC_DEAD\r\n")
+	b.WriteString("set /a TRIES+=1\r\n")
+	b.WriteString("if %TRIES% GEQ 15 (\r\n")
+	b.WriteString("    taskkill /F /IM edr-agent.exe >nul 2>&1\r\n")
+	b.WriteString("    timeout /t 3 /nobreak >nul\r\n")
+	b.WriteString("    goto PROC_DEAD\r\n")
+	b.WriteString(")\r\n")
 	b.WriteString("timeout /t 2 /nobreak >nul\r\n")
+	b.WriteString("goto WAIT_LOOP\r\n")
+	b.WriteString(":PROC_DEAD\r\n")
+	b.WriteString("\r\n")
+	b.WriteString(":: ── Step 4: Swap the binary ──\r\n")
 	fmt.Fprintf(&b, "del /f /q \"%s.old\" 2>nul\r\n", dstExe)
-	fmt.Fprintf(&b, "ren \"%s\" edr-agent.exe.old\r\n", dstExe)
-	fmt.Fprintf(&b, "copy /y \"%s\" \"%s\"\r\n", patchExe, dstExe)
-	b.WriteString("if errorlevel 1 exit /b 1\r\n")
-	fmt.Fprintf(&b, "del /f /q \"%s\"\r\n", patchExe)
-	b.WriteString("sc start EDRAgent\r\n")
-	b.WriteString(`del /f /q "%~f0"` + "\r\n")
+	fmt.Fprintf(&b, "move /y \"%s\" \"%s.old\" >nul 2>&1\r\n", dstExe, dstExe)
+	fmt.Fprintf(&b, "copy /y \"%s\" \"%s\" >nul\r\n", patchExe, dstExe)
+	b.WriteString("if errorlevel 1 (\r\n")
+	b.WriteString("    :: Rollback: restore old binary\r\n")
+	fmt.Fprintf(&b, "    move /y \"%s.old\" \"%s\" >nul 2>&1\r\n", dstExe, dstExe)
+	b.WriteString("    sc failure EDRAgent reset= 86400 actions= restart/5000/restart/10000/restart/30000 >nul 2>&1\r\n")
+	b.WriteString("    sc start EDRAgent >nul 2>&1\r\n")
+	b.WriteString("    exit /b 1\r\n")
+	b.WriteString(")\r\n")
+	b.WriteString("\r\n")
+	b.WriteString(":: ── Step 5: Clean up patch file ──\r\n")
+	fmt.Fprintf(&b, "del /f /q \"%s\" 2>nul\r\n", patchExe)
+	b.WriteString("\r\n")
+	b.WriteString(":: ── Step 6: Start the service with the NEW binary ──\r\n")
+	b.WriteString("sc start EDRAgent >nul 2>&1\r\n")
+	b.WriteString("\r\n")
+	b.WriteString(":: ── Step 7: Restore SCM recovery policy ──\r\n")
+	b.WriteString("timeout /t 3 /nobreak >nul\r\n")
+	b.WriteString("sc failure EDRAgent reset= 86400 actions= restart/5000/restart/10000/restart/30000 >nul 2>&1\r\n")
+	b.WriteString("\r\n")
+	b.WriteString(":: ── Step 8: Self-delete ──\r\n")
+	b.WriteString("del /f /q \"%~f0\" 2>nul\r\n")
 	return os.WriteFile(scriptPath, []byte(b.String()), 0700)
 }
 

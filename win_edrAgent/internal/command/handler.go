@@ -1635,6 +1635,37 @@ func (h *Handler) updateConfig(ctx context.Context, params map[string]string) (s
 		overrides = append(overrides, "filtering.exclude_processes+="+v)
 	}
 
+	// ── Vulnerability scanner settings ─────────────────────────────────────
+	if v, ok := params["vuln_scan_enabled"]; ok && v != "" {
+		overrides = append(overrides, "collectors.vuln_scan_enabled="+v)
+	}
+	if v, ok := params["vuln_scan_interval"]; ok && v != "" {
+		overrides = append(overrides, "collectors.vuln_scan_interval="+v)
+	}
+	if v, ok := params["vuln_scanner_type"]; ok && v != "" {
+		overrides = append(overrides, "collectors.vuln_scanner_type="+v)
+	}
+	if v, ok := params["vuln_scanner_path"]; ok && v != "" {
+		overrides = append(overrides, "collectors.vuln_scanner_path="+v)
+	}
+	if v, ok := params["vuln_scan_timeout"]; ok && v != "" {
+		overrides = append(overrides, "collectors.vuln_scan_timeout="+v)
+	}
+	if v, ok := params["vuln_scan_args"]; ok && v != "" {
+		overrides = append(overrides, "collectors.vuln_scan_args="+v)
+	}
+
+	// ── Response / process-prevention settings ─────────────────────────────
+	if v, ok := params["process_prevention_mode"]; ok && v != "" {
+		overrides = append(overrides, "response.process_prevention_mode="+v)
+	}
+	if v, ok := params["process_auto_kill_enabled"]; ok && v != "" {
+		overrides = append(overrides, "response.process_auto_kill_enabled="+v)
+	}
+	if v, ok := params["auto_quarantine"]; ok && v != "" {
+		overrides = append(overrides, "response.auto_quarantine="+v)
+	}
+
 	if len(overrides) == 0 {
 		return "", fmt.Errorf("UPDATE_CONFIG requires either a 'config' YAML payload, a 'policy' JSON payload, or at least one override param (server_address, log_level, exclude_process)")
 	}
@@ -1672,6 +1703,60 @@ func (h *Handler) updateConfig(ctx context.Context, params map[string]string) (s
 			newCfg.Filtering.ExcludeProcesses = append(newCfg.Filtering.ExcludeProcesses, v)
 			updated++
 		}
+	}
+
+	// ── Vulnerability scanner settings ─────────────────────────────────────
+	if v := strings.TrimSpace(params["vuln_scan_enabled"]); v != "" {
+		newCfg.Collectors.VulnScanEnabled = v == "true" || v == "1"
+		updated++
+	}
+	if v := strings.TrimSpace(params["vuln_scan_interval"]); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			newCfg.Collectors.VulnScanInterval = d
+			updated++
+		}
+	}
+	if v := strings.TrimSpace(params["vuln_scanner_type"]); v != "" {
+		newCfg.Collectors.VulnScannerType = strings.ToLower(v)
+		updated++
+	}
+	if v := strings.TrimSpace(params["vuln_scanner_path"]); v != "" {
+		newCfg.Collectors.VulnScannerPath = v
+		updated++
+	}
+	if v := strings.TrimSpace(params["vuln_scan_timeout"]); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			newCfg.Collectors.VulnScanTimeout = d
+			updated++
+		}
+	}
+	if v := strings.TrimSpace(params["vuln_scan_args"]); v != "" {
+		// Accept comma-separated args string: "arg1,arg2" → []string{"arg1","arg2"}
+		parts := strings.Split(v, ",")
+		args := make([]string, 0, len(parts))
+		for _, p := range parts {
+			if t := strings.TrimSpace(p); t != "" {
+				args = append(args, t)
+			}
+		}
+		newCfg.Collectors.VulnScanArgs = args
+		updated++
+	}
+
+	// ── Response / process-prevention settings ─────────────────────────────
+	if v := strings.TrimSpace(params["process_prevention_mode"]); v != "" {
+		if v == "detect_only" || v == "auto_kill_then_override" {
+			newCfg.Response.ProcessPreventionMode = v
+			updated++
+		}
+	}
+	if v := strings.TrimSpace(params["process_auto_kill_enabled"]); v != "" {
+		newCfg.Response.ProcessAutoKillEnabled = v == "true" || v == "1"
+		updated++
+	}
+	if v := strings.TrimSpace(params["auto_quarantine"]); v != "" {
+		newCfg.Response.AutoQuarantine = v == "true" || v == "1"
+		updated++
 	}
 
 	if updated == 0 {

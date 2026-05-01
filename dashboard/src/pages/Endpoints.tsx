@@ -44,6 +44,7 @@ const COMMAND_DEFINITIONS: Record<CommandType, { label: string; icon: typeof Pla
     unblock_domain: { label: 'Unblock Domain', icon: Globe2, description: 'Remove domain block', color: 'text-emerald-600' },
     update_signatures: { label: 'Update Signatures', icon: Download, description: 'Pull signature / intel bundle', color: 'text-indigo-500' },
     update_config: { label: 'Update Config', icon: Settings, description: 'Hot-reload agent configuration key', color: 'text-slate-600' },
+    update_vuln_config: { label: 'Update Vuln Config', icon: Settings, description: 'Update vulnerability scanner and response settings', color: 'text-indigo-500' },
     restore_quarantine_file: { label: 'Restore Quarantine File', icon: ArchiveRestore, description: 'Restore file from quarantine', color: 'text-green-600' },
     delete_quarantine_file: { label: 'Delete Quarantine File', icon: Trash2, description: 'Permanently delete quarantined file', color: 'text-red-600' },
     custom: { label: 'Custom Command', icon: Zap, description: 'Execute custom command', color: 'text-slate-500' },

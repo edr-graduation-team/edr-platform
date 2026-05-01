@@ -885,7 +885,7 @@ func mapCommandType(cmdType string) edrv1.CommandType {
 		// Using a numeric literal avoids forcing a pb.go regeneration pass; the agent
 		// decodes the same integer and routes it through the uninstall command path.
 		return edrv1.CommandType(21)
-	case "update_config", "update_policy":
+	case "update_config", "update_policy", "update_vuln_config":
 		return edrv1.CommandType_COMMAND_TYPE_UPDATE_CONFIG
 	case "update_filter_policy":
 		return edrv1.CommandType(12) // COMMAND_TYPE_UPDATE_FILTER_POLICY

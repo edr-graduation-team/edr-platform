@@ -215,12 +215,12 @@ func (h *Handlers) UpdateAgent(c echo.Context) error {
 // agentBusinessContextRequest is the body for PATCH /api/v1/agents/:id/business-context
 // All fields are optional; only provided ones are updated.
 type agentBusinessContextRequest struct {
-	Criticality  *string `json:"criticality,omitempty"`    // low | medium | high | critical
+	Criticality  *string `json:"criticality,omitempty"`   // low | medium | high | critical
 	BusinessUnit *string `json:"business_unit,omitempty"` // free-form
 	Environment  *string `json:"environment,omitempty"`   // production | staging | development | ''
 	// Tag-based fields — written into agents.tags JSONB
-	Profile      *string `json:"profile,omitempty"`       // e.g. Server, Workstation, Laptop
-	Customer     *string `json:"customer,omitempty"`      // e.g. ACME Corp
+	Profile      *string `json:"profile,omitempty"`        // e.g. Server, Workstation, Laptop
+	Customer     *string `json:"customer,omitempty"`       // e.g. ACME Corp
 	LoggedInUser *string `json:"logged_in_user,omitempty"` // last known user
 }
 
@@ -894,6 +894,8 @@ func mapCommandType(cmdType string) edrv1.CommandType {
 		// decodes the same integer and routes it through the uninstall command path.
 		return edrv1.CommandType(21)
 	case "update_config", "update_policy", "update_vuln_config":
+		return edrv1.CommandType_COMMAND_TYPE_UPDATE_CONFIG
+	case "enable_sysmon", "disable_sysmon":
 		return edrv1.CommandType_COMMAND_TYPE_UPDATE_CONFIG
 	case "update_filter_policy":
 		return edrv1.CommandType(12) // COMMAND_TYPE_UPDATE_FILTER_POLICY

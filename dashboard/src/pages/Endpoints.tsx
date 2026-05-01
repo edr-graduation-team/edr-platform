@@ -6,7 +6,7 @@ import {
     Search, Monitor, Wifi, WifiOff, AlertTriangle, ChevronDown,
     Play, Shield, FileX, Folder, RefreshCw, X, Check, Clock, Loader2, Power, ShieldAlert, Square, Zap,
     LayoutGrid, List, PanelLeft, Building2, Layers, UserPlus, Terminal,
-    Ban, ShieldOff, Globe, Globe2, Download, Settings, Trash2, ArchiveRestore, Wrench, PackageSearch,
+    Ban, ShieldOff, Globe, Globe2, Download, Settings, Trash2, ArchiveRestore, Wrench, PackageSearch, Pencil,
 } from 'lucide-react';
 import {
     agentsApi,
@@ -587,13 +587,89 @@ function isCommandDisabledForAgent(agent: Agent, cmd: CommandType): boolean {
 }
 
 function dmProfile(agent: Agent): string {
-    return agent.tags?.profile ?? agent.metadata?.profile ?? '—';
+    return agent.tags?.profile ?? agent.metadata?.profile ?? '';
 }
 function dmCustomer(agent: Agent): string {
-    return agent.tags?.customer ?? agent.metadata?.customer ?? '—';
+    return agent.tags?.customer ?? agent.metadata?.customer ?? '';
 }
 function dmLastUser(agent: Agent): string {
-    return agent.metadata?.logged_in_user ?? agent.tags?.logged_in_user ?? '—';
+    return agent.metadata?.logged_in_user ?? agent.tags?.logged_in_user ?? '';
+}
+
+const PROFILE_OPTIONS = [
+    { value: '', label: '—' },
+    { value: 'Workstation', label: 'Workstation' },
+    { value: 'Laptop', label: 'Laptop' },
+    { value: 'Server', label: 'Server' },
+    { value: 'Domain Controller', label: 'Domain Controller' },
+    { value: 'Cloud Instance', label: 'Cloud Instance' },
+];
+
+function InlineCellEdit({
+    value, onSave, type = 'text', options, placeholder, canEdit,
+}: {
+    value: string;
+    onSave: (v: string) => Promise<void>;
+    type?: 'text' | 'select';
+    options?: { value: string; label: string }[];
+    placeholder?: string;
+    canEdit: boolean;
+}) {
+    const [editing, setEditing] = useState(false);
+    const [pending, setPending] = useState(value);
+    const [saving, setSaving] = useState(false);
+
+    const save = async () => {
+        setSaving(true);
+        try { await onSave(pending); setEditing(false); }
+        finally { setSaving(false); }
+    };
+
+    if (!editing) {
+        return (
+            <span className="flex items-center gap-1 group min-w-0">
+                <span className={`truncate ${value ? '' : 'text-slate-400 italic'}`}>{value || '—'}</span>
+                {canEdit && (
+                    <button
+                        onClick={() => { setPending(value); setEditing(true); }}
+                        className="shrink-0 opacity-0 group-hover:opacity-100 p-0.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-opacity"
+                    >
+                        <Pencil className="w-3 h-3" />
+                    </button>
+                )}
+            </span>
+        );
+    }
+
+    return (
+        <span className="flex items-center gap-1">
+            {type === 'select' ? (
+                <select
+                    autoFocus
+                    value={pending}
+                    onChange={e => setPending(e.target.value)}
+                    className="text-xs rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-1.5 py-0.5 focus:outline-none focus:ring-1 focus:ring-violet-500/40 max-w-[120px]"
+                >
+                    {options?.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                </select>
+            ) : (
+                <input
+                    autoFocus
+                    value={pending}
+                    onChange={e => setPending(e.target.value)}
+                    placeholder={placeholder}
+                    onKeyDown={e => { if (e.key === 'Enter') save(); if (e.key === 'Escape') setEditing(false); }}
+                    className="text-xs rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-1.5 py-0.5 w-28 focus:outline-none focus:ring-1 focus:ring-violet-500/40"
+                />
+            )}
+            <button onClick={save} disabled={saving} className="shrink-0 p-0.5 text-emerald-600 hover:text-emerald-700 disabled:opacity-50">
+                {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
+            </button>
+            <button onClick={() => setEditing(false)} className="shrink-0 p-0.5 text-slate-400 hover:text-slate-600">
+                <X className="w-3 h-3" />
+            </button>
+        </span>
+    );
 }
 function dmComponentsLabel(agent: Agent): string {
     const eff = getEffectiveStatus(agent);
@@ -659,18 +735,27 @@ export default function Endpoints() {
     const total = data?.pagination?.total || 0;
 
     const patchBusinessContextMutation = useMutation({
-        mutationFn: ({ agentId, criticality }: { agentId: string; criticality: 'low' | 'medium' | 'high' | 'critical' }) =>
-            agentsApi.patchBusinessContext(agentId, { criticality }),
-        onSuccess: () => {
-            showToast('Asset criticality updated', 'success');
+        mutationFn: ({ agentId, ...data }: { agentId: string } & Parameters<typeof agentsApi.patchBusinessContext>[1]) =>
+            agentsApi.patchBusinessContext(agentId, data),
+        onSuccess: (_, vars) => {
+            const field = vars.criticality ? 'Criticality'
+                : vars.profile !== undefined ? 'Profile'
+                : vars.customer !== undefined ? 'Customer'
+                : vars.logged_in_user !== undefined ? 'Last logged in user'
+                : 'Asset context';
+            showToast(`${field} updated`, 'success');
             queryClient.invalidateQueries({ queryKey: ['agents'] });
-            queryClient.invalidateQueries({ queryKey: ['vuln-findings'] });
-            queryClient.invalidateQueries({ queryKey: ['vuln-stats'] });
+            if (vars.criticality) {
+                queryClient.invalidateQueries({ queryKey: ['vuln-findings'] });
+                queryClient.invalidateQueries({ queryKey: ['vuln-stats'] });
+            }
         },
         onError: (error: Error) => {
-            showToast(error.message || 'Failed to update criticality', 'error');
+            showToast(error.message || 'Failed to update', 'error');
         },
     });
+
+    const canManage = authApi.canManageEndpoints();
 
     const toggleSelectAll = () => {
         setSelectedIds((prev) => {
@@ -1126,17 +1211,39 @@ export default function Endpoints() {
                                                     </span>
                                                 )}
                                             </td>
-                                            <td className="py-3 px-2 align-middle text-xs text-slate-600 dark:text-slate-300 max-w-[100px] truncate" title={dmProfile(agent)}>
-                                                {dmProfile(agent)}
+                                            <td className="py-3 px-2 align-middle text-xs text-slate-600 dark:text-slate-300 max-w-[130px]">
+                                                <InlineCellEdit
+                                                    value={dmProfile(agent)}
+                                                    canEdit={canManage}
+                                                    type="select"
+                                                    options={PROFILE_OPTIONS}
+                                                    onSave={async (v) => {
+                                                        await patchBusinessContextMutation.mutateAsync({ agentId: agent.id, profile: v });
+                                                    }}
+                                                />
                                             </td>
                                             <td className="py-3 px-2 align-middle text-xs text-slate-600 dark:text-slate-300">
                                                 {dmComponentsLabel(agent)}
                                             </td>
-                                            <td className="py-3 px-2 align-middle text-xs text-slate-600 dark:text-slate-300 max-w-[100px] truncate" title={dmCustomer(agent)}>
-                                                {dmCustomer(agent)}
+                                            <td className="py-3 px-2 align-middle text-xs text-slate-600 dark:text-slate-300 max-w-[120px]">
+                                                <InlineCellEdit
+                                                    value={dmCustomer(agent)}
+                                                    canEdit={canManage}
+                                                    placeholder="ACME Corp"
+                                                    onSave={async (v) => {
+                                                        await patchBusinessContextMutation.mutateAsync({ agentId: agent.id, customer: v });
+                                                    }}
+                                                />
                                             </td>
-                                            <td className="py-3 px-2 align-middle text-xs text-slate-600 dark:text-slate-300 max-w-[120px] truncate" title={dmLastUser(agent)}>
-                                                {dmLastUser(agent)}
+                                            <td className="py-3 px-2 align-middle text-xs text-slate-600 dark:text-slate-300 max-w-[140px]">
+                                                <InlineCellEdit
+                                                    value={dmLastUser(agent)}
+                                                    canEdit={canManage}
+                                                    placeholder="DOMAIN\\user"
+                                                    onSave={async (v) => {
+                                                        await patchBusinessContextMutation.mutateAsync({ agentId: agent.id, logged_in_user: v });
+                                                    }}
+                                                />
                                             </td>
                                             <td className="py-3 px-2 align-middle text-xs text-slate-500">
                                                 <span title={new Date(agent.last_seen).toLocaleString()}>

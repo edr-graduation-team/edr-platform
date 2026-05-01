@@ -215,9 +215,13 @@ func (h *Handlers) UpdateAgent(c echo.Context) error {
 // agentBusinessContextRequest is the body for PATCH /api/v1/agents/:id/business-context
 // All fields are optional; only provided ones are updated.
 type agentBusinessContextRequest struct {
-	Criticality  *string `json:"criticality,omitempty"`   // low | medium | high | critical
+	Criticality  *string `json:"criticality,omitempty"`    // low | medium | high | critical
 	BusinessUnit *string `json:"business_unit,omitempty"` // free-form
 	Environment  *string `json:"environment,omitempty"`   // production | staging | development | ''
+	// Tag-based fields — written into agents.tags JSONB
+	Profile      *string `json:"profile,omitempty"`       // e.g. Server, Workstation, Laptop
+	Customer     *string `json:"customer,omitempty"`      // e.g. ACME Corp
+	LoggedInUser *string `json:"logged_in_user,omitempty"` // last known user
 }
 
 // PatchAgentBusinessContext updates an agent's asset-context fields.
@@ -238,8 +242,9 @@ func (h *Handlers) PatchAgentBusinessContext(c echo.Context) error {
 	if err := c.Bind(&body); err != nil {
 		return errorResponse(c, http.StatusBadRequest, "INVALID_BODY", "Invalid JSON body")
 	}
-	if body.Criticality == nil && body.BusinessUnit == nil && body.Environment == nil {
-		return errorResponse(c, http.StatusBadRequest, "EMPTY_PATCH", "Provide at least one of: criticality, business_unit, environment")
+	if body.Criticality == nil && body.BusinessUnit == nil && body.Environment == nil &&
+		body.Profile == nil && body.Customer == nil && body.LoggedInUser == nil {
+		return errorResponse(c, http.StatusBadRequest, "EMPTY_PATCH", "Provide at least one field to update")
 	}
 
 	if body.Criticality != nil {
@@ -256,6 +261,9 @@ func (h *Handlers) PatchAgentBusinessContext(c echo.Context) error {
 		Criticality:  body.Criticality,
 		BusinessUnit: body.BusinessUnit,
 		Environment:  body.Environment,
+		Profile:      body.Profile,
+		Customer:     body.Customer,
+		LoggedInUser: body.LoggedInUser,
 	})
 	if err != nil {
 		if err == repository.ErrNotFound {

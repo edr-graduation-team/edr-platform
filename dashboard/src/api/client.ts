@@ -583,6 +583,9 @@ export const agentsApi = {
         criticality?: 'low' | 'medium' | 'high' | 'critical';
         business_unit?: string;
         environment?: string;
+        profile?: string;
+        customer?: string;
+        logged_in_user?: string;
     }) => {
         const response = await connectionApi.patch<{ data: Agent }>(
             `/api/v1/agents/${encodeURIComponent(id)}/business-context`,

@@ -534,7 +534,7 @@ func (r *PostgresEventRepository) GetBandwidthAnalytics(ctx context.Context, hou
 			GROUP BY p.proc_name
 		)
 		SELECT
-			proc_name,
+			per_proc.proc_name AS proc_name,
 			(array_agg(executable ORDER BY length(executable) DESC))[1] AS executable,
 			COALESCE(SUM(CASE WHEN bs ~ '^\d+$' THEN bs::bigint ELSE 0 END), 0) AS total_sent,
 			COALESCE(SUM(CASE WHEN br ~ '^\d+$' THEN br::bigint ELSE 0 END), 0) AS total_received,
@@ -548,7 +548,7 @@ func (r *PostgresEventRepository) GetBandwidthAnalytics(ctx context.Context, hou
 			MAX(ts) AS last_seen
 		FROM per_proc
 		LEFT JOIN per_hosts ph ON ph.proc_name = per_proc.proc_name
-		GROUP BY proc_name
+		GROUP BY per_proc.proc_name, ph.hostnames
 		ORDER BY connections DESC
 		LIMIT 200`
 

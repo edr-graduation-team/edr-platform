@@ -1,4 +1,5 @@
 import { useEffect, type ReactNode } from 'react';
+import ReactDOM from 'react-dom';
 import { X } from 'lucide-react';
 
 interface ModalProps {
@@ -56,8 +57,8 @@ export function Modal({
 
     if (!isOpen) return null;
 
-    return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
+    return ReactDOM.createPortal(
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
             {/* Overlay */}
             <div
                 className="absolute inset-0 bg-black/60 backdrop-blur-md animate-fade-in"
@@ -67,14 +68,14 @@ export function Modal({
 
             {/* Modal Content */}
             <div
-                className={`relative w-full ${sizeClasses[size]} mx-4 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700/80 rounded-2xl shadow-2xl dark:shadow-slate-900/60 animate-slide-up-fade overflow-hidden`}
+                className={`relative w-full ${sizeClasses[size]} bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700/80 rounded-2xl shadow-2xl dark:shadow-slate-900/60 animate-slide-up-fade overflow-hidden flex flex-col max-h-[90vh]`}
                 role="dialog"
                 aria-modal="true"
                 aria-labelledby={title ? 'modal-title' : undefined}
             >
                 {/* Header */}
                 {(title || showCloseButton) && (
-                    <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-700/80 bg-slate-50/80 dark:bg-slate-800/80">
+                    <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-700/80 bg-slate-50/80 dark:bg-slate-800/80 shrink-0">
                         {title && (
                             <h2 id="modal-title" className="text-base font-bold text-slate-900 dark:text-white tracking-tight">
                                 {title}
@@ -93,18 +94,19 @@ export function Modal({
                 )}
 
                 {/* Body */}
-                <div className="px-6 py-5 max-h-[70vh] overflow-y-auto">
+                <div className="px-6 py-5 overflow-y-auto flex-1">
                     {children}
                 </div>
 
                 {/* Footer */}
                 {footer && (
-                    <div className="px-6 py-4 border-t border-slate-200 dark:border-slate-700/80 bg-slate-50/80 dark:bg-slate-900/50 rounded-b-2xl">
+                    <div className="px-6 py-4 border-t border-slate-200 dark:border-slate-700/80 bg-slate-50/80 dark:bg-slate-900/50 rounded-b-2xl shrink-0">
                         {footer}
                     </div>
                 )}
             </div>
-        </div>
+        </div>,
+        document.body
     );
 }
 

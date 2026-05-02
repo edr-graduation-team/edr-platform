@@ -76,7 +76,7 @@ export default function SignaturesManagement() {
                     <div className="mt-2 text-2xl font-bold">{statsQuery.data?.count ?? '—'}</div>
                 </div>
                 <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-4">
-                    <div className="text-xs uppercase font-semibold text-slate-500 flex items-center gap-2"><Workflow className="w-4 h-4" /> Max version</div>
+                    <div className="text-xs uppercase font-semibold text-slate-500 flex items-center gap-2"><Workflow className="w-4 h-4" /> Sync generations</div>
                     <div className="mt-2 text-2xl font-bold">{statsQuery.data?.max_version ?? '—'}</div>
                 </div>
                 <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-4">

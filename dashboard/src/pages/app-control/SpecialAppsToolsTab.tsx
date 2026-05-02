@@ -1,11 +1,11 @@
 import React, { useMemo, useState } from 'react';
 import {
-    Terminal, KeyRound, Wrench, Cog, Server, AlertTriangle,
+    Terminal, KeyRound, Wrench, Cog, AlertTriangle,
     RefreshCw, Search, ChevronDown, ChevronRight, Monitor,
     Package, Shield,
 } from 'lucide-react';
 import { useProcessAnalytics } from './useProcessAnalytics';
-import { CATEGORY_META, type ProcessCategory, type ProcessAggRow } from './types';
+import { type ProcessCategory, type ProcessAggRow } from './types';
 import { isHighAttention } from './classifyProcess';
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -226,7 +226,7 @@ function SummaryKPI({ label, value, sub, icon: Icon, accent }: {
 // ─── Main component ──────────────────────────────────────────────────────────
 
 export default function SpecialAppsToolsTab() {
-    const { rows, totalEvents, isLoading, isError, refetch, isFetching } = useProcessAnalytics();
+    const { rows, isLoading, isError, refetch, isFetching } = useProcessAnalytics();
     const [search, setSearch] = useState('');
 
     // Group rows by category

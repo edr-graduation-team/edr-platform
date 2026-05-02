@@ -282,7 +282,7 @@ func (r *PostgresAgentRepository) UpdateMetrics(ctx context.Context, id uuid.UUI
 	cpuUsage float64, memoryUsedMB int64, memoryTotalMB int64, queueDepth int,
 	eventsGenerated, eventsSent, eventsDropped int64,
 	agentVersion string, ipAddresses []string, cpuCount int, healthScore float64,
-	sysmonInstalled, sysmonRunning bool) error {
+	sysmonInstalled, sysmonRunning bool, osVersion string) error {
 
 	// Marshal ip_addresses to JSON for JSONB column
 	var ipJSON []byte
@@ -305,6 +305,7 @@ func (r *PostgresAgentRepository) UpdateMetrics(ctx context.Context, id uuid.UUI
 			cpu_count = CASE WHEN $11 = 0 THEN cpu_count ELSE $11 END,
 			health_score = CASE WHEN $12 < 0 THEN health_score ELSE $12 END,
 			sysmon_installed = $14, sysmon_running = $15,
+			os_version = CASE WHEN $16 = '' THEN os_version ELSE $16 END,
 			last_seen = $13, updated_at = $13
 		WHERE id = $1`
 
@@ -312,7 +313,7 @@ func (r *PostgresAgentRepository) UpdateMetrics(ctx context.Context, id uuid.UUI
 	result, err := r.pool.Exec(ctx, query, id, cpuUsage, memoryUsedMB, memoryTotalMB, queueDepth,
 		eventsGenerated, eventsSent, eventsDropped,
 		agentVersion, string(ipJSON), cpuCount, healthScore, now,
-		sysmonInstalled, sysmonRunning)
+		sysmonInstalled, sysmonRunning, osVersion)
 
 	if err != nil {
 		return fmt.Errorf("failed to update agent metrics: %w", err)

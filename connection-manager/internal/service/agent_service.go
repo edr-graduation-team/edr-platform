@@ -95,6 +95,7 @@ type AgentMetrics struct {
 	HealthScore     float64
 	SysmonInstalled bool
 	SysmonRunning   bool
+	OsVersion       string // live OS version string from the agent (e.g. "Windows Server 2019 Datacenter")
 }
 
 // RegistrationStatusApproved is the status string for approved (cert-issued) registration.
@@ -425,6 +426,7 @@ func (s *agentServiceImpl) UpdateMetrics(ctx context.Context, id uuid.UUID, metr
 		metrics.HealthScore,
 		metrics.SysmonInstalled,
 		metrics.SysmonRunning,
+		metrics.OsVersion,
 	)
 }
 

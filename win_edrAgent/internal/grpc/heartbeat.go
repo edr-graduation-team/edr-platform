@@ -68,6 +68,7 @@ type HeartbeatRequest struct {
 	Status          HeartbeatStatus `json:"status"`
 	Version         string          `json:"version"`
 	Hostname        string          `json:"hostname"`
+	OsVersion       string          `json:"os_version,omitempty"`
 	CPUUsage        float64         `json:"cpu_usage"`
 	MemoryUsedMB    uint64          `json:"memory_used_mb"`
 	MemoryTotalMB   uint64          `json:"memory_total_mb"`
@@ -258,6 +259,7 @@ func (h *Heartbeat) buildRequest() *HeartbeatRequest {
 		Status:          currentStatus,
 		Version:         "1.0.0", // TODO: Get from build
 		Hostname:        h.cfg.Agent.Hostname,
+		OsVersion:       getOSVersion(),
 		MemoryUsedMB:    usedMB,
 		MemoryTotalMB:   totalMB,
 		IPAddresses:     getLocalIPAddresses(),

@@ -50,6 +50,26 @@ func getSystemCPUCount() int {
 	return runtime.NumCPU()
 }
 
+// getOSVersion queries Win32_OperatingSystem.Caption via PowerShell/WMI to
+// return a human-readable Windows version string such as:
+//
+//	"Windows Server 2019 Datacenter"
+//	"Windows 10 Pro"
+//
+// Falls back to an empty string on any error so callers can decide how to handle
+// a missing value. This function is intended to be called once at startup.
+func getOSVersion() string {
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+
+	out, err := exec.CommandContext(ctx, "powershell", "-NoProfile", "-NonInteractive", "-Command",
+		`(Get-CimInstance Win32_OperatingSystem).Caption`).Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
 // getDeviceProfile classifies this Windows endpoint as one of:
 // "Domain Controller", "Server", "Laptop", or "Workstation".
 //

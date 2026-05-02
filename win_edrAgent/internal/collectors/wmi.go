@@ -122,6 +122,9 @@ func (c *WMICollector) collectInventory() {
 	// Collect network adapters
 	c.collectNetworkAdapters()
 
+	// Collect installed software inventory
+	c.collectInstalledSoftware()
+
 	c.logger.Debug("Inventory collection complete")
 }
 
@@ -303,4 +306,85 @@ func (c *WMICollector) IsRunning() bool {
 // ForceInventory triggers an immediate inventory collection.
 func (c *WMICollector) ForceInventory() {
 	go c.collectInventory()
+}
+
+// softwareRecord represents one installed application from registry uninstall keys.
+type softwareRecord struct {
+	DisplayName    *string `json:"DisplayName"`
+	DisplayVersion *string `json:"DisplayVersion"`
+	Publisher      *string `json:"Publisher"`
+	InstallDate    *string `json:"InstallDate"`
+	InstallSource  *string `json:"InstallSource"`
+}
+
+// collectInstalledSoftware queries the Windows Registry uninstall keys
+// for installed applications and emits software_inventory events.
+// This is more reliable than Win32_Product (which is slow and can trigger repairs)
+// and covers both 32-bit and 64-bit applications.
+func (c *WMICollector) collectInstalledSoftware() {
+	c.queriesRun.Add(1)
+
+	// Query both 64-bit and 32-bit registry uninstall keys, filter blanks
+	psCmd := `
+$paths = @(
+  'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*',
+  'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*'
+)
+Get-ItemProperty -Path $paths -ErrorAction SilentlyContinue |
+  Where-Object { $_.DisplayName -and $_.DisplayName.Trim() -ne '' } |
+  Select-Object DisplayName, DisplayVersion, Publisher, InstallDate, InstallSource -Unique |
+  ConvertTo-Json -Compress
+`
+	cmd := exec.Command("powershell", "-NoProfile", "-Command", psCmd)
+
+	output, err := cmd.Output()
+	if err != nil {
+		c.errors.Add(1)
+		c.logger.Debugf("Failed to query installed software: %v", err)
+		return
+	}
+
+	raw := strings.TrimSpace(string(output))
+	if raw == "" || raw == "null" {
+		return
+	}
+
+	var records []softwareRecord
+	if err := json.Unmarshal([]byte(raw), &records); err != nil {
+		// PowerShell returns a single object when only one result
+		var single softwareRecord
+		if err2 := json.Unmarshal([]byte(raw), &single); err2 != nil {
+			c.errors.Add(1)
+			c.logger.Debugf("Failed to parse software inventory JSON: %v", err)
+			return
+		}
+		records = []softwareRecord{single}
+	}
+
+	for _, r := range records {
+		if r.DisplayName == nil {
+			continue
+		}
+		data := map[string]interface{}{
+			"action": "inventory",
+			"name":   *r.DisplayName,
+		}
+		if r.DisplayVersion != nil {
+			data["version"] = *r.DisplayVersion
+		}
+		if r.Publisher != nil {
+			data["publisher"] = *r.Publisher
+		}
+		if r.InstallDate != nil {
+			data["install_date"] = *r.InstallDate
+		}
+		if r.InstallSource != nil {
+			data["install_source"] = *r.InstallSource
+		}
+
+		evt := event.NewEvent(event.EventTypeSoftwareInventory, event.SeverityLow, data)
+		c.sendEvent(evt)
+	}
+
+	c.logger.Infof("Software inventory collected: %d applications", len(records))
 }

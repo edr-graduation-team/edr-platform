@@ -303,4 +303,105 @@ func (r *PostgresEventRepository) GetByID(ctx context.Context, id uuid.UUID) (*E
 	return &d, nil
 }
 
+// ProcessAggRow is an aggregated process execution row.
+type ProcessAggRow struct {
+	Name       string `json:"name"`
+	Executable string `json:"executable"`
+	Count      int    `json:"count"`
+	AgentCount int    `json:"agent_count"`
+	LastSeen   string `json:"last_seen"`
+}
+
+// GetProcessAnalytics aggregates process events by name within a time window.
+// This runs a SQL GROUP BY query on the server-side for efficient aggregation.
+func (r *PostgresEventRepository) GetProcessAnalytics(ctx context.Context, hoursBack int) ([]ProcessAggRow, int, error) {
+	if hoursBack <= 0 {
+		hoursBack = 24
+	}
+
+	const q = `
+		SELECT
+			COALESCE(raw->'data'->>'name', raw->>'name', 'unknown') AS proc_name,
+			COALESCE(raw->'data'->>'executable', raw->>'executable', '') AS executable,
+			COUNT(*) AS exec_count,
+			COUNT(DISTINCT agent_id) AS agent_count,
+			MAX(ts) AS last_seen
+		FROM events
+		WHERE event_type = 'process'
+		  AND ts >= NOW() - ($1 || ' hours')::interval
+		GROUP BY proc_name, executable
+		ORDER BY exec_count DESC
+		LIMIT 500`
+
+	rows, err := r.db.Query(ctx, q, fmt.Sprintf("%d", hoursBack))
+	if err != nil {
+		return nil, 0, fmt.Errorf("process analytics query: %w", err)
+	}
+	defer rows.Close()
+
+	var out []ProcessAggRow
+	for rows.Next() {
+		var r ProcessAggRow
+		var lastSeen time.Time
+		if err := rows.Scan(&r.Name, &r.Executable, &r.Count, &r.AgentCount, &lastSeen); err != nil {
+			return nil, 0, fmt.Errorf("scan process agg: %w", err)
+		}
+		r.LastSeen = lastSeen.Format(time.RFC3339)
+		out = append(out, r)
+	}
+
+	// Total raw events count
+	var total int
+	_ = r.db.QueryRow(ctx,
+		`SELECT COUNT(*) FROM events WHERE event_type = 'process' AND ts >= NOW() - ($1 || ' hours')::interval`,
+		fmt.Sprintf("%d", hoursBack)).Scan(&total)
+
+	return out, total, nil
+}
+
+// SoftwareInventoryRow is an aggregated installed software row.
+type SoftwareInventoryRow struct {
+	Name          string `json:"name"`
+	Version       string `json:"version"`
+	Publisher     string `json:"publisher"`
+	InstallDate   string `json:"install_date"`
+	AgentCount    int    `json:"agent_count"`
+	LastReported  string `json:"last_reported"`
+}
+
+// GetSoftwareInventory aggregates software_inventory events by app name.
+func (r *PostgresEventRepository) GetSoftwareInventory(ctx context.Context) ([]SoftwareInventoryRow, error) {
+	const q = `
+		SELECT
+			COALESCE(raw->'data'->>'name', raw->>'name', 'unknown') AS app_name,
+			COALESCE(raw->'data'->>'version', raw->>'version', '') AS version,
+			COALESCE(raw->'data'->>'publisher', raw->>'publisher', '') AS publisher,
+			COALESCE(raw->'data'->>'install_date', '') AS install_date,
+			COUNT(DISTINCT agent_id) AS agent_count,
+			MAX(ts) AS last_reported
+		FROM events
+		WHERE event_type = 'software_inventory'
+		GROUP BY app_name, version, publisher, install_date
+		ORDER BY agent_count DESC, app_name ASC
+		LIMIT 1000`
+
+	rows, err := r.db.Query(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("software inventory query: %w", err)
+	}
+	defer rows.Close()
+
+	var out []SoftwareInventoryRow
+	for rows.Next() {
+		var r SoftwareInventoryRow
+		var lastReported time.Time
+		if err := rows.Scan(&r.Name, &r.Version, &r.Publisher, &r.InstallDate, &r.AgentCount, &lastReported); err != nil {
+			return nil, fmt.Errorf("scan software inv: %w", err)
+		}
+		r.LastReported = lastReported.Format(time.RFC3339)
+		out = append(out, r)
+	}
+
+	return out, nil
+}
 

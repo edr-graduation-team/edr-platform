@@ -190,6 +190,11 @@ func (s *Server) RegisterRoutes(handlers *Handlers) {
 	events.GET("/:id", handlers.GetEvent, handlers.RequirePermission("alerts", "read"))
 	events.POST("/export", handlers.ExportEvents, handlers.RequirePermission("alerts", "read"))
 
+	// ── Application Control endpoints (process analytics + software inventory) ──
+	appControl := protected.Group("/app-control")
+	appControl.GET("/process-analytics", handlers.GetProcessAnalytics, handlers.RequirePermission("endpoints", "read"))
+	appControl.GET("/software-inventory", handlers.GetSoftwareInventory, handlers.RequirePermission("endpoints", "read"))
+
 	// ── Reliability health (operational) ──────────────────────────────────
 	// Authenticated endpoint (no extra RBAC gate) to avoid false-negative
 	// "backend unreachable" UI states when role permission catalogs drift.

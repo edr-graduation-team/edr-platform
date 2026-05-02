@@ -344,7 +344,7 @@ func (r *PostgresEventRepository) GetProcessAnalytics(ctx context.Context, hours
 			GROUP BY proc_name
 		)
 		SELECT
-			proc_name,
+			per_name.proc_name AS proc_name,
 			-- pick the longest (most specific) executable path per process name
 			(array_agg(executable ORDER BY length(executable) DESC))[1] AS executable,
 			SUM(exec_count)::bigint AS exec_count,
@@ -353,7 +353,7 @@ func (r *PostgresEventRepository) GetProcessAnalytics(ctx context.Context, hours
 			MAX(last_seen) AS last_seen
 		FROM per_name
 		LEFT JOIN per_hosts ph ON ph.proc_name = per_name.proc_name
-		GROUP BY proc_name
+		GROUP BY per_name.proc_name, ph.hostnames
 		ORDER BY exec_count DESC
 		LIMIT 500`
 

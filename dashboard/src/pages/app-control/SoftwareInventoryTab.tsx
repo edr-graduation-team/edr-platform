@@ -5,6 +5,7 @@ import {
     Building2, Calendar, Monitor, Download, FileSpreadsheet,
 } from 'lucide-react';
 import { appControlApi, type SoftwareInventoryRow } from '../../api/client';
+import HostsCell from './HostsCell';
 
 // ────────────────────────────────────────────────────────────────────────────
 // Software Inventory Tab — Live Data from Agent WMI Collector
@@ -394,7 +395,7 @@ export default function SoftwareInventoryTab() {
                                         {row.publisher || <span className="text-slate-300">—</span>}
                                     </td>
                                     <td className="px-4 py-3 tabular-nums text-center font-semibold text-slate-700 dark:text-slate-300">
-                                        {row.agent_count}
+                                        <HostsCell hostnames={row.hostnames} fallbackCount={row.agent_count} />
                                     </td>
                                     <td className="px-4 py-3 text-xs text-slate-500 whitespace-nowrap">
                                         {new Date(row.last_reported).toLocaleString()}

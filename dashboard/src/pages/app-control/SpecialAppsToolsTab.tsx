@@ -1,12 +1,13 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
     Terminal, KeyRound, Wrench, Cog, AlertTriangle,
-    RefreshCw, Search, ChevronDown, ChevronRight, Monitor,
+    RefreshCw, Search, ChevronDown, ChevronRight,
     Package, Shield,
 } from 'lucide-react';
 import { useProcessAnalytics } from './useProcessAnalytics';
 import { type ProcessCategory, type ProcessAggRow } from './types';
 import { isHighAttention } from './classifyProcess';
+import HostsCell from './HostsCell';
 
 // ────────────────────────────────────────────────────────────────────────────
 // Special Applications & Tools Tab
@@ -115,7 +116,7 @@ function ToolSection({ config, rows }: { config: SectionConfig; rows: ProcessAgg
     }, [rows, page]);
 
     const totalExecs = rows.reduce((s, r) => s + r.count, 0);
-    const uniqueHosts = new Set(rows.flatMap(r => Array.from(r.agents))).size;
+    const uniqueHosts = new Set(rows.flatMap(r => r.hostnames)).size;
     const Icon = config.icon;
 
     return (
@@ -190,10 +191,7 @@ function ToolSection({ config, rows }: { config: SectionConfig; rows: ProcessAgg
                                                 {row.count.toLocaleString()}
                                             </td>
                                             <td className="px-4 py-2 tabular-nums text-center text-slate-600 dark:text-slate-400 text-xs">
-                                                <span className="flex items-center justify-center gap-1">
-                                                    <Monitor className="w-3 h-3 text-slate-400" />
-                                                    {row.agents.size}
-                                                </span>
+                                                <HostsCell hostnames={row.hostnames} fallbackCount={0} />
                                             </td>
                                             <td className="px-4 py-2 text-xs text-slate-500 whitespace-nowrap">
                                                 {new Date(row.lastSeen).toLocaleString()}

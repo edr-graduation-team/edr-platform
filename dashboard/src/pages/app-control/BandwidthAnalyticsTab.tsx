@@ -10,6 +10,7 @@ import {
     PieChart, Pie,
 } from 'recharts';
 import { appControlApi } from '../../api/client';
+import HostsCell from './HostsCell';
 
 // ────────────────────────────────────────────────────────────────────────────
 // Network Activity by Application Tab
@@ -411,7 +412,7 @@ export default function BandwidthAnalyticsTab() {
                                             </td>
                                         )}
                                         <td className="px-4 py-3 tabular-nums text-center text-slate-600 dark:text-slate-400">
-                                            {row.agent_count}
+                                            <HostsCell hostnames={row.hostnames} fallbackCount={row.agent_count} />
                                         </td>
                                         <td className="px-4 py-3 text-xs text-slate-500 whitespace-nowrap">
                                             {new Date(row.last_seen).toLocaleString()}

@@ -26,7 +26,6 @@ const EnrollmentTokens = lazy(() => import('./pages/EnrollmentTokens'));
 const ActionCenter = lazy(() => import('./pages/ActionCenter'));
 const AgentDeployment = lazy(() => import('./pages/AgentDeployment'));
 const SystemLayout = lazy(() => import('./pages/SystemLayout'));
-const AgentProfiles = lazy(() => import('./pages/AgentProfiles'));
 
 const DashboardsLayout = lazy(() => import('./pages/parity/DashboardsLayout'));
 const DashboardEndpointPage = lazy(() => import('./pages/parity/dashboardPages').then((m) => ({ default: m.DashboardEndpointPage })));
@@ -356,7 +355,7 @@ function AppRoutes() {
             <Route path="/management/staff" element={<ProtectedRoute><ManagementStaffPage /></ProtectedRoute>} />
             <Route path="/system/account" element={<ProtectedRoute><ManagementAccountPage /></ProtectedRoute>} />
              <Route path="/management/account" element={<Navigate to="/system/account" replace />} />
-            <Route path="/management/users" element={<Navigate to="/management/agent-profiles" replace />} />
+            <Route path="/management/users" element={<Navigate to="/management/devices" replace />} />
             <Route path="/management/licenses" element={<ProtectedRoute><ManagementLicensesPage /></ProtectedRoute>} />
             <Route path="/management/billing" element={<ProtectedRoute><ManagementBillingPage /></ProtectedRoute>} />
 
@@ -365,11 +364,7 @@ function AppRoutes() {
                 <AgentDeployment />
               </ProtectedRoute>
             } />
-            <Route path="/management/agent-profiles" element={
-              <ProtectedRoute roles={['admin', 'security', 'analyst', 'operations', 'viewer']}>
-                <AgentProfiles />
-              </ProtectedRoute>
-            } />
+            <Route path="/management/agent-profiles" element={<Navigate to="/management/devices" replace />} />
             <Route path="/management/context-policies" element={
               <ProtectedRoute>
                 {/* This is an admin-ish control surface; kept under Management per requirements. */}

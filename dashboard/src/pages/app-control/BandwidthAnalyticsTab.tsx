@@ -9,7 +9,7 @@ import {
     CartesianGrid, Tooltip as RechartsTooltip, Cell, Legend,
     PieChart, Pie,
 } from 'recharts';
-import { appControlApi, type BandwidthAnalyticsRow } from '../../api/client';
+import { appControlApi } from '../../api/client';
 
 // ────────────────────────────────────────────────────────────────────────────
 // Bandwidth-Consuming Applications Tab
@@ -236,7 +236,7 @@ export default function BandwidthAnalyticsTab() {
                                     />
                                     <RechartsTooltip
                                         contentStyle={{ background: 'rgba(15, 23, 42, 0.95)', border: 'none', borderRadius: '8px', color: 'white', fontSize: '12px' }}
-                                        formatter={(value: number, name: string) => [fmtBytes(value), name === 'received' ? '↓ Received' : '↑ Sent']}
+                                        formatter={(value, name) => [fmtBytes(Number(value ?? 0)), name === 'received' ? '↓ Received' : '↑ Sent']}
                                     />
                                     <Legend wrapperStyle={{ fontSize: '11px' }} />
                                     <Bar dataKey="received" name="↓ Received" stackId="bw" fill="#06b6d4" radius={[0, 0, 0, 0]} barSize={14} />
@@ -274,13 +274,13 @@ export default function BandwidthAnalyticsTab() {
                                         </Pie>
                                         <RechartsTooltip
                                             contentStyle={{ background: 'rgba(15, 23, 42, 0.95)', border: 'none', borderRadius: '8px', color: 'white', fontSize: '11px' }}
-                                            formatter={(value: number) => [fmtBytes(value), 'Total']}
+                                            formatter={(value) => [fmtBytes(Number(value ?? 0)), 'Total']}
                                         />
                                     </PieChart>
                                 </ResponsiveContainer>
                             </div>
                             <ul className="space-y-1.5 mt-2">
-                                {pieData.map((d, i) => (
+                                {pieData.map((d) => (
                                     <li key={d.name} className="flex items-center gap-2 text-xs">
                                         <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: d.fill }} />
                                         <span className="truncate text-slate-600 dark:text-slate-400 flex-1">{d.name}</span>

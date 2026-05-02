@@ -405,3 +405,62 @@ func (r *PostgresEventRepository) GetSoftwareInventory(ctx context.Context) ([]S
 	return out, nil
 }
 
+// BandwidthAggRow is an aggregated bandwidth-per-application row.
+type BandwidthAggRow struct {
+	ProcessName   string `json:"process_name"`
+	Executable    string `json:"executable"`
+	BytesSent     int64  `json:"bytes_sent"`
+	BytesReceived int64  `json:"bytes_received"`
+	TotalBytes    int64  `json:"total_bytes"`
+	Connections   int    `json:"connections"`
+	AgentCount    int    `json:"agent_count"`
+	LastSeen      string `json:"last_seen"`
+}
+
+// GetBandwidthAnalytics aggregates network events by process name within a time window,
+// summing bytes_sent and bytes_received to show bandwidth consumption per application.
+func (r *PostgresEventRepository) GetBandwidthAnalytics(ctx context.Context, hoursBack int) ([]BandwidthAggRow, error) {
+	if hoursBack <= 0 {
+		hoursBack = 24
+	}
+
+	const q = `
+		SELECT
+			COALESCE(raw->'data'->>'process_name', raw->>'process_name', 'unknown') AS proc_name,
+			COALESCE(raw->'data'->>'executable', raw->>'executable', '') AS executable,
+			COALESCE(SUM((raw->'data'->>'bytes_sent')::bigint), 0) AS total_sent,
+			COALESCE(SUM((raw->'data'->>'bytes_received')::bigint), 0) AS total_received,
+			COALESCE(SUM((raw->'data'->>'bytes_sent')::bigint), 0) +
+			COALESCE(SUM((raw->'data'->>'bytes_received')::bigint), 0) AS total_bytes,
+			COUNT(*) AS connections,
+			COUNT(DISTINCT agent_id) AS agent_count,
+			MAX(ts) AS last_seen
+		FROM events
+		WHERE event_type = 'network'
+		  AND ts >= NOW() - ($1 || ' hours')::interval
+		GROUP BY proc_name, executable
+		HAVING COALESCE(SUM((raw->'data'->>'bytes_sent')::bigint), 0) +
+		       COALESCE(SUM((raw->'data'->>'bytes_received')::bigint), 0) > 0
+		ORDER BY total_bytes DESC
+		LIMIT 200`
+
+	rows, err := r.db.Query(ctx, q, fmt.Sprintf("%d", hoursBack))
+	if err != nil {
+		return nil, fmt.Errorf("bandwidth analytics query: %w", err)
+	}
+	defer rows.Close()
+
+	var out []BandwidthAggRow
+	for rows.Next() {
+		var r BandwidthAggRow
+		var lastSeen time.Time
+		if err := rows.Scan(&r.ProcessName, &r.Executable, &r.BytesSent, &r.BytesReceived, &r.TotalBytes, &r.Connections, &r.AgentCount, &lastSeen); err != nil {
+			return nil, fmt.Errorf("scan bandwidth agg: %w", err)
+		}
+		r.LastSeen = lastSeen.Format(time.RFC3339)
+		out = append(out, r)
+	}
+
+	return out, nil
+}
+

@@ -72,3 +72,39 @@ func (h *Handlers) GetSoftwareInventory(c echo.Context) error {
 		"meta":  responseMeta(c),
 	})
 }
+
+// GetBandwidthAnalytics returns aggregated bandwidth consumption per application
+// from network events (bytes_sent/bytes_received fields).
+//
+// Query params:
+//   - hours: lookback window in hours (default 24, max 168)
+func (h *Handlers) GetBandwidthAnalytics(c echo.Context) error {
+	if h.eventRepo == nil {
+		return errorResponse(c, http.StatusServiceUnavailable, "DB_UNAVAILABLE", "Event repository is not available")
+	}
+
+	hours := 24
+	if v := c.QueryParam("hours"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 168 {
+			hours = n
+		}
+	}
+
+	repo, ok := h.eventRepo.(*repository.PostgresEventRepository)
+	if !ok {
+		return errorResponse(c, http.StatusServiceUnavailable, "DB_UNAVAILABLE", "Bandwidth analytics requires PostgreSQL repository")
+	}
+
+	rows, err := repo.GetBandwidthAnalytics(c.Request().Context(), hours)
+	if err != nil {
+		h.logger.WithError(err).Error("Failed to fetch bandwidth analytics")
+		return errorResponse(c, http.StatusInternalServerError, "FETCH_FAILED", err.Error())
+	}
+
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"data":  rows,
+		"total": len(rows),
+		"hours": hours,
+		"meta":  responseMeta(c),
+	})
+}

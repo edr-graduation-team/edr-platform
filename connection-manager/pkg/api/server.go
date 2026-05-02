@@ -194,6 +194,7 @@ func (s *Server) RegisterRoutes(handlers *Handlers) {
 	appControl := protected.Group("/app-control")
 	appControl.GET("/process-analytics", handlers.GetProcessAnalytics, handlers.RequirePermission("endpoints", "read"))
 	appControl.GET("/software-inventory", handlers.GetSoftwareInventory, handlers.RequirePermission("endpoints", "read"))
+	appControl.GET("/bandwidth-analytics", handlers.GetBandwidthAnalytics, handlers.RequirePermission("endpoints", "read"))
 
 	// ── Reliability health (operational) ──────────────────────────────────
 	// Authenticated endpoint (no extra RBAC gate) to avoid false-negative

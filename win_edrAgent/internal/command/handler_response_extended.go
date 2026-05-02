@@ -2,15 +2,16 @@ package command
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"crypto/sha256"
-	"encoding/json"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
-	neturl "net/url"
+	"net/url"
 	"os"
 	"os/exec"
 	"strconv"
@@ -175,7 +176,7 @@ func (h *Handler) updateSignatures(ctx context.Context, params map[string]string
 	finalURL := rawURL
 	if strings.Contains(rawURL, "signatures/feed.ndjson") {
 		if localVer, verErr := st.GetServerVersion(); verErr == nil {
-			if parsed, parseErr := neturl.Parse(rawURL); parseErr == nil {
+			if parsed, parseErr := url.Parse(rawURL); parseErr == nil {
 				q := parsed.Query()
 				if q.Get("since_version") == "" {
 					q.Set("since_version", strconv.FormatInt(localVer, 10))
@@ -203,6 +204,22 @@ func (h *Handler) updateSignatures(ctx context.Context, params map[string]string
 	if err != nil {
 		return "", err
 	}
+
+	// Workaround: If the server sent gzip data but the headers were stripped/missing, decompress it manually.
+	if len(body) >= 2 && body[0] == 0x1f && body[1] == 0x8b {
+		gr, err := gzip.NewReader(bytes.NewReader(body))
+		if err == nil {
+			if decompressed, err := io.ReadAll(gr); err == nil {
+				body = decompressed
+			}
+			gr.Close()
+		}
+	}
+
+	if len(bytes.TrimSpace(body)) == 0 {
+		return "Already up to date — no new signatures found", nil
+	}
+
 	if want != "" {
 		sum := sha256.Sum256(body)
 		got := hex.EncodeToString(sum[:])

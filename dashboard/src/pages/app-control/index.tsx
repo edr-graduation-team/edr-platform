@@ -1,41 +1,57 @@
 import React, { useState, useEffect, Suspense, lazy } from 'react';
-import { Layers, Activity, ShieldAlert, Package, RefreshCw } from 'lucide-react';
+import { Layers, Activity, ShieldAlert, Package, RefreshCw, Wifi, Wrench } from 'lucide-react';
 import InsightHero from '../../components/InsightHero';
 
 // ────────────────────────────────────────────────────────────────────────────
 // Application Control — main page
 //
-// Three tabs:
-//  1. Process Analytics  — what's running across the fleet (from events API)
-//  2. Vulnerability Findings — compact summary of Trivy CVE scan results
-//  3. Software Inventory — planned enhancement (roadmap placeholder)
+// Five tabs (aligned with WatchGuard Application Control Dashboard):
+//  1. Process Analytics  — IT Applications: what's running across the fleet
+//  2. Vulnerability Findings — Vulnerable Applications: CVE scan results
+//  3. Bandwidth Analytics — Bandwidth-Consuming Applications: per-app traffic
+//  4. Special Apps & Tools — Scripting, remote access, admin tools drill-down
+//  5. Software Inventory — Installed applications from WMI/Registry
 // ────────────────────────────────────────────────────────────────────────────
 
 // Lazy-load tabs for code-splitting
 const ProcessAnalyticsTab = lazy(() => import('./ProcessAnalyticsTab'));
 const VulnerabilityOverviewTab = lazy(() => import('./VulnerabilityOverviewTab'));
+const BandwidthAnalyticsTab = lazy(() => import('./BandwidthAnalyticsTab'));
+const SpecialAppsToolsTab = lazy(() => import('./SpecialAppsToolsTab'));
 const SoftwareInventoryTab = lazy(() => import('./SoftwareInventoryTab'));
 
-type TabId = 'processes' | 'vulnerabilities' | 'inventory';
+type TabId = 'processes' | 'vulnerabilities' | 'bandwidth' | 'special' | 'inventory';
 
 const TABS: { id: TabId; label: string; icon: React.ElementType; description: string }[] = [
     {
         id: 'processes',
-        label: 'Process Analytics',
+        label: 'IT Applications',
         icon: Activity,
         description: 'Execution visibility across fleet endpoints',
     },
     {
         id: 'vulnerabilities',
-        label: 'Vulnerability Findings',
+        label: 'Vulnerable Applications',
         icon: ShieldAlert,
         description: 'CVE exposure from Trivy scans',
+    },
+    {
+        id: 'bandwidth',
+        label: 'Bandwidth Consuming',
+        icon: Wifi,
+        description: 'Network traffic per application',
+    },
+    {
+        id: 'special',
+        label: 'Special Apps & Tools',
+        icon: Wrench,
+        description: 'Scripting, remote access, admin tools',
     },
     {
         id: 'inventory',
         label: 'Software Inventory',
         icon: Package,
-        description: 'Installed applications (planned)',
+        description: 'Installed applications from registry',
     },
 ];
 
@@ -85,18 +101,39 @@ export default function ApplicationControlPage() {
                         ),
                     },
                     {
+                        heading: 'Bandwidth & special tools',
+                        children: (
+                            <>
+                                Network bandwidth consumption per application from{' '}
+                                <code className="text-[11px] font-mono px-1 rounded bg-slate-200/90 dark:bg-slate-800">
+                                    bytes_sent / bytes_received
+                                </code>{' '}
+                                telemetry, plus dedicated drill-down views for scripting engines, remote access,
+                                and admin tools detected across the fleet.
+                            </>
+                        ),
+                    },
+                    {
                         heading: 'Data sources',
                         children: (
                             <>
                                 Process events from{' '}
                                 <code className="text-[11px] font-mono px-1 rounded bg-slate-200/90 dark:bg-slate-800">
-                                    POST /events/search
-                                </code>{' '}
-                                and vulnerability findings from{' '}
+                                    GET /app-control/process-analytics
+                                </code>
+                                , bandwidth from{' '}
+                                <code className="text-[11px] font-mono px-1 rounded bg-slate-200/90 dark:bg-slate-800">
+                                    GET /app-control/bandwidth-analytics
+                                </code>
+                                , software from{' '}
+                                <code className="text-[11px] font-mono px-1 rounded bg-slate-200/90 dark:bg-slate-800">
+                                    GET /app-control/software-inventory
+                                </code>
+                                , and vulnerability findings from{' '}
                                 <code className="text-[11px] font-mono px-1 rounded bg-slate-200/90 dark:bg-slate-800">
                                     GET /vuln/findings
-                                </code>{' '}
-                                — both powered by real backend data, no mocks.
+                                </code>
+                                {' '} — all powered by real backend data.
                             </>
                         ),
                     },
@@ -129,6 +166,8 @@ export default function ApplicationControlPage() {
             <Suspense fallback={<TabSkeleton />}>
                 {activeTab === 'processes' && <ProcessAnalyticsTab />}
                 {activeTab === 'vulnerabilities' && <VulnerabilityOverviewTab />}
+                {activeTab === 'bandwidth' && <BandwidthAnalyticsTab />}
+                {activeTab === 'special' && <SpecialAppsToolsTab />}
                 {activeTab === 'inventory' && <SoftwareInventoryTab />}
             </Suspense>
         </div>

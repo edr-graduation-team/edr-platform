@@ -573,6 +573,18 @@ export interface SoftwareInventoryRow {
     last_reported: string;
 }
 
+/** Aggregated bandwidth-per-application row from GET /api/v1/app-control/bandwidth-analytics. */
+export interface BandwidthAnalyticsRow {
+    process_name: string;
+    executable: string;
+    bytes_sent: number;
+    bytes_received: number;
+    total_bytes: number;
+    connections: number;
+    agent_count: number;
+    last_seen: string;
+}
+
 export const appControlApi = {
     /** Server-side aggregated process analytics (SQL GROUP BY on process name). */
     getProcessAnalytics: async (hours = 24) => {
@@ -589,6 +601,15 @@ export const appControlApi = {
             data: SoftwareInventoryRow[];
             total: number;
         }>('/api/v1/app-control/software-inventory');
+        return response.data;
+    },
+    /** Aggregated bandwidth consumption per application from network events. */
+    getBandwidthAnalytics: async (hours = 24) => {
+        const response = await connectionApi.get<{
+            data: BandwidthAnalyticsRow[];
+            total: number;
+            hours: number;
+        }>(`/api/v1/app-control/bandwidth-analytics?hours=${hours}`);
         return response.data;
     },
 };

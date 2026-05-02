@@ -554,6 +554,45 @@ export const eventsApi = {
     },
 };
 
+/** Aggregated process execution row from GET /api/v1/app-control/process-analytics. */
+export interface ProcessAnalyticsRow {
+    name: string;
+    executable: string;
+    count: number;
+    agent_count: number;
+    last_seen: string;
+}
+
+/** Aggregated software inventory row from GET /api/v1/app-control/software-inventory. */
+export interface SoftwareInventoryRow {
+    name: string;
+    version: string;
+    publisher: string;
+    install_date: string;
+    agent_count: number;
+    last_reported: string;
+}
+
+export const appControlApi = {
+    /** Server-side aggregated process analytics (SQL GROUP BY on process name). */
+    getProcessAnalytics: async (hours = 24) => {
+        const response = await connectionApi.get<{
+            data: ProcessAnalyticsRow[];
+            total_events: number;
+            hours: number;
+        }>(`/api/v1/app-control/process-analytics?hours=${hours}`);
+        return response.data;
+    },
+    /** Aggregated installed software inventory from software_inventory events. */
+    getSoftwareInventory: async () => {
+        const response = await connectionApi.get<{
+            data: SoftwareInventoryRow[];
+            total: number;
+        }>('/api/v1/app-control/software-inventory');
+        return response.data;
+    },
+};
+
 export const agentsApi = {
     list: async (params?: {
         limit?: number;

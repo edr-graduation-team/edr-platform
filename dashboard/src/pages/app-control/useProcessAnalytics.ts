@@ -1,103 +1,39 @@
 import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { eventsApi, type EventSearchRequestBody } from '../../api/client';
+import { appControlApi, type ProcessAnalyticsRow } from '../../api/client';
 import { classifyProcess } from './classifyProcess';
 import type { ProcessAggRow } from './types';
 
 // ────────────────────────────────────────────────────────────────────────────
-// Shared data hook for Application Control.
+// Shared data hook for Application Control — Process Analytics tab.
 //
-// Fetches process-type events from the last N hours and aggregates them
-// into ranked rows suitable for tables & charts.
+// Uses the server-side aggregation endpoint (GET /api/v1/app-control/process-analytics)
+// which runs a SQL GROUP BY on the events table. This is far more efficient
+// than fetching thousands of raw events and aggregating client-side.
 // ────────────────────────────────────────────────────────────────────────────
 
 /** How far back (hours) to look for process events. */
 const LOOKBACK_HOURS = 24;
 
-/** Max events fetched per search call. */
-const EVENT_LIMIT = 2000;
-
-function buildSearchBody(): EventSearchRequestBody {
-    const now = new Date();
-    const from = new Date(now.getTime() - LOOKBACK_HOURS * 60 * 60 * 1000);
+/** Convert a backend ProcessAnalyticsRow to the UI ProcessAggRow shape. */
+function toAggRow(r: ProcessAnalyticsRow): ProcessAggRow {
+    const name = r.name.toLowerCase();
     return {
-        filters: [{ field: 'event_type', operator: 'eq', value: 'process' }],
-        logic: 'AND',
-        time_range: { from: from.toISOString(), to: now.toISOString() },
-        limit: EVENT_LIMIT,
-        offset: 0,
+        name,
+        executable: r.executable,
+        count: r.count,
+        category: classifyProcess(name),
+        lastSeen: r.last_seen,
+        agents: new Set(Array.from({ length: r.agent_count }, (_, i) => `agent-${i}`)),
     };
-}
-
-/**
- * Extracts the executable name from `raw.executable` or `summary`.
- * Handles both full paths (C:\Windows\...) and bare names.
- */
-function extractProcessName(raw: Record<string, unknown>, summary: string): { name: string; exe: string } {
-    // Try raw.name first (ETW process events)
-    const rawName = (raw?.name as string) ?? '';
-    const rawExe = (raw?.executable as string) ?? '';
-
-    if (rawName) {
-        return { name: rawName.toLowerCase(), exe: rawExe || rawName };
-    }
-
-    // Fallback: parse from summary "Process START: pid=... name=X"
-    const m = summary.match(/name=(\S+)/i);
-    if (m) {
-        return { name: m[1].toLowerCase(), exe: rawExe || m[1] };
-    }
-
-    // Last resort: use executable path basename
-    if (rawExe) {
-        const parts = rawExe.replace(/\\/g, '/').split('/');
-        const base = parts[parts.length - 1];
-        return { name: base.toLowerCase(), exe: rawExe };
-    }
-
-    return { name: 'unknown', exe: '' };
-}
-
-/** Aggregate raw events into ProcessAggRow[]. */
-function aggregateProcessEvents(
-    events: { id: string; agent_id: string; event_type: string; timestamp: string; summary: string; raw?: unknown }[],
-): ProcessAggRow[] {
-    const map = new Map<string, ProcessAggRow>();
-
-    for (const evt of events) {
-        const raw = (evt.raw ?? {}) as Record<string, unknown>;
-        const { name, exe } = extractProcessName(raw, evt.summary);
-        if (!name || name === 'unknown') continue;
-
-        const existing = map.get(name);
-        if (existing) {
-            existing.count += 1;
-            existing.agents.add(evt.agent_id);
-            if (evt.timestamp > existing.lastSeen) {
-                existing.lastSeen = evt.timestamp;
-            }
-        } else {
-            map.set(name, {
-                name,
-                executable: exe,
-                count: 1,
-                category: classifyProcess(name),
-                lastSeen: evt.timestamp,
-                agents: new Set([evt.agent_id]),
-            });
-        }
-    }
-
-    // Sort by execution count descending
-    return Array.from(map.values()).sort((a, b) => b.count - a.count);
 }
 
 // ─── Hook ────────────────────────────────────────────────────────────────────
 
 export interface UseProcessAnalyticsResult {
-    /** Aggregated rows, sorted by count desc. */
+    /** Aggregated rows, sorted by count desc (from server). */
     rows: ProcessAggRow[];
-    /** Total raw events fetched. */
+    /** Total raw events in the time window. */
     totalEvents: number;
     /** Loading state. */
     isLoading: boolean;
@@ -111,24 +47,24 @@ export interface UseProcessAnalyticsResult {
 
 export function useProcessAnalytics(): UseProcessAnalyticsResult {
     const query = useQuery({
-        queryKey: ['app-control', 'process-events', LOOKBACK_HOURS],
-        queryFn: async () => {
-            const body = buildSearchBody();
-            const result = await eventsApi.search(body);
-            return result;
-        },
+        queryKey: ['app-control', 'process-analytics', LOOKBACK_HOURS],
+        queryFn: () => appControlApi.getProcessAnalytics(LOOKBACK_HOURS),
         staleTime: 60_000,       // 1 min
         refetchInterval: 120_000, // 2 min
         retry: 1,
     });
 
-    const rawEvents = query.data?.data ?? [];
+    const serverRows = query.data?.data ?? [];
+    const totalEvents = query.data?.total_events ?? 0;
 
-    const rows = useMemo(() => aggregateProcessEvents(rawEvents as never[]), [rawEvents]);
+    const rows = useMemo(
+        () => serverRows.map(toAggRow),
+        [serverRows],
+    );
 
     return {
         rows,
-        totalEvents: rawEvents.length,
+        totalEvents,
         isLoading: query.isLoading,
         isError: query.isError,
         refetch: () => query.refetch(),

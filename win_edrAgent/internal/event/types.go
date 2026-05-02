@@ -24,6 +24,7 @@ const (
 	EventTypeWMI           EventType = "wmi"
 	EventTypeClipboard     EventType = "clipboard"
 	EventTypeVulnerability EventType = "vulnerability_finding"
+	EventTypeSoftwareInventory EventType = "software_inventory"
 )
 
 // Severity represents event severity level.

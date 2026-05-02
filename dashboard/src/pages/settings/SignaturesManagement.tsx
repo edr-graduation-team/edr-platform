@@ -29,8 +29,8 @@ export default function SignaturesManagement() {
 
     const syncMutation = useMutation({
         mutationFn: signaturesApi.syncNow,
-        onSuccess: () => {
-            showToast('Signature feed sync queued on server', 'success');
+        onSuccess: (data) => {
+            showToast(data.message, data.inserted === 0 ? 'info' : 'success');
             queryClient.invalidateQueries({ queryKey: ['signatures'] });
         },
         onError: (err: any) => showToast(err?.message || 'Failed to trigger sync', 'error'),
@@ -98,7 +98,7 @@ export default function SignaturesManagement() {
                         onClick={() => syncMutation.mutate()}
                         className="px-3 py-2 rounded-lg text-sm font-semibold bg-emerald-600 hover:bg-emerald-700 text-white disabled:opacity-40"
                     >
-                        {syncMutation.isPending ? 'Queuing…' : 'Sync signatures now'}
+                        {syncMutation.isPending ? 'Syncing…' : 'Sync signatures now'}
                     </button>
                     <label className="inline-flex items-center gap-2 text-sm">
                         <input type="checkbox" checked={includeOffline} onChange={(e) => setIncludeOffline(e.target.checked)} />

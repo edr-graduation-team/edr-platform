@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 	"time"
@@ -107,16 +108,40 @@ func (h *Handlers) GetSignatureStats(c echo.Context) error {
 	})
 }
 
-// TriggerSignatureSync triggers an immediate MalwareBazaar sync.
+// TriggerSignatureSync runs an immediate MalwareBazaar sync synchronously.
 // POST /api/v1/signatures/sync  (JWT protected)
+// Returns the number of hashes actually inserted so the UI can show
+// "Already up to date" vs "N new hashes added".
 func (h *Handlers) TriggerSignatureSync(c echo.Context) error {
 	if h.signatureSyncSvc == nil {
 		return errorResponse(c, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "Signature sync service not configured")
 	}
-	h.signatureSyncSvc.TriggerNow()
-	return c.JSON(http.StatusAccepted, map[string]interface{}{
-		"message": "Signature sync triggered",
-		"meta":    responseMeta(c),
+
+	ctx := c.Request().Context()
+	inserted, err := h.signatureSyncSvc.SyncOnce(ctx)
+	if err != nil {
+		h.logger.WithError(err).Error("[signatures] Manual sync failed")
+		return errorResponse(c, http.StatusInternalServerError, "SYNC_FAILED", fmt.Sprintf("Sync failed: %v", err))
+	}
+
+	var message string
+	if inserted == 0 {
+		message = "Already up to date — no new hashes found"
+	} else {
+		message = fmt.Sprintf("%d new hash(es) added", inserted)
+	}
+
+	maxVer, _ := h.malwareHashRepo.GetMaxVersion(ctx)
+	count, _ := h.malwareHashRepo.Count(ctx)
+
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"message":  message,
+		"inserted": inserted,
+		"stats": map[string]interface{}{
+			"count":       count,
+			"max_version": maxVer,
+		},
+		"meta": responseMeta(c),
 	})
 }
 
@@ -140,9 +165,17 @@ func (h *Handlers) ListSignatureHashes(c echo.Context) error {
 		}
 	}
 
-	hashes, err := h.malwareHashRepo.ListSinceVersion(c.Request().Context(), sinceVersion, limit)
-	if err != nil {
-		h.logger.WithError(err).Error("[signatures] ListSignatureHashes failed")
+	var hashes []*models.MalwareHash
+	var fetchErr error
+	if sinceVersion == 0 {
+		// Admin "recent entries" view: show newest hashes first.
+		hashes, fetchErr = h.malwareHashRepo.GetLatest(c.Request().Context(), limit)
+	} else {
+		// Delta query: return entries after the given version cursor (ASC).
+		hashes, fetchErr = h.malwareHashRepo.ListSinceVersion(c.Request().Context(), sinceVersion, limit)
+	}
+	if fetchErr != nil {
+		h.logger.WithError(fetchErr).Error("[signatures] ListSignatureHashes failed")
 		return errorResponse(c, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to list signatures")
 	}
 	count, _ := h.malwareHashRepo.Count(c.Request().Context())

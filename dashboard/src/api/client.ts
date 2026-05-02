@@ -1156,9 +1156,12 @@ export const signaturesApi = {
         return response.data;
     },
     syncNow: async () => {
-        const response = await connectionApi.post<{ message: string; meta?: { request_id?: string; timestamp?: string } }>(
-            '/api/v1/signatures/sync'
-        );
+        const response = await connectionApi.post<{
+            message: string;
+            inserted: number;
+            stats?: { count: number; max_version: number };
+            meta?: { request_id?: string; timestamp?: string };
+        }>('/api/v1/signatures/sync');
         return response.data;
     },
     list: async (params?: { since_version?: number; limit?: number }): Promise<SignatureListResponse> => {

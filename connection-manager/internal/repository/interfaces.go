@@ -449,4 +449,7 @@ type MalwareHashRepository interface {
 
 	// SourceBreakdown returns a map of source → count for stats.
 	SourceBreakdown(ctx context.Context) (map[string]int64, error)
+
+	// GetLatest returns the most recently inserted hashes, ordered newest-first.
+	GetLatest(ctx context.Context, limit int) ([]*models.MalwareHash, error)
 }

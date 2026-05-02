@@ -189,8 +189,9 @@ func fillEventSource(events []*Event) {
 		ip = "unknown"
 	}
 
-	// NOTE: os_version is currently unknown in this agent implementation.
-	// We keep it explicit (non-empty) to satisfy production context contracts.
+	// NOTE: os_version in event source is set to "unknown" here since getOSVersion()
+	// lives in the grpcclient package. The real os_version is sent via heartbeat
+	// and stored persistently in the DB — no need to duplicate the WMI call per-batch.
 	osVersion := "unknown"
 
 	agentVersion := "1.0.0"

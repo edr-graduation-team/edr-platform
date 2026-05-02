@@ -620,10 +620,11 @@ func (c *Client) SendHeartbeat(req *HeartbeatRequest) (*HeartbeatResponse, error
 
 	// Attach device context as gRPC metadata (avoids proto schema changes).
 	// The server reads these headers to update the agent's tags in the DB.
-	if req.Profile != "" || req.LoggedInUser != "" {
+	if req.Profile != "" || req.LoggedInUser != "" || req.OsVersion != "" {
 		md := metadata.Pairs(
 			"x-agent-profile", req.Profile,
 			"x-agent-logged-in-user", req.LoggedInUser,
+			"x-agent-os-version", req.OsVersion,
 		)
 		ctx = metadata.NewOutgoingContext(ctx, md)
 	}

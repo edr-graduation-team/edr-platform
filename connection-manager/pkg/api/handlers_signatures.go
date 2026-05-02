@@ -202,6 +202,15 @@ func (h *Handlers) PushSignatureUpdateAll(c echo.Context) error {
 		return errorResponse(c, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to list agents")
 	}
 
+	// Build the NDJSON feed URL that agents will pull from.
+	// Scheme: respect X-Forwarded-Proto from nginx, but always default to https
+	// because the agent rejects non-HTTPS URLs.
+	scheme := c.Scheme()
+	if scheme == "" || scheme == "http" {
+		scheme = "https"
+	}
+	feedURL := scheme + "://" + c.Request().Host + "/api/v1/signatures/feed.ndjson"
+
 	sent := 0
 	queued := 0
 	failed := 0
@@ -235,7 +244,7 @@ func (h *Handlers) PushSignatureUpdateAll(c echo.Context) error {
 			ID:             cmdID,
 			AgentID:        a.ID,
 			CommandType:    models.CommandType("update_signatures"),
-			Parameters:     map[string]any{},
+			Parameters:     map[string]any{"url": feedURL},
 			Priority:       5,
 			Status:         models.CommandStatusPending,
 			TimeoutSeconds: timeoutSec,
@@ -256,7 +265,7 @@ func (h *Handlers) PushSignatureUpdateAll(c echo.Context) error {
 			CommandId:  cmdID.String(),
 			Timestamp:  timestamppb.Now(),
 			Type:       mapCommandType("update_signatures"),
-			Parameters: map[string]string{},
+			Parameters: map[string]string{"url": feedURL},
 			Priority:   5,
 			ExpiresAt:  timestamppb.New(time.Now().Add(time.Duration(timeoutSec) * time.Second)),
 		}

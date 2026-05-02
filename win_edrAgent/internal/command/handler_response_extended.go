@@ -156,7 +156,16 @@ func (h *Handler) updateSignatures(ctx context.Context, params map[string]string
 	rawURL := strings.TrimSpace(params["url"])
 	want := strings.ToLower(strings.TrimSpace(params["checksum_sha256"]))
 	if rawURL == "" {
-		return "", fmt.Errorf("url parameter is required")
+		if h.serverAddress != "" {
+			// Extract host without port if possible, or just use the whole address if it's multiplexed
+			host := h.serverAddress
+			if strings.Contains(host, ":50051") {
+				host = strings.Replace(host, ":50051", "", 1)
+			}
+			rawURL = "https://" + host + "/api/v1/signatures/feed.ndjson"
+		} else {
+			return "", fmt.Errorf("url parameter is required")
+		}
 	}
 	if !strings.HasPrefix(strings.ToLower(rawURL), "https://") {
 		return "", fmt.Errorf("url must use HTTPS")
@@ -209,7 +218,10 @@ func (h *Handler) updateSignatures(ctx context.Context, params map[string]string
 	if len(body) >= 2 && body[0] == 0x1f && body[1] == 0x8b {
 		gr, err := gzip.NewReader(bytes.NewReader(body))
 		if err == nil {
-			if decompressed, err := io.ReadAll(gr); err == nil {
+			decompressed, readErr := io.ReadAll(gr)
+			if readErr == nil || readErr == io.ErrUnexpectedEOF || readErr == io.EOF {
+				body = decompressed
+			} else if len(decompressed) > 0 {
 				body = decompressed
 			}
 			gr.Close()

@@ -453,17 +453,16 @@ export default function EndpointDetail() {
                         </div>
                         <div className="flex flex-wrap items-center gap-2">
                             <span
-                                className={`px-3 py-1.5 rounded-full text-xs font-bold uppercase tracking-wider border ${
-                                    eff === 'online'
+                                className={`px-3 py-1.5 rounded-full text-xs font-bold uppercase tracking-wider border ${eff === 'online'
                                         ? 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800/50'
                                         : eff === 'offline'
-                                          ? 'bg-slate-100 dark:bg-slate-800 text-slate-500 border-slate-200 dark:border-slate-700'
-                                          : eff === 'uninstalled'
-                                            ? 'bg-rose-50 dark:bg-rose-900/20 text-rose-600 dark:text-rose-400 border-rose-200 dark:border-rose-800/50'
-                                            : eff === 'pending_uninstall'
-                                              ? 'bg-rose-50 dark:bg-rose-900/20 text-rose-500 border-rose-200 dark:border-rose-800/50'
-                                              : 'bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400 border-amber-200 dark:border-amber-800/50'
-                                }`}
+                                            ? 'bg-slate-100 dark:bg-slate-800 text-slate-500 border-slate-200 dark:border-slate-700'
+                                            : eff === 'uninstalled'
+                                                ? 'bg-rose-50 dark:bg-rose-900/20 text-rose-600 dark:text-rose-400 border-rose-200 dark:border-rose-800/50'
+                                                : eff === 'pending_uninstall'
+                                                    ? 'bg-rose-50 dark:bg-rose-900/20 text-rose-500 border-rose-200 dark:border-rose-800/50'
+                                                    : 'bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400 border-amber-200 dark:border-amber-800/50'
+                                    }`}
                             >
                                 {eff === 'pending_uninstall' ? 'Uninstalling…' : eff}
                             </span>
@@ -495,11 +494,10 @@ export default function EndpointDetail() {
                             key={id}
                             type="button"
                             onClick={() => setTabAndUrl(id)}
-                            className={`flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-xl transition-all duration-200 whitespace-nowrap ${
-                                tab === id
+                            className={`flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-xl transition-all duration-200 whitespace-nowrap ${tab === id
                                     ? 'bg-gradient-to-r from-cyan-500 to-indigo-600 text-white shadow-md shadow-cyan-500/20'
                                     : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800'
-                            }`}
+                                }`}
                         >
                             <Icon className="w-3.5 h-3.5" />
                             {label}
@@ -549,12 +547,12 @@ export default function EndpointDetail() {
 
                     {tab === 'response' && !canViewResp && (
                         <div className="flex flex-col items-center justify-center py-16 text-center">
-                                <div className="w-16 h-16 rounded-2xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center mb-4">
-                                    <Terminal className="w-8 h-8 text-slate-400" />
-                                </div>
-                                <h3 className="text-lg font-bold text-slate-800 dark:text-slate-200 mb-2">Access Required</h3>
-                                <p className="text-sm text-slate-500 max-w-md">You need command execution permissions to access this section.</p>
+                            <div className="w-16 h-16 rounded-2xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center mb-4">
+                                <Terminal className="w-8 h-8 text-slate-400" />
                             </div>
+                            <h3 className="text-lg font-bold text-slate-800 dark:text-slate-200 mb-2">Access Required</h3>
+                            <p className="text-sm text-slate-500 max-w-md">You need command execution permissions to access this section.</p>
+                        </div>
                     )}
 
                     {tab === 'quarantine' && canViewResp && (
@@ -570,12 +568,12 @@ export default function EndpointDetail() {
 
                     {tab === 'quarantine' && !canViewResp && (
                         <div className="flex flex-col items-center justify-center py-16 text-center">
-                                <div className="w-16 h-16 rounded-2xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center mb-4">
-                                    <Shield className="w-8 h-8 text-slate-400" />
-                                </div>
-                                <h3 className="text-lg font-bold text-slate-800 dark:text-slate-200 mb-2">Access Required</h3>
-                                <p className="text-sm text-slate-500 max-w-md">You need security permissions to view quarantined items.</p>
+                            <div className="w-16 h-16 rounded-2xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center mb-4">
+                                <Shield className="w-8 h-8 text-slate-400" />
                             </div>
+                            <h3 className="text-lg font-bold text-slate-800 dark:text-slate-200 mb-2">Access Required</h3>
+                            <p className="text-sm text-slate-500 max-w-md">You need security permissions to view quarantined items.</p>
+                        </div>
                     )}
 
                     {tab === 'activity' && (
@@ -594,12 +592,12 @@ export default function EndpointDetail() {
 
                     {tab === 'forensics' && !canViewResp && (
                         <div className="flex flex-col items-center justify-center py-16 text-center">
-                                <div className="w-16 h-16 rounded-2xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center mb-4">
-                                    <FileText className="w-8 h-8 text-slate-400" />
-                                </div>
-                                <h3 className="text-lg font-bold text-slate-800 dark:text-slate-200 mb-2">Access Required</h3>
-                                <p className="text-sm text-slate-500 max-w-md">You need forensics permissions to view collection data.</p>
+                            <div className="w-16 h-16 rounded-2xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center mb-4">
+                                <FileText className="w-8 h-8 text-slate-400" />
                             </div>
+                            <h3 className="text-lg font-bold text-slate-800 dark:text-slate-200 mb-2">Access Required</h3>
+                            <p className="text-sm text-slate-500 max-w-md">You need forensics permissions to view collection data.</p>
+                        </div>
                     )}
 
                     {tab === 'auto-proc' &&
@@ -626,7 +624,7 @@ export default function EndpointDetail() {
                             </div>
                             <h3 className="text-lg font-bold text-slate-800 dark:text-slate-200 mb-2">Software Inventory</h3>
                             <p className="text-sm text-slate-500 max-w-md">
-                                Software inventory collection is being prepared for this endpoint. 
+                                Software inventory collection is being prepared for this endpoint.
                                 Once available, you will see all installed applications, versions, and publishers here.
                             </p>
                         </div>
@@ -660,9 +658,9 @@ export default function EndpointDetail() {
 
 const CRIT_CONFIG: Record<string, { label: string; badge: string }> = {
     critical: { label: 'Critical', badge: 'bg-rose-500/10 text-rose-700 dark:text-rose-300 border-rose-500/30' },
-    high:     { label: 'High',     badge: 'bg-orange-500/10 text-orange-700 dark:text-orange-300 border-orange-500/30' },
-    medium:   { label: 'Medium',   badge: 'bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/30' },
-    low:      { label: 'Low',      badge: 'bg-slate-500/10 text-slate-600 dark:text-slate-300 border-slate-500/20' },
+    high: { label: 'High', badge: 'bg-orange-500/10 text-orange-700 dark:text-orange-300 border-orange-500/30' },
+    medium: { label: 'Medium', badge: 'bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/30' },
+    low: { label: 'Low', badge: 'bg-slate-500/10 text-slate-600 dark:text-slate-300 border-slate-500/20' },
 };
 
 function OverviewTab({
@@ -706,7 +704,7 @@ function OverviewTab({
         onSuccess: (_, vars) => {
             const field = vars.criticality ? 'Criticality'
                 : vars.business_unit !== undefined ? 'Business unit'
-                : 'Environment';
+                    : 'Environment';
             showToast(`${field} updated`, 'success');
             queryClient.invalidateQueries({ queryKey: ['agent', agent.id] });
             setCritEdit(false); setBuEdit(false); setEnvEdit(false);
@@ -808,7 +806,6 @@ function OverviewTab({
                         <div className="flex justify-between gap-4 py-1 border-b border-slate-100 dark:border-slate-700/40"><dt className="text-slate-500">Last Seen</dt><dd className="text-right font-medium text-slate-800 dark:text-slate-200">{new Date(agent.last_seen).toLocaleString()}</dd></div>
                         <div className="flex justify-between gap-4 py-1 border-b border-slate-100 dark:border-slate-700/40"><dt className="text-slate-500">IP Addresses</dt><dd className="text-right font-medium text-slate-800 dark:text-slate-200 break-all">{(agent.ip_addresses || []).join(', ') || '—'}</dd></div>
                         <div className="flex justify-between gap-4 py-1 border-b border-slate-100 dark:border-slate-700/40"><dt className="text-slate-500">Install Date</dt><dd className="text-right font-medium text-slate-800 dark:text-slate-200">{agent.installed_date ? new Date(agent.installed_date).toLocaleDateString() : '—'}</dd></div>
-                        <div className="flex justify-between gap-4 py-1 border-b border-slate-100 dark:border-slate-700/40"><dt className="text-slate-500">Enrollment Date</dt><dd className="text-right font-medium text-slate-800 dark:text-slate-200">{agent.created_at ? new Date(agent.created_at).toLocaleDateString() : '—'}</dd></div>
                         {tagEntries.length > 0 && <div className="flex justify-between gap-4 py-1"><dt className="text-slate-500">Tags</dt><dd className="text-right text-xs font-mono text-slate-600 dark:text-slate-300 break-all">{tagEntries.map(([k, v]) => `${k}=${v}`).join(', ')}</dd></div>}
                     </dl>
                 </div>
@@ -822,15 +819,14 @@ function OverviewTab({
                         <div className="flex items-center justify-between gap-3">
                             <span className="text-slate-500">Status</span>
                             <span
-                                className={`px-2 py-0.5 rounded-full text-xs font-semibold border ${
-                                    sysmonStatus.tone === 'ok'
+                                className={`px-2 py-0.5 rounded-full text-xs font-semibold border ${sysmonStatus.tone === 'ok'
                                         ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/20'
                                         : sysmonStatus.tone === 'warn'
-                                        ? 'bg-amber-500/10 text-amber-800 dark:text-amber-300 border-amber-500/20'
-                                        : sysmonStatus.tone === 'bad'
-                                        ? 'bg-rose-500/10 text-rose-700 dark:text-rose-300 border-rose-500/20'
-                                        : 'bg-slate-500/10 text-slate-700 dark:text-slate-300 border-slate-500/20'
-                                }`}
+                                            ? 'bg-amber-500/10 text-amber-800 dark:text-amber-300 border-amber-500/20'
+                                            : sysmonStatus.tone === 'bad'
+                                                ? 'bg-rose-500/10 text-rose-700 dark:text-rose-300 border-rose-500/20'
+                                                : 'bg-slate-500/10 text-slate-700 dark:text-slate-300 border-slate-500/20'
+                                    }`}
                             >
                                 {sysmonStatus.label}
                             </span>
@@ -905,8 +901,8 @@ function OverviewTab({
                                         onChange={e => setPendingCrit(e.target.value)}
                                         className="text-xs rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 px-2 py-1 focus:outline-none focus:ring-2 focus:ring-violet-500/40"
                                     >
-                                        {['low','medium','high','critical'].map(v => (
-                                            <option key={v} value={v}>{v.charAt(0).toUpperCase()+v.slice(1)}</option>
+                                        {['low', 'medium', 'high', 'critical'].map(v => (
+                                            <option key={v} value={v}>{v.charAt(0).toUpperCase() + v.slice(1)}</option>
                                         ))}
                                     </select>
                                     <button onClick={() => bCtxMutation.mutate({ criticality: pendingCrit as 'low' | 'medium' | 'high' | 'critical' })} disabled={bCtxMutation.isPending}
@@ -1937,7 +1933,7 @@ function ConfigurationTab({ agent, canExec }: { agent: Agent; canExec: boolean }
                     </div>
                     <div>
                         <div className="flex items-center justify-between mb-1">
-                            <label className={lbl} style={{marginBottom: 0}}>Sysmon Config XML</label>
+                            <label className={lbl} style={{ marginBottom: 0 }}>Sysmon Config XML</label>
                             <span className="text-[10px] text-slate-400 font-mono">assets/sysmonconfig.xml</span>
                         </div>
                         <textarea
@@ -2096,11 +2092,10 @@ function _NetworkTab({ agentId, canViewAlerts }: { agentId: string; canViewAlert
                         key={d}
                         type="button"
                         onClick={() => setRangeDays(d)}
-                        className={`px-2.5 py-1 rounded-md text-xs font-medium border transition-colors ${
-                            rangeDays === d
+                        className={`px-2.5 py-1 rounded-md text-xs font-medium border transition-colors ${rangeDays === d
                                 ? 'border-cyan-500/60 bg-cyan-500/10 text-cyan-800 dark:text-cyan-200'
                                 : 'border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
-                        }`}
+                            }`}
                     >
                         Last {d} days
                     </button>
@@ -2209,9 +2204,9 @@ function _NetworkTab({ agentId, canViewAlerts }: { agentId: string; canViewAlert
 const AUTO_PROC_PAGE_SIZE = 25;
 
 const ACTION_BADGE: Record<string, { label: string; color: string; bg: string; icon: React.ElementType }> = {
-    auto_terminated:                    { label: 'Terminated',  color: '#22c55e', bg: 'rgba(34,197,94,0.12)',  icon: CheckCircle2 },
-    auto_terminate_failed:              { label: 'Failed',      color: '#ef4444', bg: 'rgba(239,68,68,0.12)',  icon: XCircle },
-    process_rule_matched_detect_only:   { label: 'Detect Only', color: '#f59e0b', bg: 'rgba(245,158,11,0.12)', icon: AlertTriangle },
+    auto_terminated: { label: 'Terminated', color: '#22c55e', bg: 'rgba(34,197,94,0.12)', icon: CheckCircle2 },
+    auto_terminate_failed: { label: 'Failed', color: '#ef4444', bg: 'rgba(239,68,68,0.12)', icon: XCircle },
+    process_rule_matched_detect_only: { label: 'Detect Only', color: '#f59e0b', bg: 'rgba(245,158,11,0.12)', icon: AlertTriangle },
 };
 
 function AutoProcTerminationTab({ agentId, canViewAlerts, canExec }: { agentId: string; canViewAlerts: boolean; canExec: boolean }) {
@@ -2327,11 +2322,10 @@ function AutoProcTerminationTab({ agentId, canViewAlerts, canExec }: { agentId: 
                 <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Time range</span>
                 {([7, 30, 90] as const).map((d) => (
                     <button key={d} type="button" onClick={() => setRangeDays(d)}
-                        className={`px-2.5 py-1 rounded-md text-xs font-medium border transition-colors ${
-                            rangeDays === d
+                        className={`px-2.5 py-1 rounded-md text-xs font-medium border transition-colors ${rangeDays === d
                                 ? 'border-cyan-500/60 bg-cyan-500/10 text-cyan-800 dark:text-cyan-200'
                                 : 'border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
-                        }`}
+                            }`}
                     >Last {d} days</button>
                 ))}
                 <span className="ml-auto text-[10px] text-slate-400">{total} event{total !== 1 ? 's' : ''} in range</span>
@@ -2348,103 +2342,103 @@ function AutoProcTerminationTab({ agentId, canViewAlerts, canExec }: { agentId: 
                 </div>
             ) : (
                 <>
-                <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-700">
-                    <table className="w-full text-left text-xs">
-                        <thead className="bg-slate-100 dark:bg-slate-800/80 text-slate-600 dark:text-slate-400 uppercase text-[10px]">
-                            <tr>
-                                <th className="p-2.5">Time</th>
-                                <th className="p-2.5">Action</th>
-                                <th className="p-2.5">Severity</th>
-                                <th className="p-2.5">Process</th>
-                                <th className="p-2.5">Rule</th>
-                                <th className="p-2.5">User</th>
-                                <th className="p-2.5 text-right">Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {filteredRows.map((ev) => {
-                                const badge = getActionBadge(ev);
-                                const BadgeIcon = badge.icon;
-                                const isExpanded = expandedId === ev.id;
-                                const processName = getField(ev, 'name') || getField(ev, 'process_name') || '—';
-                                const ruleName = getField(ev, 'matched_rule_title') || getField(ev, 'matched_rule_id') || '—';
-                                const userName = getField(ev, 'user_name') || '—';
-                                const severity = (ev as any).severity || getField(ev, 'severity') || 'medium';
-                                const sevColor = severity === 'critical' ? 'text-rose-600 dark:text-rose-400 bg-rose-500/10 border-rose-500/20'
-                                    : severity === 'high' ? 'text-orange-600 dark:text-orange-400 bg-orange-500/10 border-orange-500/20'
-                                    : 'text-amber-600 dark:text-amber-400 bg-amber-500/10 border-amber-500/20';
+                    <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-700">
+                        <table className="w-full text-left text-xs">
+                            <thead className="bg-slate-100 dark:bg-slate-800/80 text-slate-600 dark:text-slate-400 uppercase text-[10px]">
+                                <tr>
+                                    <th className="p-2.5">Time</th>
+                                    <th className="p-2.5">Action</th>
+                                    <th className="p-2.5">Severity</th>
+                                    <th className="p-2.5">Process</th>
+                                    <th className="p-2.5">Rule</th>
+                                    <th className="p-2.5">User</th>
+                                    <th className="p-2.5 text-right">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {filteredRows.map((ev) => {
+                                    const badge = getActionBadge(ev);
+                                    const BadgeIcon = badge.icon;
+                                    const isExpanded = expandedId === ev.id;
+                                    const processName = getField(ev, 'name') || getField(ev, 'process_name') || '—';
+                                    const ruleName = getField(ev, 'matched_rule_title') || getField(ev, 'matched_rule_id') || '—';
+                                    const userName = getField(ev, 'user_name') || '—';
+                                    const severity = (ev as any).severity || getField(ev, 'severity') || 'medium';
+                                    const sevColor = severity === 'critical' ? 'text-rose-600 dark:text-rose-400 bg-rose-500/10 border-rose-500/20'
+                                        : severity === 'high' ? 'text-orange-600 dark:text-orange-400 bg-orange-500/10 border-orange-500/20'
+                                            : 'text-amber-600 dark:text-amber-400 bg-amber-500/10 border-amber-500/20';
 
-                                return (
-                                    <React.Fragment key={ev.id}>
-                                        <tr
-                                            className="border-t border-slate-100 dark:border-slate-800 cursor-pointer hover:bg-slate-50/90 dark:hover:bg-slate-800/40 transition-colors"
-                                            onClick={() => setExpandedId(isExpanded ? null : ev.id)}
-                                        >
-                                            <td className="p-2.5 whitespace-nowrap text-slate-600 dark:text-slate-300">{new Date(ev.timestamp).toLocaleString()}</td>
-                                            <td className="p-2.5">
-                                                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '2px 8px', borderRadius: '9999px', fontSize: '10px', fontWeight: 600, color: badge.color, backgroundColor: badge.bg }}>
-                                                    <BadgeIcon style={{ width: 12, height: 12 }} /> {badge.label}
-                                                </span>
-                                            </td>
-                                            <td className="p-2.5">
-                                                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase border ${sevColor}`}>{severity}</span>
-                                            </td>
-                                            <td className="p-2.5 font-mono font-medium text-slate-800 dark:text-slate-200">{processName}</td>
-                                            <td className="p-2.5 text-slate-600 dark:text-slate-300 max-w-[180px] truncate" title={ruleName}>{ruleName}</td>
-                                            <td className="p-2.5 text-slate-500">{userName}</td>
-                                            <td className="p-2.5 text-right">
-                                                {canExec && getField(ev, 'action') !== 'process_rule_matched_detect_only' && (
-                                                    <button
-                                                        type="button"
-                                                        className="px-2 py-1 rounded border border-emerald-500/40 text-[10px] font-semibold text-emerald-700 dark:text-emerald-400 hover:bg-emerald-500/10 disabled:opacity-50"
-                                                        onClick={(e) => { e.stopPropagation(); setAllowTarget({ name: processName, rule: ruleName }); }}
-                                                    >Allow</button>
-                                                )}
-                                            </td>
-                                        </tr>
-                                        {isExpanded && (
-                                            <tr className="bg-slate-50/50 dark:bg-slate-900/30">
-                                                <td colSpan={7} className="p-4">
-                                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
-                                                        <div><span className="font-semibold text-slate-500 uppercase text-[10px]">PID</span><div className="font-mono mt-0.5">{getField(ev, 'pid') || '—'}</div></div>
-                                                        <div><span className="font-semibold text-slate-500 uppercase text-[10px]">PPID</span><div className="font-mono mt-0.5">{getField(ev, 'ppid') || '—'}</div></div>
-                                                        <div className="md:col-span-2"><span className="font-semibold text-slate-500 uppercase text-[10px]">Command Line</span><div className="font-mono mt-0.5 bg-slate-100 dark:bg-slate-900/60 p-2 rounded break-all max-h-24 overflow-auto">{getField(ev, 'command_line') || '—'}</div></div>
-                                                        <div><span className="font-semibold text-slate-500 uppercase text-[10px]">Parent</span><div className="font-mono mt-0.5">{getField(ev, 'parent_name') || '—'}</div></div>
-                                                        <div><span className="font-semibold text-slate-500 uppercase text-[10px]">Parent Executable</span><div className="font-mono mt-0.5 truncate" title={getField(ev, 'parent_executable')}>{getField(ev, 'parent_executable') || '—'}</div></div>
-                                                        <div><span className="font-semibold text-slate-500 uppercase text-[10px]">Kill Tree</span><div className="mt-0.5">{getField(ev, 'kill_tree') === 'true' ? <span className="text-rose-600 font-bold">Yes</span> : 'No'}</div></div>
-                                                        <div><span className="font-semibold text-slate-500 uppercase text-[10px]">Signature</span><div className="mt-0.5">{getField(ev, 'signature_status') || '—'}</div></div>
-                                                        <div><span className="font-semibold text-slate-500 uppercase text-[10px]">Elevated</span><div className="mt-0.5">{getField(ev, 'is_elevated') === 'true' ? <span className="text-amber-600 font-bold">Yes</span> : 'No'}</div></div>
-                                                        <div><span className="font-semibold text-slate-500 uppercase text-[10px]">Integrity Level</span><div className="mt-0.5">{getField(ev, 'integrity_level') || '—'}</div></div>
-                                                        {getField(ev, 'kill_output') && (
-                                                            <div className="md:col-span-2"><span className="font-semibold text-slate-500 uppercase text-[10px]">Kill Output</span><pre className="font-mono mt-0.5 bg-slate-900 text-slate-100 p-2 rounded text-[10px] max-h-20 overflow-auto">{getField(ev, 'kill_output')}</pre></div>
-                                                        )}
-                                                        {getField(ev, 'kill_error') && (
-                                                            <div className="md:col-span-2"><span className="font-semibold text-rose-500 uppercase text-[10px]">Error</span><pre className="font-mono mt-0.5 bg-rose-500/10 text-rose-700 dark:text-rose-300 p-2 rounded text-[10px]">{getField(ev, 'kill_error')}</pre></div>
-                                                        )}
-                                                        <div><span className="font-semibold text-slate-500 uppercase text-[10px]">Rule ID</span><div className="font-mono mt-0.5 text-slate-400">{getField(ev, 'matched_rule_id') || '—'}</div></div>
-                                                        <div><span className="font-semibold text-slate-500 uppercase text-[10px]">Decision Mode</span><div className="mt-0.5">{getField(ev, 'decision_mode') || '—'}</div></div>
-                                                    </div>
+                                    return (
+                                        <React.Fragment key={ev.id}>
+                                            <tr
+                                                className="border-t border-slate-100 dark:border-slate-800 cursor-pointer hover:bg-slate-50/90 dark:hover:bg-slate-800/40 transition-colors"
+                                                onClick={() => setExpandedId(isExpanded ? null : ev.id)}
+                                            >
+                                                <td className="p-2.5 whitespace-nowrap text-slate-600 dark:text-slate-300">{new Date(ev.timestamp).toLocaleString()}</td>
+                                                <td className="p-2.5">
+                                                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '2px 8px', borderRadius: '9999px', fontSize: '10px', fontWeight: 600, color: badge.color, backgroundColor: badge.bg }}>
+                                                        <BadgeIcon style={{ width: 12, height: 12 }} /> {badge.label}
+                                                    </span>
+                                                </td>
+                                                <td className="p-2.5">
+                                                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase border ${sevColor}`}>{severity}</span>
+                                                </td>
+                                                <td className="p-2.5 font-mono font-medium text-slate-800 dark:text-slate-200">{processName}</td>
+                                                <td className="p-2.5 text-slate-600 dark:text-slate-300 max-w-[180px] truncate" title={ruleName}>{ruleName}</td>
+                                                <td className="p-2.5 text-slate-500">{userName}</td>
+                                                <td className="p-2.5 text-right">
+                                                    {canExec && getField(ev, 'action') !== 'process_rule_matched_detect_only' && (
+                                                        <button
+                                                            type="button"
+                                                            className="px-2 py-1 rounded border border-emerald-500/40 text-[10px] font-semibold text-emerald-700 dark:text-emerald-400 hover:bg-emerald-500/10 disabled:opacity-50"
+                                                            onClick={(e) => { e.stopPropagation(); setAllowTarget({ name: processName, rule: ruleName }); }}
+                                                        >Allow</button>
+                                                    )}
                                                 </td>
                                             </tr>
-                                        )}
-                                    </React.Fragment>
-                                );
-                            })}
-                        </tbody>
-                    </table>
-                </div>
-
-                {totalPages > 1 && (
-                    <div className="flex items-center justify-between gap-3 pt-1">
-                        <button type="button" className="inline-flex items-center gap-1 px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-medium disabled:opacity-40" disabled={page <= 1} onClick={() => setPage(p => Math.max(1, p - 1))}>
-                            <ChevronLeft className="w-4 h-4" /> Prev
-                        </button>
-                        <span className="text-xs text-slate-500">Page <span className="font-semibold text-slate-700 dark:text-slate-200">{page}</span> / {totalPages}</span>
-                        <button type="button" className="inline-flex items-center gap-1 px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-medium disabled:opacity-40" disabled={page >= totalPages} onClick={() => setPage(p => Math.min(totalPages, p + 1))}>
-                            Next <ChevronRight className="w-4 h-4" />
-                        </button>
+                                            {isExpanded && (
+                                                <tr className="bg-slate-50/50 dark:bg-slate-900/30">
+                                                    <td colSpan={7} className="p-4">
+                                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+                                                            <div><span className="font-semibold text-slate-500 uppercase text-[10px]">PID</span><div className="font-mono mt-0.5">{getField(ev, 'pid') || '—'}</div></div>
+                                                            <div><span className="font-semibold text-slate-500 uppercase text-[10px]">PPID</span><div className="font-mono mt-0.5">{getField(ev, 'ppid') || '—'}</div></div>
+                                                            <div className="md:col-span-2"><span className="font-semibold text-slate-500 uppercase text-[10px]">Command Line</span><div className="font-mono mt-0.5 bg-slate-100 dark:bg-slate-900/60 p-2 rounded break-all max-h-24 overflow-auto">{getField(ev, 'command_line') || '—'}</div></div>
+                                                            <div><span className="font-semibold text-slate-500 uppercase text-[10px]">Parent</span><div className="font-mono mt-0.5">{getField(ev, 'parent_name') || '—'}</div></div>
+                                                            <div><span className="font-semibold text-slate-500 uppercase text-[10px]">Parent Executable</span><div className="font-mono mt-0.5 truncate" title={getField(ev, 'parent_executable')}>{getField(ev, 'parent_executable') || '—'}</div></div>
+                                                            <div><span className="font-semibold text-slate-500 uppercase text-[10px]">Kill Tree</span><div className="mt-0.5">{getField(ev, 'kill_tree') === 'true' ? <span className="text-rose-600 font-bold">Yes</span> : 'No'}</div></div>
+                                                            <div><span className="font-semibold text-slate-500 uppercase text-[10px]">Signature</span><div className="mt-0.5">{getField(ev, 'signature_status') || '—'}</div></div>
+                                                            <div><span className="font-semibold text-slate-500 uppercase text-[10px]">Elevated</span><div className="mt-0.5">{getField(ev, 'is_elevated') === 'true' ? <span className="text-amber-600 font-bold">Yes</span> : 'No'}</div></div>
+                                                            <div><span className="font-semibold text-slate-500 uppercase text-[10px]">Integrity Level</span><div className="mt-0.5">{getField(ev, 'integrity_level') || '—'}</div></div>
+                                                            {getField(ev, 'kill_output') && (
+                                                                <div className="md:col-span-2"><span className="font-semibold text-slate-500 uppercase text-[10px]">Kill Output</span><pre className="font-mono mt-0.5 bg-slate-900 text-slate-100 p-2 rounded text-[10px] max-h-20 overflow-auto">{getField(ev, 'kill_output')}</pre></div>
+                                                            )}
+                                                            {getField(ev, 'kill_error') && (
+                                                                <div className="md:col-span-2"><span className="font-semibold text-rose-500 uppercase text-[10px]">Error</span><pre className="font-mono mt-0.5 bg-rose-500/10 text-rose-700 dark:text-rose-300 p-2 rounded text-[10px]">{getField(ev, 'kill_error')}</pre></div>
+                                                            )}
+                                                            <div><span className="font-semibold text-slate-500 uppercase text-[10px]">Rule ID</span><div className="font-mono mt-0.5 text-slate-400">{getField(ev, 'matched_rule_id') || '—'}</div></div>
+                                                            <div><span className="font-semibold text-slate-500 uppercase text-[10px]">Decision Mode</span><div className="mt-0.5">{getField(ev, 'decision_mode') || '—'}</div></div>
+                                                        </div>
+                                                    </td>
+                                                </tr>
+                                            )}
+                                        </React.Fragment>
+                                    );
+                                })}
+                            </tbody>
+                        </table>
                     </div>
-                )}
+
+                    {totalPages > 1 && (
+                        <div className="flex items-center justify-between gap-3 pt-1">
+                            <button type="button" className="inline-flex items-center gap-1 px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-medium disabled:opacity-40" disabled={page <= 1} onClick={() => setPage(p => Math.max(1, p - 1))}>
+                                <ChevronLeft className="w-4 h-4" /> Prev
+                            </button>
+                            <span className="text-xs text-slate-500">Page <span className="font-semibold text-slate-700 dark:text-slate-200">{page}</span> / {totalPages}</span>
+                            <button type="button" className="inline-flex items-center gap-1 px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-medium disabled:opacity-40" disabled={page >= totalPages} onClick={() => setPage(p => Math.min(totalPages, p + 1))}>
+                                Next <ChevronRight className="w-4 h-4" />
+                            </button>
+                        </div>
+                    )}
                 </>
             )}
 
@@ -2668,7 +2662,7 @@ function ResponseTab({
                         </button>
                     )}
                 </div>
-                
+
                 {/* Rate Limiting Notice */}
                 <div className="mb-6 rounded-lg border border-amber-200 dark:border-amber-800/40 bg-amber-50 dark:bg-amber-900/10 px-4 py-3 text-xs text-amber-800 dark:text-amber-200 flex items-start gap-3">
                     <Shield className="w-4 h-4 shrink-0 mt-0.5 text-amber-500" />
@@ -2689,11 +2683,10 @@ function ResponseTab({
                                         type="button"
                                         disabled={!canExec}
                                         onClick={() => setCmdType(o.value)}
-                                        className={`flex flex-col items-start p-3 rounded-xl border text-left transition-all ${
-                                            isSelected
+                                        className={`flex flex-col items-start p-3 rounded-xl border text-left transition-all ${isSelected
                                                 ? 'border-cyan-500 bg-cyan-50 dark:bg-cyan-900/20 shadow-sm ring-1 ring-cyan-500'
                                                 : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/50 hover:border-slate-300 dark:hover:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-800'
-                                        } ${!canExec ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                            } ${!canExec ? 'opacity-50 cursor-not-allowed' : ''}`}
                                     >
                                         <div className="flex items-center justify-between w-full">
                                             <span className={`text-sm font-medium ${isSelected ? 'text-cyan-700 dark:text-cyan-400 font-semibold' : 'text-slate-700 dark:text-slate-300'}`}>
@@ -2713,12 +2706,12 @@ function ResponseTab({
                         <h4 className="text-sm font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2 mb-4">
                             <Settings className="w-4 h-4 text-slate-400" /> Command Parameters
                         </h4>
-                        
+
                         <div className="space-y-4 flex-1">
                             {/* DECISION LOGIC SECTION */}
                             <div className="p-3 bg-white dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-xl space-y-3">
                                 <div className="text-xs font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-widest mb-1 border-b border-slate-100 dark:border-slate-700 pb-1">Decision Logic & Auditability</div>
-                                
+
                                 <div className="grid grid-cols-2 gap-3">
                                     <div>
                                         <label className="block text-[10px] text-slate-500 uppercase mb-1">Confidence Score</label>
@@ -2761,7 +2754,7 @@ function ResponseTab({
                             {/* PARAMETERS SECTION */}
                             <div className="pt-2 border-t border-slate-200 dark:border-slate-700">
                                 <label className="block text-xs font-semibold text-slate-500 uppercase mb-3">Action Parameters</label>
-                                
+
                                 <div>
                                     <label className="block text-[10px] text-slate-500 uppercase mb-1">Timeout (seconds)</label>
                                     <input className="input w-full" type="number" min={0} max={3600} value={fields.timeout ?? '300'} onChange={(e) => patch('timeout', e.target.value)} disabled={!canExec} />
@@ -2777,7 +2770,7 @@ function ResponseTab({
                                             <label className="text-[10px] text-slate-500 uppercase">Process name (optional)</label>
                                             <input className="input w-full mt-1" value={fields.process_name || ''} onChange={(e) => patch('process_name', e.target.value)} disabled={!canExec} />
                                         </div>
-                                        
+
                                         <div className="flex items-center justify-between gap-2 mt-2 pt-2 border-t border-slate-200 dark:border-slate-700">
                                             <label className="flex items-center gap-2 text-xs font-medium text-slate-700 dark:text-slate-300">
                                                 <input type="checkbox" className="rounded" checked={fields.kill_tree === 'true'} onChange={(e) => patch('kill_tree', e.target.checked ? 'true' : 'false')} disabled={!canExec} />
@@ -2948,9 +2941,8 @@ function ResponseTab({
                                 const active = (i === 0 && upgradeStep === 'building') || (i === 1 && upgradeStep === 'pushing');
                                 const done = (i === 0 && upgradeStep === 'pushing');
                                 return (
-                                    <div key={step} className={`flex-1 px-3 py-2 text-center text-xs font-semibold transition-colors ${
-                                        active ? 'bg-cyan-500 text-white' : done ? 'bg-emerald-500/20 text-emerald-700 dark:text-emerald-300' : 'bg-slate-50 dark:bg-slate-800 text-slate-400'
-                                    }`}>
+                                    <div key={step} className={`flex-1 px-3 py-2 text-center text-xs font-semibold transition-colors ${active ? 'bg-cyan-500 text-white' : done ? 'bg-emerald-500/20 text-emerald-700 dark:text-emerald-300' : 'bg-slate-50 dark:bg-slate-800 text-slate-400'
+                                        }`}>
                                         {done ? '✓ ' : active ? '⟳ ' : ''}{step}
                                     </div>
                                 );
@@ -2970,24 +2962,22 @@ function ResponseTab({
                             <div>
                                 <label className="block text-[10px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">Server IP</label>
                                 <input
-                                    className={`input w-full text-sm font-mono ${
-                                        upgradeErrors.server ? 'border-rose-400 ring-1 ring-rose-400' : ''
-                                    }`}
+                                    className={`input w-full text-sm font-mono ${upgradeErrors.server ? 'border-rose-400 ring-1 ring-rose-400' : ''
+                                        }`}
                                     placeholder="e.g. 192.168.1.100"
                                     value={upgradeForm.serverIP}
-                                    onChange={(e) => { setUpgradeForm(f => ({...f, serverIP: e.target.value})); setUpgradeErrors(prev => ({...prev, server: ''})); }}
+                                    onChange={(e) => { setUpgradeForm(f => ({ ...f, serverIP: e.target.value })); setUpgradeErrors(prev => ({ ...prev, server: '' })); }}
                                     disabled={upgradeMutation.isPending}
                                 />
                             </div>
                             <div>
                                 <label className="block text-[10px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">Server Domain</label>
                                 <input
-                                    className={`input w-full text-sm font-mono ${
-                                        upgradeErrors.server ? 'border-rose-400 ring-1 ring-rose-400' : ''
-                                    }`}
+                                    className={`input w-full text-sm font-mono ${upgradeErrors.server ? 'border-rose-400 ring-1 ring-rose-400' : ''
+                                        }`}
                                     placeholder="e.g. edr.company.com"
                                     value={upgradeForm.serverDomain}
-                                    onChange={(e) => { setUpgradeForm(f => ({...f, serverDomain: e.target.value})); setUpgradeErrors(prev => ({...prev, server: ''})); }}
+                                    onChange={(e) => { setUpgradeForm(f => ({ ...f, serverDomain: e.target.value })); setUpgradeErrors(prev => ({ ...prev, server: '' })); }}
                                     disabled={upgradeMutation.isPending}
                                 />
                             </div>
@@ -2996,11 +2986,10 @@ function ResponseTab({
                         <div>
                             <label className="block text-[10px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">Server Port</label>
                             <input
-                                className={`input w-full text-sm font-mono ${
-                                    upgradeErrors.port ? 'border-rose-400 ring-1 ring-rose-400' : ''
-                                }`}
+                                className={`input w-full text-sm font-mono ${upgradeErrors.port ? 'border-rose-400 ring-1 ring-rose-400' : ''
+                                    }`}
                                 value={upgradeForm.serverPort}
-                                onChange={(e) => { setUpgradeForm(f => ({...f, serverPort: e.target.value})); setUpgradeErrors(prev => ({...prev, port: ''})); }}
+                                onChange={(e) => { setUpgradeForm(f => ({ ...f, serverPort: e.target.value })); setUpgradeErrors(prev => ({ ...prev, port: '' })); }}
                                 disabled={upgradeMutation.isPending}
                             />
                             {upgradeErrors.port && <p className="text-[10px] text-rose-500 mt-0.5">{upgradeErrors.port}</p>}
@@ -3024,7 +3013,7 @@ function ResponseTab({
                                     type="checkbox"
                                     className="rounded mt-0.5 text-cyan-500 focus:ring-cyan-500"
                                     checked={upgradeForm.installSysmon}
-                                    onChange={(e) => setUpgradeForm(f => ({...f, installSysmon: e.target.checked}))}
+                                    onChange={(e) => setUpgradeForm(f => ({ ...f, installSysmon: e.target.checked }))}
                                     disabled={upgradeMutation.isPending}
                                 />
                                 <div>
@@ -3043,73 +3032,73 @@ function ResponseTab({
                     <Loader2 className="w-8 h-8 animate-spin text-cyan-500" />
                 ) : (
                     <>
-                    <div className="overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-700">
-                        <table className="w-full text-left text-xs">
-                            <thead className="bg-slate-100 dark:bg-slate-800/80 text-slate-600 uppercase">
-                                <tr>
-                                    <th className="p-2">Status</th>
-                                    <th className="p-2">Type & Logic</th>
-                                    <th className="p-2">D3FEND Mapping</th>
-                                    <th className="p-2">Issued</th>
-                                    <th className="p-2">By</th>
-                                    <th className="p-2">Output / error</th>
-                                    <th className="p-2">Rollback</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {cmds.length === 0 ? (
-                                    <tr><td colSpan={7} className="p-4 text-slate-500">No commands</td></tr>
-                                ) : (
-                                    cmds.slice((cmdPage - 1) * CMD_PAGE_SIZE, cmdPage * CMD_PAGE_SIZE).map((c) => (
-                                        <tr key={c.id} className="border-t border-slate-100 dark:border-slate-800 align-top">
-                                            <td className="p-2 whitespace-nowrap font-medium text-slate-700 dark:text-slate-200">{c.status}</td>
-                                            <td className="p-2">
-                                                <div className="font-mono text-cyan-600 dark:text-cyan-400 font-semibold">{c.command_type}</div>
-                                                <div className="text-[10px] text-slate-500 mt-1 max-w-[200px] leading-tight">
-                                                    Reason: {c.parameters?.decision_reason || 'Manual execution'} <br/>
-                                                    Confidence: {c.parameters?.decision_confidence || 'N/A'}
-                                                </div>
-                                            </td>
-                                            <td className="p-2">
-                                                <span className="bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400 px-1.5 py-0.5 rounded border border-indigo-200 dark:border-indigo-800/50 whitespace-nowrap">
-                                                    {c.parameters?.d3fend_mapping || 'Unmapped'}
-                                                </span>
-                                            </td>
-                                            <td className="p-2 whitespace-nowrap text-slate-600 dark:text-slate-400">{new Date(c.issued_at).toLocaleString()}</td>
-                                            <td className="p-2 max-w-[140px] break-all">{c.issued_by_user || c.issued_by || '—'}</td>
-                                            <td className="p-2 max-w-md">
-                                                {c.error_message ? (
-                                                    <span className="text-rose-600 dark:text-rose-400">{c.error_message}</span>
-                                                ) : (
-                                                    commandHistoryOutputCell(c, agentId)
-                                                )}
-                                            </td>
-                                            <td className="p-2">
-                                                {(c.command_type === 'kill_process' || c.command_type === 'terminate_process' || c.command_type === 'quarantine_file') && c.status === 'completed' ? (
-                                                    <button className="text-[10px] text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/20 hover:bg-emerald-100 dark:hover:bg-emerald-900/40 border border-emerald-200 dark:border-emerald-800/40 px-2 py-1 rounded transition-colors font-medium">
-                                                        Rollback Action
-                                                    </button>
-                                                ) : (
-                                                    <span className="text-[10px] text-slate-400">—</span>
-                                                )}
-                                            </td>
-                                        </tr>
-                                    ))
-                                )}
-                            </tbody>
-                        </table>
-                    </div>
-                    {cmds.length > CMD_PAGE_SIZE && (
-                        <div className="flex items-center justify-between gap-3 pt-3 mt-3">
-                            <button type="button" className="inline-flex items-center gap-1 px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-medium disabled:opacity-40" disabled={cmdPage <= 1} onClick={() => setCmdPage((p) => Math.max(1, p - 1))}>
-                                <ChevronLeft className="w-4 h-4" /> Previous
-                            </button>
-                            <span className="text-xs text-slate-500">Page <span className="font-semibold text-slate-700 dark:text-slate-200">{cmdPage}</span> of {Math.max(1, Math.ceil(cmds.length / CMD_PAGE_SIZE))}</span>
-                            <button type="button" className="inline-flex items-center gap-1 px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-medium disabled:opacity-40" disabled={cmdPage >= Math.max(1, Math.ceil(cmds.length / CMD_PAGE_SIZE))} onClick={() => setCmdPage((p) => Math.min(Math.max(1, Math.ceil(cmds.length / CMD_PAGE_SIZE)), p + 1))}>
-                                Next <ChevronRight className="w-4 h-4" />
-                            </button>
+                        <div className="overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-700">
+                            <table className="w-full text-left text-xs">
+                                <thead className="bg-slate-100 dark:bg-slate-800/80 text-slate-600 uppercase">
+                                    <tr>
+                                        <th className="p-2">Status</th>
+                                        <th className="p-2">Type & Logic</th>
+                                        <th className="p-2">D3FEND Mapping</th>
+                                        <th className="p-2">Issued</th>
+                                        <th className="p-2">By</th>
+                                        <th className="p-2">Output / error</th>
+                                        <th className="p-2">Rollback</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {cmds.length === 0 ? (
+                                        <tr><td colSpan={7} className="p-4 text-slate-500">No commands</td></tr>
+                                    ) : (
+                                        cmds.slice((cmdPage - 1) * CMD_PAGE_SIZE, cmdPage * CMD_PAGE_SIZE).map((c) => (
+                                            <tr key={c.id} className="border-t border-slate-100 dark:border-slate-800 align-top">
+                                                <td className="p-2 whitespace-nowrap font-medium text-slate-700 dark:text-slate-200">{c.status}</td>
+                                                <td className="p-2">
+                                                    <div className="font-mono text-cyan-600 dark:text-cyan-400 font-semibold">{c.command_type}</div>
+                                                    <div className="text-[10px] text-slate-500 mt-1 max-w-[200px] leading-tight">
+                                                        Reason: {c.parameters?.decision_reason || 'Manual execution'} <br />
+                                                        Confidence: {c.parameters?.decision_confidence || 'N/A'}
+                                                    </div>
+                                                </td>
+                                                <td className="p-2">
+                                                    <span className="bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400 px-1.5 py-0.5 rounded border border-indigo-200 dark:border-indigo-800/50 whitespace-nowrap">
+                                                        {c.parameters?.d3fend_mapping || 'Unmapped'}
+                                                    </span>
+                                                </td>
+                                                <td className="p-2 whitespace-nowrap text-slate-600 dark:text-slate-400">{new Date(c.issued_at).toLocaleString()}</td>
+                                                <td className="p-2 max-w-[140px] break-all">{c.issued_by_user || c.issued_by || '—'}</td>
+                                                <td className="p-2 max-w-md">
+                                                    {c.error_message ? (
+                                                        <span className="text-rose-600 dark:text-rose-400">{c.error_message}</span>
+                                                    ) : (
+                                                        commandHistoryOutputCell(c, agentId)
+                                                    )}
+                                                </td>
+                                                <td className="p-2">
+                                                    {(c.command_type === 'kill_process' || c.command_type === 'terminate_process' || c.command_type === 'quarantine_file') && c.status === 'completed' ? (
+                                                        <button className="text-[10px] text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/20 hover:bg-emerald-100 dark:hover:bg-emerald-900/40 border border-emerald-200 dark:border-emerald-800/40 px-2 py-1 rounded transition-colors font-medium">
+                                                            Rollback Action
+                                                        </button>
+                                                    ) : (
+                                                        <span className="text-[10px] text-slate-400">—</span>
+                                                    )}
+                                                </td>
+                                            </tr>
+                                        ))
+                                    )}
+                                </tbody>
+                            </table>
                         </div>
-                    )}
+                        {cmds.length > CMD_PAGE_SIZE && (
+                            <div className="flex items-center justify-between gap-3 pt-3 mt-3">
+                                <button type="button" className="inline-flex items-center gap-1 px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-medium disabled:opacity-40" disabled={cmdPage <= 1} onClick={() => setCmdPage((p) => Math.max(1, p - 1))}>
+                                    <ChevronLeft className="w-4 h-4" /> Previous
+                                </button>
+                                <span className="text-xs text-slate-500">Page <span className="font-semibold text-slate-700 dark:text-slate-200">{cmdPage}</span> of {Math.max(1, Math.ceil(cmds.length / CMD_PAGE_SIZE))}</span>
+                                <button type="button" className="inline-flex items-center gap-1 px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-medium disabled:opacity-40" disabled={cmdPage >= Math.max(1, Math.ceil(cmds.length / CMD_PAGE_SIZE))} onClick={() => setCmdPage((p) => Math.min(Math.max(1, Math.ceil(cmds.length / CMD_PAGE_SIZE)), p + 1))}>
+                                    Next <ChevronRight className="w-4 h-4" />
+                                </button>
+                            </div>
+                        )}
                     </>
                 )}
             </div>
@@ -3289,69 +3278,69 @@ function ActivityTab({
                     </p>
                 ) : (
                     <>
-                    <ul className="space-y-2">
-                        {merged.slice((actPage - 1) * ACT_PAGE_SIZE, actPage * ACT_PAGE_SIZE).map((r) =>
-                            r.kind === 'alert' ? (
-                                <li
-                                    key={r.id}
-                                    className="flex items-start gap-3 text-sm border border-slate-200 dark:border-slate-700 rounded-lg p-3"
-                                >
-                                    {r.alert.severity === 'critical' || r.alert.severity === 'high' ? (
-                                        <XCircle className="w-4 h-4 text-rose-500 shrink-0 mt-0.5" />
-                                    ) : (
-                                        <CheckCircle2 className="w-4 h-4 text-slate-400 shrink-0 mt-0.5" />
-                                    )}
-                                    <div>
-                                        <div className="font-medium text-slate-900 dark:text-slate-100">
-                                            {r.alert.rule_title || r.alert.rule_id || 'Alert'}
+                        <ul className="space-y-2">
+                            {merged.slice((actPage - 1) * ACT_PAGE_SIZE, actPage * ACT_PAGE_SIZE).map((r) =>
+                                r.kind === 'alert' ? (
+                                    <li
+                                        key={r.id}
+                                        className="flex items-start gap-3 text-sm border border-slate-200 dark:border-slate-700 rounded-lg p-3"
+                                    >
+                                        {r.alert.severity === 'critical' || r.alert.severity === 'high' ? (
+                                            <XCircle className="w-4 h-4 text-rose-500 shrink-0 mt-0.5" />
+                                        ) : (
+                                            <CheckCircle2 className="w-4 h-4 text-slate-400 shrink-0 mt-0.5" />
+                                        )}
+                                        <div>
+                                            <div className="font-medium text-slate-900 dark:text-slate-100">
+                                                {r.alert.rule_title || r.alert.rule_id || 'Alert'}
+                                            </div>
+                                            <div className="text-xs text-slate-500">
+                                                {new Date(r.at).toLocaleString()} · Sigma · {r.alert.severity || '—'}
+                                            </div>
+                                            <Link className="text-xs text-cyan-600 hover:underline mt-1 inline-block" to="/alerts">
+                                                Open Alerts
+                                            </Link>
                                         </div>
-                                        <div className="text-xs text-slate-500">
-                                            {new Date(r.at).toLocaleString()} · Sigma · {r.alert.severity || '—'}
-                                        </div>
-                                        <Link className="text-xs text-cyan-600 hover:underline mt-1 inline-block" to="/alerts">
-                                            Open Alerts
-                                        </Link>
-                                    </div>
-                                </li>
-                            ) : (
-                                <li
-                                    key={r.id}
-                                    role="button"
-                                    tabIndex={0}
-                                    className="flex items-start gap-3 text-sm border border-slate-200 dark:border-slate-700 rounded-lg p-3 cursor-pointer hover:bg-slate-50/90 dark:hover:bg-slate-800/50 transition-colors"
-                                    onClick={() => setDetailId(r.ev.id)}
-                                    onKeyDown={(ev) => {
-                                        if (ev.key === 'Enter' || ev.key === ' ') {
-                                            ev.preventDefault();
-                                            setDetailId(r.ev.id);
+                                    </li>
+                                ) : (
+                                    <li
+                                        key={r.id}
+                                        role="button"
+                                        tabIndex={0}
+                                        className="flex items-start gap-3 text-sm border border-slate-200 dark:border-slate-700 rounded-lg p-3 cursor-pointer hover:bg-slate-50/90 dark:hover:bg-slate-800/50 transition-colors"
+                                        onClick={() => setDetailId(r.ev.id)}
+                                        onKeyDown={(ev) => {
+                                            if (ev.key === 'Enter' || ev.key === ' ') {
+                                                ev.preventDefault();
+                                                setDetailId(r.ev.id);
+                                            }
+                                        }}
+                                    >
+                                        {r.ev.event_type === 'network'
+                                            ? <Network className="w-4 h-4 text-indigo-500 shrink-0 mt-0.5" />
+                                            : <Network className="w-4 h-4 text-cyan-500 shrink-0 mt-0.5" />
                                         }
-                                    }}
-                                >
-                                    {r.ev.event_type === 'network'
-                                        ? <Network className="w-4 h-4 text-indigo-500 shrink-0 mt-0.5" />
-                                        : <Network className="w-4 h-4 text-cyan-500 shrink-0 mt-0.5" />
-                                    }
-                                    <div className="min-w-0 flex-1">
-                                        <div className="font-mono text-xs text-cyan-700 dark:text-cyan-300">{r.ev.event_type}</div>
-                                        <div className="text-slate-800 dark:text-slate-100">{r.ev.summary}</div>
-                                        <div className="text-xs text-slate-500">{new Date(r.at).toLocaleString()} · Server event · Click to view details</div>
-                                    </div>
-                                </li>
-                            )
+                                        <div className="min-w-0 flex-1">
+                                            <div className="font-mono text-xs text-cyan-700 dark:text-cyan-300">{r.ev.event_type}</div>
+                                            <div className="text-slate-800 dark:text-slate-100">{r.ev.summary}</div>
+                                            <div className="text-xs text-slate-500">{new Date(r.at).toLocaleString()} · Server event · Click to view details</div>
+                                        </div>
+                                    </li>
+                                )
+                            )}
+                        </ul>
+                        {merged.length > ACT_PAGE_SIZE && (
+                            <div className="flex items-center justify-between gap-3 pt-3 border-t border-slate-200 dark:border-slate-700 mt-3">
+                                <button type="button" className="inline-flex items-center gap-1 px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-medium disabled:opacity-40" disabled={actPage <= 1} onClick={() => setActPage((p) => Math.max(1, p - 1))}>
+                                    <ChevronLeft className="w-4 h-4" /> Previous
+                                </button>
+                                <span className="text-xs text-slate-500">Page <span className="font-semibold text-slate-700 dark:text-slate-200">{actPage}</span> of {Math.max(1, Math.ceil(merged.length / ACT_PAGE_SIZE))}</span>
+                                <button type="button" className="inline-flex items-center gap-1 px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-medium disabled:opacity-40" disabled={actPage >= Math.max(1, Math.ceil(merged.length / ACT_PAGE_SIZE))} onClick={() => setActPage((p) => Math.min(Math.max(1, Math.ceil(merged.length / ACT_PAGE_SIZE)), p + 1))}>
+                                    Next <ChevronRight className="w-4 h-4" />
+                                </button>
+                            </div>
                         )}
-                    </ul>
-                    {merged.length > ACT_PAGE_SIZE && (
-                        <div className="flex items-center justify-between gap-3 pt-3 border-t border-slate-200 dark:border-slate-700 mt-3">
-                            <button type="button" className="inline-flex items-center gap-1 px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-medium disabled:opacity-40" disabled={actPage <= 1} onClick={() => setActPage((p) => Math.max(1, p - 1))}>
-                                <ChevronLeft className="w-4 h-4" /> Previous
-                            </button>
-                            <span className="text-xs text-slate-500">Page <span className="font-semibold text-slate-700 dark:text-slate-200">{actPage}</span> of {Math.max(1, Math.ceil(merged.length / ACT_PAGE_SIZE))}</span>
-                            <button type="button" className="inline-flex items-center gap-1 px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-medium disabled:opacity-40" disabled={actPage >= Math.max(1, Math.ceil(merged.length / ACT_PAGE_SIZE))} onClick={() => setActPage((p) => Math.min(Math.max(1, Math.ceil(merged.length / ACT_PAGE_SIZE)), p + 1))}>
-                                Next <ChevronRight className="w-4 h-4" />
-                            </button>
-                        </div>
-                    )}
-                </>
+                    </>
                 )}
             </div>
 

@@ -15,6 +15,9 @@ export default function SystemLayout() {
         if (pathname.startsWith('/system/reliability-health')) {
             return { title: 'System · Reliability', desc: 'Operational indicators for ingestion durability and backpressure.' };
         }
+        if (pathname.startsWith('/system/signatures')) {
+            return { title: 'System · Signatures', desc: 'Server-managed malware signature feed and fleet update controls.' };
+        }
         if (pathname.startsWith('/system/platform-settings')) {
             return { title: 'System · Platform Settings', desc: 'Core platform configuration settings.' };
         }

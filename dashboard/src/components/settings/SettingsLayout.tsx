@@ -30,6 +30,12 @@ const RELATED = [
         icon: Shield,
     },
     {
+        to: '/system/signatures',
+        label: 'Signature feed management',
+        desc: 'Server-side IOC feed sync and fleet update dispatch',
+        icon: Shield,
+    },
+    {
         to: '/management/context-policies',
         label: 'Context policies',
         desc: 'Server-backed policy rules (API: context-policies)',

@@ -59,6 +59,9 @@ type Heartbeat struct {
 	deviceProfile string
 	loggedInUser  string
 	deviceInfoMu  sync.RWMutex
+
+	// Signature feed cursor provider (server-managed hash feed version).
+	getSignatureServerVersion func() int64
 }
 
 // HeartbeatRequest represents data sent in heartbeat.
@@ -88,6 +91,9 @@ type HeartbeatRequest struct {
 	// Device context — detected via WMI and sent as gRPC metadata
 	Profile      string `json:"profile,omitempty"`
 	LoggedInUser string `json:"logged_in_user,omitempty"`
+
+	// Last persisted server-side signature feed version in local bbolt.
+	SignatureServerVersion int64 `json:"signature_server_version,omitempty"`
 }
 
 // HeartbeatResponse represents server response.
@@ -138,6 +144,12 @@ func (h *Heartbeat) SetMetricsCollectors(
 	h.getEventsSent = eventsSent
 	h.getQueueDepth = queueDepth
 	h.getEventsDropped = eventsDropped
+}
+
+// SetSignatureVersionProvider sets a callback that returns the latest server
+// signature feed cursor stored in the local signature DB.
+func (h *Heartbeat) SetSignatureVersionProvider(fn func() int64) {
+	h.getSignatureServerVersion = fn
 }
 
 // Start begins the heartbeat loop.
@@ -266,6 +278,10 @@ func (h *Heartbeat) buildRequest() *HeartbeatRequest {
 		SysmonRunning:   sysmonRunning,
 		Profile:         profile,
 		LoggedInUser:    loggedInUser,
+	}
+
+	if h.getSignatureServerVersion != nil {
+		req.SignatureServerVersion = h.getSignatureServerVersion()
 	}
 
 	// Get metrics from collectors

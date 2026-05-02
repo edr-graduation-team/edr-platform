@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -618,13 +619,17 @@ func (c *Client) SendHeartbeat(req *HeartbeatRequest) (*HeartbeatResponse, error
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	// Attach device context as gRPC metadata (avoids proto schema changes).
+	// Attach supplemental context as gRPC metadata (avoids proto schema changes).
 	// The server reads these headers to update the agent's tags in the DB.
-	if req.Profile != "" || req.LoggedInUser != "" {
-		md := metadata.Pairs(
-			"x-agent-profile", req.Profile,
-			"x-agent-logged-in-user", req.LoggedInUser,
-		)
+	if req.Profile != "" || req.LoggedInUser != "" || req.SignatureServerVersion >= 0 {
+		md := metadata.Pairs()
+		if req.Profile != "" {
+			md.Append("x-agent-profile", req.Profile)
+		}
+		if req.LoggedInUser != "" {
+			md.Append("x-agent-logged-in-user", req.LoggedInUser)
+		}
+		md.Append("x-agent-signature-server-version", strconv.FormatInt(req.SignatureServerVersion, 10))
 		ctx = metadata.NewOutgoingContext(ctx, md)
 	}
 

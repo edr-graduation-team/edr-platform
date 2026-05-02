@@ -34,6 +34,13 @@ func startPlatformCollectors(ctx context.Context, a *Agent) {
 		logger.Warnf("[Response] signature database unavailable (auto-quarantine / C2 UPDATE_SIGNATURES / feeds disabled): %v", err)
 	} else {
 		a.commandHandler.SetSignatureStore(st)
+		a.heartbeat.SetSignatureVersionProvider(func() int64 {
+			v, err := st.GetServerVersion()
+			if err != nil {
+				return 0
+			}
+			return v
+		})
 		go func() {
 			<-ctx.Done()
 			_ = st.Close()

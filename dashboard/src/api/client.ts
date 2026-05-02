@@ -876,6 +876,39 @@ export interface ReliabilityHealthResponse {
     meta?: { request_id?: string; timestamp?: string };
 }
 
+export interface SignatureStatsResponse {
+    max_version: number;
+    count: number;
+    sources: Record<string, number>;
+    meta?: { request_id?: string; timestamp?: string };
+}
+
+export interface SignatureHashRow {
+    id: number;
+    sha256: string;
+    name?: string;
+    family?: string;
+    severity?: string;
+    source?: string;
+    version: number;
+}
+
+export interface SignatureListResponse {
+    data: SignatureHashRow[];
+    total: number;
+    meta?: { request_id?: string; timestamp?: string };
+}
+
+export interface BulkSignatureUpdateResult {
+    processed: number;
+    sent: number;
+    queued: number;
+    failed: number;
+    skipped_offline: number;
+    skipped_uninstalled: number;
+    include_offline: boolean;
+}
+
 export interface ContextPolicy {
     id: number;
     name: string;
@@ -1114,6 +1147,31 @@ export const reliabilityApi = {
             });
             return parsePayload(response.data);
         }
+    },
+};
+
+export const signaturesApi = {
+    stats: async (): Promise<SignatureStatsResponse> => {
+        const response = await connectionApi.get<SignatureStatsResponse>('/api/v1/signatures/stats');
+        return response.data;
+    },
+    syncNow: async () => {
+        const response = await connectionApi.post<{ message: string; meta?: { request_id?: string; timestamp?: string } }>(
+            '/api/v1/signatures/sync'
+        );
+        return response.data;
+    },
+    list: async (params?: { since_version?: number; limit?: number }): Promise<SignatureListResponse> => {
+        const response = await connectionApi.get<SignatureListResponse>('/api/v1/signatures', { params });
+        return response.data;
+    },
+    pushUpdateAll: async (payload?: { include_offline?: boolean; limit?: number; timeout?: number }) => {
+        const response = await connectionApi.post<{
+            message: string;
+            data: BulkSignatureUpdateResult;
+            meta?: { request_id?: string; timestamp?: string };
+        }>('/api/v1/signatures/push-update', payload ?? {});
+        return response.data;
     },
 };
 

@@ -6,7 +6,7 @@ import {
     Server, Network, AlertTriangle, CheckCircle2, XCircle, Settings,
     RefreshCw, ChevronLeft, ChevronRight, FileText, List, Package,
     ShieldAlert, Pencil, Check, X as XIcon, Building2, Globe,
-    Eye, ShieldCheck, Tag, Zap
+    Eye, Tag, Zap
 } from 'lucide-react';
 import {
     agentPackagesApi,
@@ -1624,16 +1624,6 @@ function ConfigurationTab({ agent, canExec }: { agent: Agent; canExec: boolean }
         onError: (e: Error) => showToast(e.message || 'Failed', 'error'),
     });
 
-    const signaturesMutation = useMutation({
-        mutationFn: () => agentsApi.executeCommand(agent.id, {
-            command_type: 'update_signatures',
-            parameters: {},
-            timeout: 180,
-        } as any),
-        onSuccess: () => { showToast('Signature update queued', 'success'); invalidate(); },
-        onError: (e: Error) => showToast(e.message || 'Failed', 'error'),
-    });
-
     // ── UI helpers ────────────────────────────────────────────────────────────
     const HotBadge = () => (
         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/40">
@@ -1942,19 +1932,6 @@ function ConfigurationTab({ agent, canExec }: { agent: Agent; canExec: boolean }
                         </button>
                         <button type="button" className={applyBtn} disabled={!canExec || sysmonEnableMutation.isPending} onClick={() => sysmonEnableMutation.mutate()}>
                             {sysmonEnableMutation.isPending ? 'Sending…' : 'Enable Sysmon'}
-                        </button>
-                    </div>
-                </div>
-            </div>
-
-            {/* ══════════════ SIGNATURES ═════════════════════════════════ */}
-            <div>
-                <h2 className={sectionHead}><ShieldCheck className="w-4 h-4 text-emerald-500" /> Signatures</h2>
-                <div className={card}>
-                    <p className="text-xs text-slate-500">Trigger a malware signature database update on this agent. The agent will fetch the latest signatures from its configured feed URL.</p>
-                    <div className="flex justify-end">
-                        <button type="button" className={applyBtn} disabled={!canExec || signaturesMutation.isPending} onClick={() => signaturesMutation.mutate()}>
-                            {signaturesMutation.isPending ? 'Queuing…' : 'Update signatures'}
                         </button>
                     </div>
                 </div>

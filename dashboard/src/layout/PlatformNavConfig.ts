@@ -73,6 +73,7 @@ export const SYSTEM_CONTEXT_TABS: ContextTab[] = [
     { to: '/system/access/roles', label: 'Roles & Permissions' },
     { to: '/system/audit-logs', label: 'Audit Logs' },
     { to: '/system/account', label: 'Account' },
+    { to: '/system/signatures', label: 'Signatures' },
     { to: '/system/reliability-health', label: 'Reliability Health' },
 ];
 

@@ -754,6 +754,13 @@ export const agentsApi = {
         }>(`/api/v1/agents/${agentId}/events`);
         return response.data;
     },
+    getSoftwareInventory: async (agentId: string) => {
+        const response = await connectionApi.get<{
+            data: SoftwareInventoryRow[];
+            total: number;
+        }>(`/api/v1/agents/${encodeURIComponent(agentId)}/software-inventory`);
+        return response.data;
+    },
 };
 
 /** One row in agent quarantine inventory (connection-manager). */

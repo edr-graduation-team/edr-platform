@@ -5,6 +5,7 @@ import (
 	"strconv"
 
 	"github.com/edr-platform/connection-manager/internal/repository"
+	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 )
 
@@ -66,6 +67,34 @@ func (h *Handlers) GetSoftwareInventory(c echo.Context) error {
 		return errorResponse(c, http.StatusInternalServerError, "FETCH_FAILED", err.Error())
 	}
 
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"data":  rows,
+		"total": len(rows),
+		"meta":  responseMeta(c),
+	})
+}
+
+// GetAgentSoftwareInventory returns per-agent installed software inventory for EndpointDetail.
+// GET /api/v1/agents/:id/software-inventory
+func (h *Handlers) GetAgentSoftwareInventory(c echo.Context) error {
+	if h.eventRepo == nil {
+		return errorResponse(c, http.StatusServiceUnavailable, "DB_UNAVAILABLE", "Event repository is not available")
+	}
+	agentID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		return errorResponse(c, http.StatusBadRequest, "INVALID_ID", "Invalid agent ID")
+	}
+
+	repo, ok := h.eventRepo.(*repository.PostgresEventRepository)
+	if !ok {
+		return errorResponse(c, http.StatusServiceUnavailable, "DB_UNAVAILABLE", "Software inventory requires PostgreSQL repository")
+	}
+
+	rows, err := repo.GetSoftwareInventoryByAgent(c.Request().Context(), agentID)
+	if err != nil {
+		h.logger.WithError(err).Error("Failed to fetch agent software inventory")
+		return errorResponse(c, http.StatusInternalServerError, "FETCH_FAILED", err.Error())
+	}
 	return c.JSON(http.StatusOK, map[string]interface{}{
 		"data":  rows,
 		"total": len(rows),

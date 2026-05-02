@@ -617,18 +617,7 @@ export default function EndpointDetail() {
 
                     {tab === 'configuration' && <ConfigurationTab agent={agent} canExec={canExec} />}
 
-                    {tab === 'software' && (
-                        <div className="flex flex-col items-center justify-center py-16 text-center">
-                            <div className="w-16 h-16 rounded-2xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center mb-4">
-                                <Package className="w-8 h-8 text-slate-400" />
-                            </div>
-                            <h3 className="text-lg font-bold text-slate-800 dark:text-slate-200 mb-2">Software Inventory</h3>
-                            <p className="text-sm text-slate-500 max-w-md">
-                                Software inventory collection is being prepared for this endpoint.
-                                Once available, you will see all installed applications, versions, and publishers here.
-                            </p>
-                        </div>
-                    )}
+                    {tab === 'software' && <SoftwareInventoryAgentTab agentId={agentId} />}
                 </div>
             </div>
 
@@ -1992,6 +1981,169 @@ function ConfigurationTab({ agent, canExec }: { agent: Agent; canExec: boolean }
                     )}
                 </div>
             </div>
+        </div>
+    );
+}
+
+function SoftwareInventoryAgentTab({ agentId }: { agentId: string }) {
+    const canRead = authApi.canViewEndpoints();
+    const { showToast } = useToast();
+    const [search, setSearch] = useState('');
+    const [page, setPage] = useState(1);
+    const pageSize = 10;
+
+    const { data, isLoading, isError, refetch, isFetching } = useQuery({
+        queryKey: ['agent-software-inventory', agentId],
+        queryFn: () => agentsApi.getSoftwareInventory(agentId),
+        enabled: !!agentId && canRead,
+        staleTime: 60_000,
+        retry: 1,
+    });
+
+    const rows = data?.data ?? [];
+    const filtered = useMemo(() => {
+        if (!search.trim()) return rows;
+        const q = search.toLowerCase();
+        return rows.filter((r) =>
+            (r.name || '').toLowerCase().includes(q) ||
+            (r.publisher || '').toLowerCase().includes(q) ||
+            (r.version || '').toLowerCase().includes(q)
+        );
+    }, [rows, search]);
+
+    const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+    useEffect(() => {
+        if (page > totalPages) setPage(totalPages);
+    }, [page, totalPages]);
+
+    const pageRows = useMemo(() => {
+        const start = (page - 1) * pageSize;
+        return filtered.slice(start, start + pageSize);
+    }, [filtered, page]);
+
+    if (!canRead) {
+        return <p className="text-sm text-rose-600">You do not have permission to view endpoint software inventory.</p>;
+    }
+
+    return (
+        <div className="space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                    <h3 className="text-lg font-bold text-slate-800 dark:text-slate-200 mb-1">Software Inventory</h3>
+                    <p className="text-sm text-slate-500">Installed software reported by this endpoint.</p>
+                </div>
+                <button
+                    type="button"
+                    onClick={() => void refetch()}
+                    disabled={isFetching}
+                    className="inline-flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold border border-slate-200 dark:border-slate-600 bg-white/70 dark:bg-slate-900/50 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-50"
+                >
+                    <RefreshCw className={`w-3.5 h-3.5 ${isFetching ? 'animate-spin' : ''}`} />
+                    Refresh
+                </button>
+            </div>
+
+            <div className="flex flex-wrap items-end gap-2">
+                <div className="flex-1 min-w-[220px]">
+                    <label className="block text-[10px] font-semibold uppercase tracking-wide text-slate-500 mb-1">Search</label>
+                    <input
+                        className="w-full rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-950 px-3 py-2 text-sm"
+                        value={search}
+                        onChange={(e) => {
+                            setSearch(e.target.value);
+                            setPage(1);
+                        }}
+                        placeholder="Name, publisher, version…"
+                    />
+                </div>
+                <div className="text-xs text-slate-500">{filtered.length} rows</div>
+            </div>
+
+            {isLoading ? (
+                <div className="flex items-center justify-center py-16 text-slate-500 gap-2">
+                    <Loader2 className="w-5 h-5 animate-spin" /> Loading…
+                </div>
+            ) : isError ? (
+                <div className="rounded-xl border border-rose-200 dark:border-rose-900/40 p-4">
+                    <p className="text-sm font-semibold text-slate-800 dark:text-slate-200">Failed to load software inventory</p>
+                    <button
+                        type="button"
+                        onClick={() => {
+                            showToast('Retrying…', 'info');
+                            void refetch();
+                        }}
+                        className="mt-2 px-3 py-2 rounded-lg text-xs font-semibold bg-slate-800 text-white hover:bg-slate-700"
+                    >
+                        Retry
+                    </button>
+                </div>
+            ) : filtered.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-16 text-center">
+                    <div className="w-16 h-16 rounded-2xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center mb-4">
+                        <Package className="w-8 h-8 text-slate-400" />
+                    </div>
+                    <p className="text-sm text-slate-500 max-w-md">
+                        No software inventory rows reported yet for this endpoint. It will appear after the agent completes its first inventory cycle.
+                    </p>
+                </div>
+            ) : (
+                <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/60 overflow-hidden">
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-left text-sm border-collapse">
+                            <thead>
+                                <tr className="bg-slate-50/80 dark:bg-slate-800/40">
+                                    <th className="px-4 py-2 text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Name</th>
+                                    <th className="px-4 py-2 text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Version</th>
+                                    <th className="px-4 py-2 text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Publisher</th>
+                                    <th className="px-4 py-2 text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Install date</th>
+                                    <th className="px-4 py-2 text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Last reported</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {pageRows.map((r, i) => (
+                                    <tr
+                                        key={`${r.name}::${r.version}::${r.publisher}::${i}`}
+                                        className={`border-t border-slate-100 dark:border-slate-800/60 hover:bg-slate-50 dark:hover:bg-slate-800/40 ${
+                                            i % 2 === 1 ? 'bg-slate-50/40 dark:bg-slate-800/20' : ''
+                                        }`}
+                                    >
+                                        <td className="px-4 py-2 font-mono text-xs font-semibold text-slate-900 dark:text-white">{r.name}</td>
+                                        <td className="px-4 py-2 font-mono text-xs text-slate-700 dark:text-slate-300">{r.version || '—'}</td>
+                                        <td className="px-4 py-2 text-xs text-slate-600 dark:text-slate-400">{r.publisher || '—'}</td>
+                                        <td className="px-4 py-2 text-xs text-slate-500">{r.install_date || '—'}</td>
+                                        <td className="px-4 py-2 text-xs text-slate-500 whitespace-nowrap">
+                                            {r.last_reported ? new Date(r.last_reported).toLocaleString() : '—'}
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                    <div className="flex items-center justify-between px-4 py-3 border-t border-slate-200 dark:border-slate-700 text-xs">
+                        <span className="text-slate-500">
+                            Page {page} / {totalPages}
+                        </span>
+                        <div className="flex items-center gap-2">
+                            <button
+                                type="button"
+                                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                                disabled={page <= 1}
+                                className="px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-600 disabled:opacity-50"
+                            >
+                                Prev
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                                disabled={page >= totalPages}
+                                className="px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-600 disabled:opacity-50"
+                            >
+                                Next
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

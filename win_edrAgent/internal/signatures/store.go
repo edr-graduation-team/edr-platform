@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -16,6 +17,8 @@ import (
 )
 
 const bucketName = "malware_hashes"
+const metaBucketName = "malware_hashes_meta"
+const serverVersionKey = "server_version"
 
 // EICARTestFileSHA256 is the SHA-256 of the standard EICAR test string (for offline validation).
 const EICARTestFileSHA256 = "275a021bbfb6489e54d471899f7db9d1663fc695ec2fe2a2c4538aabf651fd0f"
@@ -48,7 +51,10 @@ func Open(path string) (*Store, error) {
 	}
 	s := &Store{db: db}
 	if err := db.Update(func(tx *bolt.Tx) error {
-		_, err := tx.CreateBucketIfNotExists([]byte(bucketName))
+		if _, err := tx.CreateBucketIfNotExists([]byte(bucketName)); err != nil {
+			return err
+		}
+		_, err := tx.CreateBucketIfNotExists([]byte(metaBucketName))
 		return err
 	}); err != nil {
 		_ = db.Close()
@@ -224,4 +230,42 @@ func (s *Store) Version() (int, error) {
 		})
 	})
 	return n, err
+}
+
+// GetServerVersion returns the last successfully synced server feed version (0 if never synced).
+func (s *Store) GetServerVersion() (int64, error) {
+	if s == nil || s.db == nil {
+		return 0, fmt.Errorf("signatures: nil store")
+	}
+	var v int64
+	err := s.db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(metaBucketName))
+		if b == nil {
+			return nil
+		}
+		raw := b.Get([]byte(serverVersionKey))
+		if raw == nil {
+			return nil
+		}
+		n, err := strconv.ParseInt(string(raw), 10, 64)
+		if err == nil {
+			v = n
+		}
+		return nil
+	})
+	return v, err
+}
+
+// SetServerVersion persists the last successfully synced server feed version.
+func (s *Store) SetServerVersion(v int64) error {
+	if s == nil || s.db == nil {
+		return fmt.Errorf("signatures: nil store")
+	}
+	return s.db.Update(func(tx *bolt.Tx) error {
+		b, err := tx.CreateBucketIfNotExists([]byte(metaBucketName))
+		if err != nil {
+			return err
+		}
+		return b.Put([]byte(serverVersionKey), []byte(strconv.FormatInt(v, 10)))
+	})
 }

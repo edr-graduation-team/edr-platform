@@ -430,3 +430,22 @@ type AutomationMetricsRepository interface {
 	// GetMetrics retrieves overall automation metrics.
 	GetMetrics(ctx context.Context, timeRange string) (*models.AutomationMetricsSummary, error)
 }
+
+// MalwareHashRepository manages the server-side malicious SHA-256 hash feed.
+type MalwareHashRepository interface {
+	// InsertMany bulk-inserts hashes using ON CONFLICT (sha256) DO NOTHING.
+	// Returns the number of rows actually inserted (duplicates are skipped).
+	InsertMany(ctx context.Context, hashes []*models.MalwareHash) (inserted int64, err error)
+
+	// ListSinceVersion returns hashes with version > sinceVersion, ordered ASC.
+	ListSinceVersion(ctx context.Context, sinceVersion int64, limit int) ([]*models.MalwareHash, error)
+
+	// GetMaxVersion returns the highest version number currently in the table.
+	GetMaxVersion(ctx context.Context) (int64, error)
+
+	// Count returns the total number of hashes in the table.
+	Count(ctx context.Context) (int64, error)
+
+	// SourceBreakdown returns a map of source → count for stats.
+	SourceBreakdown(ctx context.Context) (map[string]int64, error)
+}

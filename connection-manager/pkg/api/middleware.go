@@ -48,6 +48,8 @@ type Handlers struct {
 	vulnScannerIngest   *service.VulnScannerIngestService      // Trivy/Grype report parser
 	siemRepo            repository.SiemConnectorRepository     // SIEM / webhook export destinations
 	AutomationHandlers   *AutomationHandlers                 // automation handlers for intelligent response
+	malwareHashRepo     repository.MalwareHashRepository       // server-managed malicious hash feed
+	signatureSyncSvc    *service.SignatureSyncService           // background MalwareBazaar sync
 }
 
 // NewHandlers creates a new handlers instance.
@@ -169,6 +171,16 @@ func (h *Handlers) SetVulnScannerIngest(svc *service.VulnScannerIngestService) {
 // SetSiemRepo sets the SiemConnectorRepository for SIEM export configuration.
 func (h *Handlers) SetSiemRepo(repo repository.SiemConnectorRepository) {
 	h.siemRepo = repo
+}
+
+// SetMalwareHashRepo wires the server-managed hash feed repository.
+func (h *Handlers) SetMalwareHashRepo(repo repository.MalwareHashRepository) {
+	h.malwareHashRepo = repo
+}
+
+// SetSignatureSyncSvc wires the background MalwareBazaar sync service.
+func (h *Handlers) SetSignatureSyncSvc(svc *service.SignatureSyncService) {
+	h.signatureSyncSvc = svc
 }
 
 // UserClaims represents authenticated user info.

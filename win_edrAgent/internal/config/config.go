@@ -67,6 +67,15 @@ type ResponseConfig struct {
 	// SignatureAutoFetchForce overwrites existing keys on each fetch (default false).
 	SignatureAutoFetchForce bool `yaml:"signature_auto_fetch_force"`
 
+	// SignatureServerSyncEnabled pulls delta NDJSON from the Connection Manager
+	// instead of (or in addition to) the public MalwareBazaar feed.
+	SignatureServerSyncEnabled bool `yaml:"signature_server_sync_enabled"`
+	// SignatureServerSyncURL is the full URL to the server's NDJSON endpoint.
+	// If empty it is auto-constructed from Server.Address.
+	SignatureServerSyncURL string `yaml:"signature_server_sync_url"`
+	// SignatureServerSyncInterval between server delta pulls (default 6h).
+	SignatureServerSyncInterval time.Duration `yaml:"signature_server_sync_interval"`
+
 	// ProcessAutoKillEnabled enables local process auto-response based on external rule packs.
 	ProcessAutoKillEnabled bool `yaml:"process_auto_kill_enabled"`
 	// ProcessRulesPath points to a JSON process response rules pack.
@@ -259,6 +268,9 @@ func DefaultConfig() *Config {
 			SignatureAutoFetchURL:     "",
 			SignatureAutoFetchLimit:   500,
 			SignatureAutoFetchForce:   false,
+			SignatureServerSyncEnabled:   false,
+			SignatureServerSyncURL:       "",
+			SignatureServerSyncInterval:  6 * time.Hour,
 			ProcessAutoKillEnabled:    true,
 			ProcessRulesPath:          `C:\ProgramData\EDR\process_prevention_rules.json`,
 			ProcessPreventionMode:     "auto_kill_then_override",
@@ -436,6 +448,9 @@ func (c *Config) Validate() error {
 	}
 	if c.Response.SignatureAutoFetchLimit <= 0 {
 		c.Response.SignatureAutoFetchLimit = 500
+	}
+	if c.Response.SignatureServerSyncInterval <= 0 {
+		c.Response.SignatureServerSyncInterval = 6 * time.Hour
 	}
 	if c.Response.ProcessRulesPath == "" {
 		c.Response.ProcessRulesPath = `C:\ProgramData\EDR\process_prevention_rules.json`

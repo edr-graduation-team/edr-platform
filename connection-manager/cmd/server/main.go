@@ -467,6 +467,13 @@ func main() {
 		apiHandlers.SetSiemRepo(repository.NewPostgresSiemConnectorRepository(pool))
 		logger.Info("SIEM connectors API enabled (siem_connectors)")
 
+		malwareHashRepo := repository.NewPostgresMalwareHashRepository(pool)
+		apiHandlers.SetMalwareHashRepo(malwareHashRepo)
+		sigSyncSvc := service.NewSignatureSyncService(malwareHashRepo, logger)
+		apiHandlers.SetSignatureSyncSvc(sigSyncSvc)
+		go sigSyncSvc.Run(context.Background())
+		logger.Info("Signature sync service enabled (MalwareBazaar → PostgreSQL, 6h interval)")
+
 		if commandRepo != nil {
 			pb := playbook.NewEngine(logger, incidentRepo, commandRepo, grpcServer.GetRegistry())
 			grpcServer.SetPlaybookEngine(pb)

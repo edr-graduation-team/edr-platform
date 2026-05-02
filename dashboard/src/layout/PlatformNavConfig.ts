@@ -81,7 +81,6 @@ export const MANAGEMENT_TABS: ContextTab[] = [
     { to: '/management/devices', label: 'Devices (Fleet)' },
     { to: '/management/network', label: 'Fleet Connectivity' },
     { to: '/management/app-control', label: 'Application Control' },
-    { to: '/management/agent-profiles', label: 'Agents Profiles' },
     { to: '/management/agent-deploy', label: 'Agent Deployment' },
     { to: '/management/context-policies', label: 'Context Policies' },
 ];

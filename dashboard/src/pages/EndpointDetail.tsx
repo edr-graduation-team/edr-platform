@@ -789,6 +789,20 @@ function OverviewTab({
                         <Server className="w-4 h-4 text-cyan-500" /> Device Information
                     </h3>
                     <dl className="text-sm space-y-2.5">
+                        <div className="flex justify-between gap-4 py-1 border-b border-slate-100 dark:border-slate-700/40">
+                            <dt className="text-slate-500">Agent ID</dt>
+                            <dd className="flex items-center gap-1.5">
+                                <span className="font-mono text-[11px] text-slate-600 dark:text-slate-300">{agent.id.slice(0, 18)}…</span>
+                                <button
+                                    type="button"
+                                    title="Copy full ID"
+                                    onClick={() => { navigator.clipboard.writeText(agent.id); }}
+                                    className="p-0.5 text-slate-400 hover:text-cyan-500 transition-colors"
+                                >
+                                    <Tag className="w-3 h-3" />
+                                </button>
+                            </dd>
+                        </div>
                         <div className="flex justify-between gap-4 py-1 border-b border-slate-100 dark:border-slate-700/40"><dt className="text-slate-500">Operating System</dt><dd className="text-right font-medium text-slate-800 dark:text-slate-200">{[agent.os_type, agent.os_version].filter(Boolean).join(' ')}</dd></div>
                         <div className="flex justify-between gap-4 py-1 border-b border-slate-100 dark:border-slate-700/40"><dt className="text-slate-500">Agent Version</dt><dd className="text-right font-medium text-slate-800 dark:text-slate-200">v{agent.agent_version || '—'}</dd></div>
                         <div className="flex justify-between gap-4 py-1 border-b border-slate-100 dark:border-slate-700/40"><dt className="text-slate-500">Last Seen</dt><dd className="text-right font-medium text-slate-800 dark:text-slate-200">{new Date(agent.last_seen).toLocaleString()}</dd></div>
@@ -1025,8 +1039,11 @@ function OverviewTab({
                     <div className="text-sm space-y-1.5">
                         <div className="flex justify-between gap-2"><span className="text-slate-500">Heartbeat age</span><span>{formatRelativeTime(agent.last_seen)}</span></div>
                         <div className="flex justify-between gap-2"><span className="text-slate-500">IPs</span><span className="text-right break-all">{(agent.ip_addresses || []).join(', ') || '—'}</span></div>
-                        <div className="flex justify-between gap-2"><span className="text-slate-500">mTLS</span><span>{certDaysLeft != null ? (certDaysLeft > 0 ? `Valid (${certDaysLeft}d)` : 'Expired') : '—'}</span></div>
+                        <div className="flex justify-between gap-2"><span className="text-slate-500">mTLS</span><span className={certDaysLeft != null && certDaysLeft <= 14 ? 'text-rose-500 font-semibold' : ''}>{certDaysLeft != null ? (certDaysLeft > 0 ? `Valid (${certDaysLeft}d)` : 'Expired') : '—'}</span></div>
                         <div className="flex justify-between gap-2"><span className="text-slate-500">Expiry</span><span>{certExpiry ? certExpiry.toLocaleDateString() : '—'}</span></div>
+                        {agent.current_cert_id && (
+                            <div className="flex justify-between gap-2"><span className="text-slate-500">Cert ID</span><span className="font-mono text-[10px] text-slate-400 truncate max-w-[120px]" title={agent.current_cert_id}>{agent.current_cert_id.slice(0, 12)}…</span></div>
+                        )}
                     </div>
                 </div>
                 <div className="rounded-xl border border-slate-200 dark:border-slate-700/60 bg-white dark:bg-slate-800/60 p-5">
@@ -1046,7 +1063,7 @@ function OverviewTab({
                         <Activity className="w-4 h-4 text-violet-500" /> Resource Usage
                     </div>
                     <div className="text-sm space-y-1.5">
-                        <div className="flex justify-between gap-2"><span className="text-slate-500">CPU</span><span className="font-mono text-xs">{cpuPct.toFixed(1)}%</span></div>
+                        <div className="flex justify-between gap-2"><span className="text-slate-500">CPU</span><span className="font-mono text-xs">{cpuPct.toFixed(1)}%{agent.cpu_count ? ` · ${agent.cpu_count} cores` : ''}</span></div>
                         <div className="flex justify-between gap-2"><span className="text-slate-500">Memory</span><span className="font-mono text-xs">{agent.memory_used_mb || 0} / {agent.memory_mb || '—'} MB ({memPct.toFixed(0)}%)</span></div>
                         <div className="flex justify-between gap-2"><span className="text-slate-500">Queue depth</span><span className="font-mono text-xs">{(agent.queue_depth || 0).toLocaleString()}</span></div>
                     </div>

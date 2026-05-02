@@ -84,6 +84,18 @@ func startPlatformCollectors(ctx context.Context, a *Agent) {
 			go signatures.StartPublicFeedAutoFetch(ctx, st, logger, feedURL, iv, lim, force)
 			logger.Infof("[Response] Public signature auto-fetch enabled (interval=%v limit=%d url=%s)", iv, lim, feedURL)
 		}
+		if cfg.Response.SignatureServerSyncEnabled {
+			serverFeedURL := cfg.Response.SignatureServerSyncURL
+			if serverFeedURL == "" {
+				// Auto-construct from server address: assume the HTTP port is the same
+				// host as gRPC but served on the API port (Connection Manager default 8082).
+				// Operators can override via SignatureServerSyncURL in config.
+				serverFeedURL = "https://" + cfg.Server.Address + "/api/v1/signatures/feed.ndjson"
+			}
+			iv := cfg.Response.SignatureServerSyncInterval
+			go signatures.StartServerFeedAutoFetch(ctx, st, logger, serverFeedURL, iv)
+			logger.Infof("[Response] Server signature sync enabled (interval=%v url=%s)", iv, serverFeedURL)
+		}
 	}
 
 	// Global telemetry filter from config

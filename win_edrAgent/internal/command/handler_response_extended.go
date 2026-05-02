@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	neturl "net/url"
 	"os"
 	"os/exec"
 	"strconv"
@@ -150,22 +151,41 @@ func (h *Handler) updateSignatures(ctx context.Context, params map[string]string
 	if st == nil {
 		return "", fmt.Errorf("signature store not initialized on this agent")
 	}
-	url := strings.TrimSpace(params["url"])
+	rawURL := strings.TrimSpace(params["url"])
 	want := strings.ToLower(strings.TrimSpace(params["checksum_sha256"]))
-	if url == "" {
+	if rawURL == "" {
 		return "", fmt.Errorf("url parameter is required")
 	}
-	if !strings.HasPrefix(strings.ToLower(url), "https://") {
+	if !strings.HasPrefix(strings.ToLower(rawURL), "https://") {
 		return "", fmt.Errorf("url must use HTTPS")
 	}
 	force := strings.EqualFold(params["force"], "true")
 	format := strings.ToLower(strings.TrimSpace(params["format"]))
-	csvFeed := format == "csv" || strings.Contains(strings.ToLower(url), "bazaar.abuse.ch/export/csv")
-	if !csvFeed && want == "" {
+	csvFeed := format == "csv" || strings.Contains(strings.ToLower(rawURL), "bazaar.abuse.ch/export/csv")
+	// Server-managed delta feed: checksum is meaningless because the response changes
+	// on every call (it returns only the delta since the agent's last version).
+	serverFeed := strings.Contains(rawURL, "signatures/feed.ndjson")
+	if !csvFeed && !serverFeed && want == "" {
 		return "", fmt.Errorf("checksum_sha256 is required for NDJSON feeds (or use format=csv with MalwareBazaar CSV URL)")
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	// For the server's NDJSON feed, automatically append the local since_version so the
+	// command benefits from delta sync without the dashboard needing to know the cursor.
+	finalURL := rawURL
+	if strings.Contains(rawURL, "signatures/feed.ndjson") {
+		if localVer, verErr := st.GetServerVersion(); verErr == nil {
+			if parsed, parseErr := neturl.Parse(rawURL); parseErr == nil {
+				q := parsed.Query()
+				if q.Get("since_version") == "" {
+					q.Set("since_version", strconv.FormatInt(localVer, 10))
+					parsed.RawQuery = q.Encode()
+					finalURL = parsed.String()
+				}
+			}
+		}
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, finalURL, nil)
 	if err != nil {
 		return "", err
 	}

@@ -258,6 +258,16 @@ func (s *Server) RegisterRoutes(handlers *Handlers) {
 	protected.POST("/agent/packages", handlers.CreateAgentPackage, handlers.RequirePermission("agents", "write"))
 	v1.GET("/agent/packages/:id/download", handlers.DownloadAgentPackage)
 
+	// ── Signature / malware-hash feed endpoints ──────────────────────────
+	// Public (no JWT) — agents poll/download without dashboard credentials.
+	v1.GET("/signatures/version", handlers.GetSignatureVersion)
+	v1.GET("/signatures/feed.ndjson", handlers.GetSignatureFeed)
+	// Admin (JWT-gated)
+	signatures := protected.Group("/signatures")
+	signatures.GET("/stats", handlers.GetSignatureStats, handlers.RequirePermission("settings", "read"))
+	signatures.POST("/sync", handlers.TriggerSignatureSync, handlers.RequirePermission("settings", "write"))
+	signatures.GET("", handlers.ListSignatureHashes, handlers.RequirePermission("settings", "read"))
+
 	// ── Automation endpoints ─────────────────────────────────────────────
 	if handlers.AutomationHandlers != nil {
 		automation := protected.Group("/automation")

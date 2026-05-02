@@ -725,6 +725,14 @@ function OverviewTab({
     const cpuPct = agent.cpu_usage || 0;
     const memPct = agent.memory_mb && agent.memory_used_mb ? Math.min(100, (agent.memory_used_mb / agent.memory_mb) * 100) : 0;
 
+    /** Returns formatted date string, or '—' if the value is Go's zero time (0001-01-01) or invalid. */
+    const formatValidDate = (dateStr: string | undefined | null, mode: 'date' | 'datetime' = 'date'): string => {
+        if (!dateStr) return '—';
+        const d = new Date(dateStr);
+        if (!isFinite(d.getTime()) || d.getFullYear() < 2000) return '—';
+        return mode === 'datetime' ? d.toLocaleString() : d.toLocaleDateString();
+    };
+
     const sysmonCmd = useMemo(() => {
         const list = cmds || [];
         return list.find((c) => c.command_type === 'enable_sysmon' || c.command_type === 'disable_sysmon');
@@ -803,12 +811,12 @@ function OverviewTab({
                                 </button>
                             </dd>
                         </div>
-                        <div className="flex justify-between gap-4 py-1 border-b border-slate-100 dark:border-slate-700/40"><dt className="text-slate-500">Operating System</dt><dd className="text-right font-medium text-slate-800 dark:text-slate-200">{[agent.os_type, agent.os_version].filter(Boolean).join(' ')}</dd></div>
-                        <div className="flex justify-between gap-4 py-1 border-b border-slate-100 dark:border-slate-700/40"><dt className="text-slate-500">Agent Version</dt><dd className="text-right font-medium text-slate-800 dark:text-slate-200">v{agent.agent_version || '—'}</dd></div>
-                        <div className="flex justify-between gap-4 py-1 border-b border-slate-100 dark:border-slate-700/40"><dt className="text-slate-500">Last Seen</dt><dd className="text-right font-medium text-slate-800 dark:text-slate-200">{new Date(agent.last_seen).toLocaleString()}</dd></div>
+                        <div className="flex justify-between gap-4 py-1 border-b border-slate-100 dark:border-slate-700/40"><dt className="text-slate-500">Operating System</dt><dd className="text-right font-medium text-slate-800 dark:text-slate-200">{agent.os_type || '—'}{agent.os_version ? ` · ${agent.os_version}` : ''}</dd></div>
+                        <div className="flex justify-between gap-4 py-1 border-b border-slate-100 dark:border-slate-700/40"><dt className="text-slate-500">Agent Version</dt><dd className="text-right font-medium text-slate-800 dark:text-slate-200 font-mono text-xs" title="Compile-time version reported by the agent binary">{agent.agent_version ? `v${agent.agent_version}` : '—'}</dd></div>
+                        <div className="flex justify-between gap-4 py-1 border-b border-slate-100 dark:border-slate-700/40"><dt className="text-slate-500">Last Seen</dt><dd className="text-right font-medium text-slate-800 dark:text-slate-200">{formatValidDate(agent.last_seen, 'datetime')}</dd></div>
                         <div className="flex justify-between gap-4 py-1 border-b border-slate-100 dark:border-slate-700/40"><dt className="text-slate-500">IP Addresses</dt><dd className="text-right font-medium text-slate-800 dark:text-slate-200 break-all">{(agent.ip_addresses || []).join(', ') || '—'}</dd></div>
-                        <div className="flex justify-between gap-4 py-1 border-b border-slate-100 dark:border-slate-700/40"><dt className="text-slate-500">Install Date</dt><dd className="text-right font-medium text-slate-800 dark:text-slate-200">{agent.installed_date ? new Date(agent.installed_date).toLocaleDateString() : '—'}</dd></div>
-                        <div className="flex justify-between gap-4 py-1 border-b border-slate-100 dark:border-slate-700/40"><dt className="text-slate-500">Enrollment Date</dt><dd className="text-right font-medium text-slate-800 dark:text-slate-200">{agent.created_at ? new Date(agent.created_at).toLocaleDateString() : '—'}</dd></div>
+                        <div className="flex justify-between gap-4 py-1 border-b border-slate-100 dark:border-slate-700/40"><dt className="text-slate-500">Install Date</dt><dd className="text-right font-medium text-slate-800 dark:text-slate-200">{formatValidDate(agent.installed_date)}</dd></div>
+                        <div className="flex justify-between gap-4 py-1 border-b border-slate-100 dark:border-slate-700/40"><dt className="text-slate-500">Enrollment Date</dt><dd className="text-right font-medium text-slate-800 dark:text-slate-200">{formatValidDate(agent.created_at)}</dd></div>
                         {tagEntries.length > 0 && <div className="flex justify-between gap-4 py-1"><dt className="text-slate-500">Tags</dt><dd className="text-right text-xs font-mono text-slate-600 dark:text-slate-300 break-all">{tagEntries.map(([k, v]) => `${k}=${v}`).join(', ')}</dd></div>}
                     </dl>
                 </div>

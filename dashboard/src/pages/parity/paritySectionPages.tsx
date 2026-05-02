@@ -5,6 +5,7 @@ import { GenericParityView } from '../../components/parity/GenericParityView';
 import { parityApi } from '../../api/parity/parityApi';
 import * as mocks from '../../api/parity/mocks';
 import VulnerabilityManagementPage from '../VulnerabilityManagement';
+import ApplicationControlPage from '../app-control';
 import StatCard from '../../components/StatCard';
 import InsightHero from '../../components/InsightHero';
 import {
@@ -3162,13 +3163,5 @@ export function ManagementVulnPage() {
 }
 
 export function ManagementAppControlPage() {
-    useEffect(() => { document.title = 'Application Control | EDR Platform'; }, []);
-    return (
-        <div className="space-y-6 w-full min-w-0 animate-slide-up-fade">
-            <InsightHero icon={Layers} accent="violet" eyebrow="Management" title="Application Control"
-                lead={<>Software inventory and application whitelisting. Requires agent software collection capability (planned enhancement).</>}
-            />
-            <GenericParityView title="Application control policies" missingApi="true" queryKey={['parity','appcontrol','policies']} fetcher={() => parityApi.getAppControlPolicies()} mock={mocks.mockAppControlPolicies} />
-        </div>
-    );
+    return <ApplicationControlPage />;
 }

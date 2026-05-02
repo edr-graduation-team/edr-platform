@@ -2941,15 +2941,6 @@ function ResponseTab({
                         </div>
                     )}
 
-                    <div className="p-3 rounded-xl bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800/40 text-xs text-blue-800 dark:text-blue-300">
-                        <p className="font-semibold mb-1 flex items-center gap-1.5"><RefreshCw className="w-3.5 h-3.5" /> How it works</p>
-                        <ol className="list-decimal list-inside space-y-0.5 text-blue-700 dark:text-blue-400">
-                            <li>A signed agent package is built on the server for this endpoint.</li>
-                            <li>An <code className="font-mono">update_agent</code> command is pushed to the agent.</li>
-                            <li>The agent downloads, verifies, and installs the new binary in-place.</li>
-                        </ol>
-                    </div>
-
                     {/* Server connectivity */}
                     <div className="space-y-3">
                         <p className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Server Connectivity</p>

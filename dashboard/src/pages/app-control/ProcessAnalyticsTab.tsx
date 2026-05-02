@@ -186,10 +186,7 @@ export default function ProcessAnalyticsTab() {
                                     />
                                     <RechartsTooltip
                                         contentStyle={{ background: 'rgba(15, 23, 42, 0.95)', border: 'none', borderRadius: '8px', color: 'white', fontSize: '12px' }}
-                                        formatter={(value: number, _name: string, entry: { payload: { fullName: string } }) => [
-                                            `${value} executions`,
-                                            entry.payload.fullName,
-                                        ]}
+                                        formatter={(value) => [`${value} executions`]}
                                     />
                                     <Bar dataKey="count" radius={[0, 4, 4, 0]} barSize={16}>
                                         {chartData.map((d, i) => (
@@ -323,7 +320,9 @@ export default function ProcessAnalyticsTab() {
                                         <td className="px-4 py-3">
                                             <div className="flex items-center gap-2">
                                                 {isHighAttention(row.category) && (
-                                                    <AlertTriangle className="w-3.5 h-3.5 text-amber-500 shrink-0" title="Security-relevant process" />
+                                                    <span title="Security-relevant process">
+                                                        <AlertTriangle className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                                                    </span>
                                                 )}
                                                 <span className="font-mono text-xs font-semibold text-slate-900 dark:text-white">{row.name}</span>
                                             </div>

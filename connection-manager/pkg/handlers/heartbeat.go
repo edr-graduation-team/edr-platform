@@ -126,7 +126,6 @@ func (h *HeartbeatHandler) Heartbeat(ctx context.Context, req *edrv1.HeartbeatRe
 				HealthScore:     healthScore,
 				SysmonInstalled: req.SysmonInstalled,
 				SysmonRunning:   req.SysmonRunning,
-				// OsVersion is updated separately via x-agent-os-version metadata (section 7).
 			}
 
 			// UpdateStatus writes status + last_seen + optional metrics in one call.
@@ -141,22 +140,18 @@ func (h *HeartbeatHandler) Heartbeat(ctx context.Context, req *edrv1.HeartbeatRe
 		}
 	}
 
-	// 7. Update device-reported tags (profile, logged_in_user, os_version) from gRPC metadata.
+	// 7. Update device-reported tags (profile, logged_in_user) from gRPC metadata.
 	// The agent sends these as x-agent-* headers to avoid proto schema changes.
 	// The DB update runs in a goroutine so it never delays the heartbeat response.
 	if h.agentService != nil {
 		if md, ok := metadata.FromIncomingContext(ctx); ok {
 			profile := ""
 			loggedInUser := ""
-			osVersion := ""
 			if vals := md.Get("x-agent-profile"); len(vals) > 0 {
 				profile = vals[0]
 			}
 			if vals := md.Get("x-agent-logged-in-user"); len(vals) > 0 {
 				loggedInUser = vals[0]
-			}
-			if vals := md.Get("x-agent-os-version"); len(vals) > 0 {
-				osVersion = vals[0]
 			}
 			if profile != "" || loggedInUser != "" {
 				if agentUUID, parseErr := uuid.Parse(agentID); parseErr == nil {
@@ -167,19 +162,6 @@ func (h *HeartbeatHandler) Heartbeat(ctx context.Context, req *edrv1.HeartbeatRe
 							logger.WithError(err).Warn("Failed to update device info tags")
 						}
 					}(agentUUID, profile, loggedInUser)
-				}
-			}
-			// Persist os_version if provided (non-empty) — runs inline since it's
-			// a single-column UPDATE that completes in microseconds.
-			if osVersion != "" {
-				if agentUUID, parseErr := uuid.Parse(agentID); parseErr == nil {
-					go func(id uuid.UUID, ver string) {
-						upCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-						defer cancel()
-						if err := h.agentService.UpdateMetrics(upCtx, id, &service.AgentMetrics{OsVersion: ver}); err != nil {
-							logger.WithError(err).Warn("Failed to update os_version from heartbeat metadata")
-						}
-					}(agentUUID, osVersion)
 				}
 			}
 		}

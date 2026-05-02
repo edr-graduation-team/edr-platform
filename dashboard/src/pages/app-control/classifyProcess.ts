@@ -20,13 +20,15 @@ const ADMIN: readonly string[] = [
     'arp.exe', 'route.exe', 'nslookup.exe', 'ping.exe', 'tracert.exe',
     'certutil.exe', 'reg.exe', 'bcdedit.exe', 'diskpart.exe', 'fsutil.exe',
     'cipher.exe', 'icacls.exe', 'takeown.exe', 'shutdown.exe', 'gpupdate.exe',
-    'schtasks.exe', 'wmic.exe', 'dism.exe', 'eventvwr.exe',
+    'schtasks.exe', 'wmic.exe', 'dism.exe', 'eventvwr.exe', 'rundll32.exe',
+    'ngen.exe', 'msiexec.exe',
 ];
 
 const REMOTE_ACCESS: readonly string[] = [
     'mstsc.exe', 'ssh.exe', 'putty.exe', 'psexec.exe', 'psexec64.exe',
     'teamviewer.exe', 'anydesk.exe', 'vnc.exe', 'winrm.exe',
-    'ngrok.exe', 'chisel.exe',
+    'ngrok.exe', 'chisel.exe', 'rdpclip.exe', 'amazon-ssm-agent.exe',
+    'ssm-agent-worker.exe',
 ];
 
 const BROWSER: readonly string[] = [
@@ -37,7 +39,9 @@ const BROWSER: readonly string[] = [
 const SECURITY: readonly string[] = [
     'sysmon.exe', 'sysmon64.exe', 'edr-agent.exe', 'trivy.exe',
     'smartscreen.exe', 'mrt.exe', 'msmpeng.exe', 'nissrv.exe',
-    'malwarebytes.exe',
+    'malwarebytes.exe', 'mpcmdrun.exe', 'mpdefendercoreservice.exe',
+    'securityhealthservice.exe', 'securityhealthhost.exe',
+    'securityhealthsystray.exe',
 ];
 
 const SYSTEM_SERVICES: readonly string[] = [
@@ -47,7 +51,16 @@ const SYSTEM_SERVICES: readonly string[] = [
     'taskhostw.exe', 'runtimebroker.exe', 'fontdrvhost.exe', 'audiodg.exe',
     'conhost.exe', 'dllhost.exe', 'sihost.exe', 'ctfmon.exe',
     'mousocoreworker.exe', 'wermgr.exe', 'sppsvc.exe',
+    // Additional core OS processes
+    'logonui.exe', 'msdtc.exe', 'unsecapp.exe', 'aggregatorhost.exe',
+    'shellhost.exe', 'searchhost.exe', 'startmenuexperiencehost.exe',
+    'tstheme.exe', 'tiworker.exe', 'trustedinstaller.exe', 'usoclient.exe',
+    'backgroundtaskhost.exe', 'wsqmcons.exe', 'dxgiadaptercache.exe',
+    'sdbinst.exe', 'setup.exe', 'openconsole.exe', 'windowsterminal.exe',
+    'microsoftedgeupdate.exe', 'wudfhost.exe', 'system', 'registry',
+    '[system process]', 'notepad.exe',
 ];
+
 
 // Build a single lookup map for O(1) classification.
 const LOOKUP = new Map<string, ProcessCategory>();

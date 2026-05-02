@@ -2,22 +2,21 @@ import React, { useState, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
     ArrowDownUp, Search, RefreshCw, AlertTriangle, ArrowUpDown,
-    Download, Upload, Wifi, Server, Activity,
+    Wifi, Server, Activity, Globe, Hash,
 } from 'lucide-react';
 import {
     ResponsiveContainer, BarChart, Bar, XAxis, YAxis,
-    CartesianGrid, Tooltip as RechartsTooltip, Cell, Legend,
+    CartesianGrid, Tooltip as RechartsTooltip, Cell,
     PieChart, Pie,
 } from 'recharts';
 import { appControlApi } from '../../api/client';
 
 // ────────────────────────────────────────────────────────────────────────────
-// Bandwidth-Consuming Applications Tab
+// Network Activity by Application Tab
 //
-// Maps to WatchGuard "Bandwidth-Consuming Applications" tab:
-//   - Data Volume Received by Applications
-//   - Data Volume Sent by Applications
-//   - Per-app bandwidth tracking with endpoint context
+// Maps to WatchGuard "Bandwidth-Consuming Applications" tab.
+// Shows connection counts, unique destinations, and unique ports per process.
+// If byte counts are available (future agent feature), they are displayed.
 // ────────────────────────────────────────────────────────────────────────────
 
 /** Format bytes to human-readable string. */
@@ -54,7 +53,7 @@ function KPICard({ label, value, sub, icon: Icon, accent }: {
 
 // ─── Sort helpers ────────────────────────────────────────────────────────────
 
-type SortKey = 'process_name' | 'bytes_sent' | 'bytes_received' | 'total_bytes' | 'connections' | 'agent_count';
+type SortKey = 'process_name' | 'connections' | 'unique_destinations' | 'unique_ports' | 'total_bytes' | 'agent_count';
 type SortDir = 'asc' | 'desc';
 
 const CHART_COLORS = [
@@ -75,36 +74,39 @@ export default function BandwidthAnalyticsTab() {
     });
 
     const [search, setSearch] = useState('');
-    const [sortKey, setSortKey] = useState<SortKey>('total_bytes');
+    const [sortKey, setSortKey] = useState<SortKey>('connections');
     const [sortDir, setSortDir] = useState<SortDir>('desc');
 
     const rows = data?.data ?? [];
 
+    // Determine if we have real byte data
+    const hasByteData = useMemo(() => rows.some(r => r.total_bytes > 0), [rows]);
+
     // KPIs
     const kpis = useMemo(() => {
-        const totalSent = rows.reduce((s, r) => s + r.bytes_sent, 0);
-        const totalReceived = rows.reduce((s, r) => s + r.bytes_received, 0);
-        const totalApps = rows.length;
         const totalConnections = rows.reduce((s, r) => s + r.connections, 0);
-        return { totalSent, totalReceived, totalApps, totalConnections };
+        const totalDestinations = rows.reduce((s, r) => s + (r.unique_destinations || 0), 0);
+        const totalApps = rows.length;
+        const totalBytes = rows.reduce((s, r) => s + r.total_bytes, 0);
+        return { totalConnections, totalDestinations, totalApps, totalBytes };
     }, [rows]);
 
-    // Top 10 for bar chart
+    // Top 10 for bar chart (connections)
     const chartData = useMemo(() => {
         return rows.slice(0, 10).map((r, i) => ({
             name: r.process_name.length > 18 ? r.process_name.slice(0, 16) + '…' : r.process_name,
             fullName: r.process_name,
-            sent: r.bytes_sent,
-            received: r.bytes_received,
+            connections: r.connections,
+            destinations: r.unique_destinations || 0,
             fill: CHART_COLORS[i % CHART_COLORS.length],
         }));
     }, [rows]);
 
-    // Pie chart: sent vs received distribution for top 8
+    // Pie chart: connection distribution for top 8
     const pieData = useMemo(() => {
         return rows.slice(0, 8).map((r, i) => ({
             name: r.process_name.length > 16 ? r.process_name.slice(0, 14) + '…' : r.process_name,
-            value: r.total_bytes,
+            value: r.connections,
             fill: CHART_COLORS[i % CHART_COLORS.length],
         }));
     }, [rows]);
@@ -123,10 +125,10 @@ export default function BandwidthAnalyticsTab() {
             let cmp = 0;
             switch (sortKey) {
                 case 'process_name': cmp = a.process_name.localeCompare(b.process_name); break;
-                case 'bytes_sent': cmp = a.bytes_sent - b.bytes_sent; break;
-                case 'bytes_received': cmp = a.bytes_received - b.bytes_received; break;
-                case 'total_bytes': cmp = a.total_bytes - b.total_bytes; break;
                 case 'connections': cmp = a.connections - b.connections; break;
+                case 'unique_destinations': cmp = (a.unique_destinations || 0) - (b.unique_destinations || 0); break;
+                case 'unique_ports': cmp = (a.unique_ports || 0) - (b.unique_ports || 0); break;
+                case 'total_bytes': cmp = a.total_bytes - b.total_bytes; break;
                 case 'agent_count': cmp = a.agent_count - b.agent_count; break;
             }
             return sortDir === 'desc' ? -cmp : cmp;
@@ -142,7 +144,7 @@ export default function BandwidthAnalyticsTab() {
     if (isLoading) {
         return (
             <div className="flex items-center justify-center py-20 text-slate-500 gap-2">
-                <RefreshCw className="w-5 h-5 animate-spin" /> Loading bandwidth data…
+                <RefreshCw className="w-5 h-5 animate-spin" /> Loading network activity data…
             </div>
         );
     }
@@ -152,7 +154,7 @@ export default function BandwidthAnalyticsTab() {
         return (
             <div className="rounded-xl border border-rose-200 dark:border-rose-900/50 p-6 text-center space-y-2">
                 <AlertTriangle className="w-8 h-8 text-rose-400 mx-auto" />
-                <p className="text-sm font-semibold text-slate-700 dark:text-slate-300">Failed to load bandwidth analytics</p>
+                <p className="text-sm font-semibold text-slate-700 dark:text-slate-300">Failed to load network activity analytics</p>
                 <p className="text-xs text-slate-500">Ensure the connection-manager events API is reachable.</p>
                 <button onClick={() => refetch()} className="mt-2 px-4 py-1.5 text-xs font-semibold rounded-lg bg-slate-800 text-white hover:bg-slate-700 transition-colors">
                     Retry
@@ -171,11 +173,11 @@ export default function BandwidthAnalyticsTab() {
                     </div>
                     <div>
                         <h3 className="text-sm font-bold text-slate-900 dark:text-white">
-                            Waiting for Network Bandwidth Data
+                            Waiting for Network Activity Data
                         </h3>
                         <p className="text-xs text-slate-600 dark:text-slate-400 mt-1 leading-relaxed max-w-xl">
-                            The agent collects network connection events with bytes_sent and bytes_received fields.
-                            Bandwidth data will appear here once agents begin reporting network activity.
+                            The agent collects network connection events (TCP/UDP) from ETW and Sysmon telemetry.
+                            Data will appear here once agents begin reporting network connections.
                         </p>
                         <div className="mt-3 flex items-center gap-3">
                             <button
@@ -198,36 +200,42 @@ export default function BandwidthAnalyticsTab() {
         <div className="space-y-6">
             {/* KPI row */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <KPICard label="Total Received" value={fmtBytes(kpis.totalReceived)}
-                    sub="Across all applications (24h)"
-                    icon={Download} accent="bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 border-cyan-500/20" />
-                <KPICard label="Total Sent" value={fmtBytes(kpis.totalSent)}
-                    sub="Across all applications (24h)"
-                    icon={Upload} accent="bg-violet-500/10 text-violet-600 dark:text-violet-400 border-violet-500/20" />
+                <KPICard label="Total Connections" value={kpis.totalConnections.toLocaleString()}
+                    sub="Network events (24h)"
+                    icon={Activity} accent="bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 border-cyan-500/20" />
+                <KPICard label="Unique Destinations" value={kpis.totalDestinations.toLocaleString()}
+                    sub="Distinct remote IPs"
+                    icon={Globe} accent="bg-violet-500/10 text-violet-600 dark:text-violet-400 border-violet-500/20" />
                 <KPICard label="Active Applications" value={kpis.totalApps}
                     sub="With network activity"
-                    icon={Activity} accent="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20" />
-                <KPICard label="Connections" value={kpis.totalConnections.toLocaleString()}
-                    sub="Total network events"
-                    icon={Server} accent="bg-orange-500/10 text-orange-600 dark:text-orange-400 border-orange-500/20" />
+                    icon={Server} accent="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20" />
+                {hasByteData ? (
+                    <KPICard label="Total Transferred" value={fmtBytes(kpis.totalBytes)}
+                        sub="Bytes sent + received"
+                        icon={ArrowDownUp} accent="bg-orange-500/10 text-orange-600 dark:text-orange-400 border-orange-500/20" />
+                ) : (
+                    <KPICard label="Avg Connections" value={kpis.totalApps > 0 ? Math.round(kpis.totalConnections / kpis.totalApps) : 0}
+                        sub="Per application (24h)"
+                        icon={Hash} accent="bg-orange-500/10 text-orange-600 dark:text-orange-400 border-orange-500/20" />
+                )}
             </div>
 
             {/* Charts */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                {/* Stacked bar chart: top processes by bandwidth */}
+                {/* Bar chart: top processes by connections */}
                 <div className="lg:col-span-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/60 p-4">
                     <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-2 mb-4">
                         <ArrowDownUp className="w-4 h-4" />
-                        Top Bandwidth Consumers (24h)
+                        Top Network Activity by Application (24h)
                     </h3>
                     {chartData.length === 0 ? (
-                        <p className="text-xs text-slate-400 text-center py-12">No bandwidth data.</p>
+                        <p className="text-xs text-slate-400 text-center py-12">No network data.</p>
                     ) : (
                         <div className="h-64">
                             <ResponsiveContainer width="100%" height="100%">
                                 <BarChart data={chartData} layout="vertical" margin={{ left: 10, right: 20 }}>
                                     <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" horizontal={false} />
-                                    <XAxis type="number" tick={{ fontSize: 10 }} tickFormatter={(v) => fmtBytes(v)} />
+                                    <XAxis type="number" tick={{ fontSize: 10 }} />
                                     <YAxis
                                         type="category"
                                         dataKey="name"
@@ -236,22 +244,23 @@ export default function BandwidthAnalyticsTab() {
                                     />
                                     <RechartsTooltip
                                         contentStyle={{ background: 'rgba(15, 23, 42, 0.95)', border: 'none', borderRadius: '8px', color: 'white', fontSize: '12px' }}
-                                        formatter={(value, name) => [fmtBytes(Number(value ?? 0)), name === 'received' ? '↓ Received' : '↑ Sent']}
+                                        formatter={((value?: number, name?: string) => {
+                                            const v = Number(value ?? 0);
+                                            return [v.toLocaleString(), name === 'connections' ? 'Connections' : 'Unique Destinations'];
+                                        }) as never}
                                     />
-                                    <Legend wrapperStyle={{ fontSize: '11px' }} />
-                                    <Bar dataKey="received" name="↓ Received" stackId="bw" fill="#06b6d4" radius={[0, 0, 0, 0]} barSize={14} />
-                                    <Bar dataKey="sent" name="↑ Sent" stackId="bw" fill="#8b5cf6" radius={[0, 4, 4, 0]} barSize={14} />
+                                    <Bar dataKey="connections" name="Connections" fill="#06b6d4" radius={[0, 4, 4, 0]} barSize={14} />
                                 </BarChart>
                             </ResponsiveContainer>
                         </div>
                     )}
                 </div>
 
-                {/* Pie chart: bandwidth distribution */}
+                {/* Pie chart: connection distribution */}
                 <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/60 p-4">
                     <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-2 mb-4">
                         <Wifi className="w-4 h-4" />
-                        Distribution
+                        Connection Distribution
                     </h3>
                     {pieData.length === 0 ? (
                         <p className="text-xs text-slate-400 text-center py-8">No data</p>
@@ -274,7 +283,7 @@ export default function BandwidthAnalyticsTab() {
                                         </Pie>
                                         <RechartsTooltip
                                             contentStyle={{ background: 'rgba(15, 23, 42, 0.95)', border: 'none', borderRadius: '8px', color: 'white', fontSize: '11px' }}
-                                            formatter={(value) => [fmtBytes(Number(value ?? 0)), 'Total']}
+                                            formatter={((value?: number) => [Number(value ?? 0).toLocaleString(), 'Connections']) as never}
                                         />
                                     </PieChart>
                                 </ResponsiveContainer>
@@ -284,7 +293,7 @@ export default function BandwidthAnalyticsTab() {
                                     <li key={d.name} className="flex items-center gap-2 text-xs">
                                         <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: d.fill }} />
                                         <span className="truncate text-slate-600 dark:text-slate-400 flex-1">{d.name}</span>
-                                        <span className="font-mono font-semibold text-slate-700 dark:text-slate-300 tabular-nums">{fmtBytes(d.value)}</span>
+                                        <span className="font-mono font-semibold text-slate-700 dark:text-slate-300 tabular-nums">{d.value.toLocaleString()}</span>
                                     </li>
                                 ))}
                             </ul>
@@ -328,10 +337,10 @@ export default function BandwidthAnalyticsTab() {
                             <tr className="border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60">
                                 {([
                                     { key: 'process_name' as SortKey, label: 'Application' },
-                                    { key: 'bytes_received' as SortKey, label: '↓ Received' },
-                                    { key: 'bytes_sent' as SortKey, label: '↑ Sent' },
-                                    { key: 'total_bytes' as SortKey, label: 'Total' },
                                     { key: 'connections' as SortKey, label: 'Connections' },
+                                    { key: 'unique_destinations' as SortKey, label: 'Destinations' },
+                                    { key: 'unique_ports' as SortKey, label: 'Ports' },
+                                    ...(hasByteData ? [{ key: 'total_bytes' as SortKey, label: 'Total Bytes' }] : []),
                                     { key: 'agent_count' as SortKey, label: 'Hosts' },
                                 ]).map(col => (
                                     <th key={col.key} className="px-4 py-3 text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 whitespace-nowrap">
@@ -344,16 +353,17 @@ export default function BandwidthAnalyticsTab() {
                                         </button>
                                     </th>
                                 ))}
+                                <th className="px-4 py-3 text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Last Seen</th>
                                 <th className="px-4 py-3 text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Path</th>
                             </tr>
                         </thead>
                         <tbody>
                             {displayed.slice(0, 100).map((row, i) => {
-                                const totalAll = rows[0]?.total_bytes || 1;
-                                const pct = ((row.total_bytes / totalAll) * 100);
+                                const topConns = rows[0]?.connections || 1;
+                                const pct = ((row.connections / topConns) * 100);
                                 return (
                                     <tr
-                                        key={`${row.process_name}-${row.executable}`}
+                                        key={row.process_name}
                                         className={`border-b border-slate-100 dark:border-slate-800/80 transition-colors hover:bg-cyan-500/5 dark:hover:bg-slate-800/60 ${
                                             i % 2 === 1 ? 'bg-slate-50/60 dark:bg-slate-800/30' : ''
                                         }`}
@@ -372,20 +382,25 @@ export default function BandwidthAnalyticsTab() {
                                                 </div>
                                             </div>
                                         </td>
-                                        <td className="px-4 py-3 tabular-nums text-right text-xs font-semibold text-cyan-600 dark:text-cyan-400">
-                                            {fmtBytes(row.bytes_received)}
-                                        </td>
-                                        <td className="px-4 py-3 tabular-nums text-right text-xs font-semibold text-violet-600 dark:text-violet-400">
-                                            {fmtBytes(row.bytes_sent)}
-                                        </td>
-                                        <td className="px-4 py-3 tabular-nums text-right font-bold text-slate-700 dark:text-slate-300">
-                                            {fmtBytes(row.total_bytes)}
-                                        </td>
-                                        <td className="px-4 py-3 tabular-nums text-center text-slate-600 dark:text-slate-400">
+                                        <td className="px-4 py-3 tabular-nums text-right text-xs font-bold text-slate-700 dark:text-slate-300">
                                             {row.connections.toLocaleString()}
                                         </td>
+                                        <td className="px-4 py-3 tabular-nums text-right text-xs font-semibold text-violet-600 dark:text-violet-400">
+                                            {(row.unique_destinations || 0).toLocaleString()}
+                                        </td>
+                                        <td className="px-4 py-3 tabular-nums text-right text-xs text-slate-600 dark:text-slate-400">
+                                            {(row.unique_ports || 0).toLocaleString()}
+                                        </td>
+                                        {hasByteData && (
+                                            <td className="px-4 py-3 tabular-nums text-right text-xs font-semibold text-cyan-600 dark:text-cyan-400">
+                                                {fmtBytes(row.total_bytes)}
+                                            </td>
+                                        )}
                                         <td className="px-4 py-3 tabular-nums text-center text-slate-600 dark:text-slate-400">
                                             {row.agent_count}
+                                        </td>
+                                        <td className="px-4 py-3 text-xs text-slate-500 whitespace-nowrap">
+                                            {new Date(row.last_seen).toLocaleString()}
                                         </td>
                                         <td className="px-4 py-3 text-xs text-slate-400 max-w-[250px] truncate font-mono" title={row.executable}>
                                             {row.executable || '—'}

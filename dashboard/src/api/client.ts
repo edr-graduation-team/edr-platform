@@ -581,6 +581,8 @@ export interface BandwidthAnalyticsRow {
     bytes_received: number;
     total_bytes: number;
     connections: number;
+    unique_destinations: number;
+    unique_ports: number;
     agent_count: number;
     last_seen: string;
 }

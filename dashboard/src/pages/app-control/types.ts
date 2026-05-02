@@ -9,7 +9,7 @@ export interface ProcessAggRow {
     /** Category tag (system, scripting, admin, browser, service, user, unknown). */
     category: ProcessCategory;
     lastSeen: string;
-    agents: Set<string>;
+    hostnames: string[];
 }
 
 export type ProcessCategory =

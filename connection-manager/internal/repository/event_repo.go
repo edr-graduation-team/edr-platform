@@ -309,6 +309,7 @@ type ProcessAggRow struct {
 	Executable string `json:"executable"`
 	Count      int    `json:"count"`
 	AgentCount int    `json:"agent_count"`
+	Hostnames  []string `json:"hostnames"`
 	LastSeen   string `json:"last_seen"`
 }
 
@@ -331,6 +332,16 @@ func (r *PostgresEventRepository) GetProcessAnalytics(ctx context.Context, hours
 			WHERE event_type = 'process'
 			  AND ts >= NOW() - ($1 || ' hours')::interval
 			GROUP BY proc_name, executable
+		),
+		per_hosts AS (
+			SELECT
+				LOWER(COALESCE(e.raw->'data'->>'name', e.raw->>'name', 'unknown')) AS proc_name,
+				ARRAY_AGG(DISTINCT a.hostname ORDER BY a.hostname) FILTER (WHERE a.hostname IS NOT NULL AND a.hostname <> '') AS hostnames
+			FROM events e
+			JOIN agents a ON a.id = e.agent_id
+			WHERE e.event_type = 'process'
+			  AND e.ts >= NOW() - ($1 || ' hours')::interval
+			GROUP BY proc_name
 		)
 		SELECT
 			proc_name,
@@ -338,8 +349,10 @@ func (r *PostgresEventRepository) GetProcessAnalytics(ctx context.Context, hours
 			(array_agg(executable ORDER BY length(executable) DESC))[1] AS executable,
 			SUM(exec_count)::bigint AS exec_count,
 			SUM(agent_count)::bigint AS agent_count,
+			COALESCE(ph.hostnames, ARRAY[]::text[]) AS hostnames,
 			MAX(last_seen) AS last_seen
 		FROM per_name
+		LEFT JOIN per_hosts ph ON ph.proc_name = per_name.proc_name
 		GROUP BY proc_name
 		ORDER BY exec_count DESC
 		LIMIT 500`
@@ -354,7 +367,7 @@ func (r *PostgresEventRepository) GetProcessAnalytics(ctx context.Context, hours
 	for rows.Next() {
 		var r ProcessAggRow
 		var lastSeen time.Time
-		if err := rows.Scan(&r.Name, &r.Executable, &r.Count, &r.AgentCount, &lastSeen); err != nil {
+		if err := rows.Scan(&r.Name, &r.Executable, &r.Count, &r.AgentCount, &r.Hostnames, &lastSeen); err != nil {
 			return nil, 0, fmt.Errorf("scan process agg: %w", err)
 		}
 		r.LastSeen = lastSeen.Format(time.RFC3339)
@@ -377,22 +390,39 @@ type SoftwareInventoryRow struct {
 	Publisher     string `json:"publisher"`
 	InstallDate   string `json:"install_date"`
 	AgentCount    int    `json:"agent_count"`
+	Hostnames     []string `json:"hostnames"`
 	LastReported  string `json:"last_reported"`
 }
 
 // GetSoftwareInventory aggregates software_inventory events by app name.
 func (r *PostgresEventRepository) GetSoftwareInventory(ctx context.Context) ([]SoftwareInventoryRow, error) {
 	const q = `
+		WITH per_hosts AS (
+			SELECT
+				COALESCE(e.raw->'data'->>'name', e.raw->>'name', 'unknown') AS app_name,
+				COALESCE(e.raw->'data'->>'version', e.raw->>'version', '') AS version,
+				COALESCE(e.raw->'data'->>'publisher', e.raw->>'publisher', '') AS publisher,
+				ARRAY_AGG(DISTINCT a.hostname ORDER BY a.hostname) FILTER (WHERE a.hostname IS NOT NULL AND a.hostname <> '') AS hostnames
+			FROM events e
+			JOIN agents a ON a.id = e.agent_id
+			WHERE e.event_type = 'software_inventory'
+			GROUP BY app_name, version, publisher
+		)
 		SELECT
-			COALESCE(raw->'data'->>'name', raw->>'name', 'unknown') AS app_name,
-			COALESCE(raw->'data'->>'version', raw->>'version', '') AS version,
-			COALESCE(raw->'data'->>'publisher', raw->>'publisher', '') AS publisher,
+			app_name,
+			version,
+			publisher,
 			MAX(COALESCE(raw->'data'->>'install_date', '')) AS install_date,
 			COUNT(DISTINCT agent_id) AS agent_count,
+			COALESCE(ph.hostnames, ARRAY[]::text[]) AS hostnames,
 			MAX(ts) AS last_reported
-		FROM events
-		WHERE event_type = 'software_inventory'
-		GROUP BY app_name, version, publisher
+		FROM events e
+		LEFT JOIN per_hosts ph
+		  ON ph.app_name = COALESCE(e.raw->'data'->>'name', e.raw->>'name', 'unknown')
+		 AND ph.version  = COALESCE(e.raw->'data'->>'version', e.raw->>'version', '')
+		 AND ph.publisher = COALESCE(e.raw->'data'->>'publisher', e.raw->>'publisher', '')
+		WHERE e.event_type = 'software_inventory'
+		GROUP BY app_name, version, publisher, ph.hostnames
 		ORDER BY agent_count DESC, app_name ASC
 		LIMIT 1000`
 
@@ -406,7 +436,7 @@ func (r *PostgresEventRepository) GetSoftwareInventory(ctx context.Context) ([]S
 	for rows.Next() {
 		var r SoftwareInventoryRow
 		var lastReported time.Time
-		if err := rows.Scan(&r.Name, &r.Version, &r.Publisher, &r.InstallDate, &r.AgentCount, &lastReported); err != nil {
+		if err := rows.Scan(&r.Name, &r.Version, &r.Publisher, &r.InstallDate, &r.AgentCount, &r.Hostnames, &lastReported); err != nil {
 			return nil, fmt.Errorf("scan software inv: %w", err)
 		}
 		r.LastReported = lastReported.Format(time.RFC3339)
@@ -426,6 +456,7 @@ func (r *PostgresEventRepository) GetSoftwareInventoryByAgent(ctx context.Contex
 			COALESCE(raw->'data'->>'publisher', raw->>'publisher', '') AS publisher,
 			MAX(COALESCE(raw->'data'->>'install_date', '')) AS install_date,
 			1 AS agent_count,
+			ARRAY[]::text[] AS hostnames,
 			MAX(ts) AS last_reported
 		FROM events
 		WHERE event_type = 'software_inventory'
@@ -444,7 +475,7 @@ func (r *PostgresEventRepository) GetSoftwareInventoryByAgent(ctx context.Contex
 	for rows.Next() {
 		var r SoftwareInventoryRow
 		var lastReported time.Time
-		if err := rows.Scan(&r.Name, &r.Version, &r.Publisher, &r.InstallDate, &r.AgentCount, &lastReported); err != nil {
+		if err := rows.Scan(&r.Name, &r.Version, &r.Publisher, &r.InstallDate, &r.AgentCount, &r.Hostnames, &lastReported); err != nil {
 			return nil, fmt.Errorf("scan software inv by agent: %w", err)
 		}
 		r.LastReported = lastReported.Format(time.RFC3339)
@@ -467,6 +498,7 @@ type BandwidthAggRow struct {
 	UniqueDestinations int    `json:"unique_destinations"`
 	UniquePorts        int    `json:"unique_ports"`
 	AgentCount         int    `json:"agent_count"`
+	Hostnames          []string `json:"hostnames"`
 	LastSeen           string `json:"last_seen"`
 }
 
@@ -492,6 +524,14 @@ func (r *PostgresEventRepository) GetBandwidthAnalytics(ctx context.Context, hou
 			FROM events
 			WHERE event_type = 'network'
 			  AND ts >= NOW() - ($1 || ' hours')::interval
+		),
+		per_hosts AS (
+			SELECT
+				p.proc_name,
+				ARRAY_AGG(DISTINCT a.hostname ORDER BY a.hostname) FILTER (WHERE a.hostname IS NOT NULL AND a.hostname <> '') AS hostnames
+			FROM per_proc p
+			JOIN agents a ON a.id = p.agent_id
+			GROUP BY p.proc_name
 		)
 		SELECT
 			proc_name,
@@ -504,8 +544,10 @@ func (r *PostgresEventRepository) GetBandwidthAnalytics(ctx context.Context, hou
 			COUNT(DISTINCT dest_ip) AS unique_destinations,
 			COUNT(DISTINCT dest_port) AS unique_ports,
 			COUNT(DISTINCT agent_id) AS agent_count,
+			COALESCE(ph.hostnames, ARRAY[]::text[]) AS hostnames,
 			MAX(ts) AS last_seen
 		FROM per_proc
+		LEFT JOIN per_hosts ph ON ph.proc_name = per_proc.proc_name
 		GROUP BY proc_name
 		ORDER BY connections DESC
 		LIMIT 200`
@@ -524,7 +566,7 @@ func (r *PostgresEventRepository) GetBandwidthAnalytics(ctx context.Context, hou
 			&r.ProcessName, &r.Executable,
 			&r.BytesSent, &r.BytesReceived, &r.TotalBytes,
 			&r.Connections, &r.UniqueDestinations, &r.UniquePorts,
-			&r.AgentCount, &lastSeen,
+			&r.AgentCount, &r.Hostnames, &lastSeen,
 		); err != nil {
 			return nil, fmt.Errorf("scan bandwidth agg: %w", err)
 		}

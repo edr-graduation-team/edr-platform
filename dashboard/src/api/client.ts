@@ -560,6 +560,7 @@ export interface ProcessAnalyticsRow {
     executable: string;
     count: number;
     agent_count: number;
+    hostnames?: string[];
     last_seen: string;
 }
 
@@ -570,6 +571,7 @@ export interface SoftwareInventoryRow {
     publisher: string;
     install_date: string;
     agent_count: number;
+    hostnames?: string[];
     last_reported: string;
 }
 
@@ -584,6 +586,7 @@ export interface BandwidthAnalyticsRow {
     unique_destinations: number;
     unique_ports: number;
     agent_count: number;
+    hostnames?: string[];
     last_seen: string;
 }
 

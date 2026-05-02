@@ -24,7 +24,7 @@ function toAggRow(r: ProcessAnalyticsRow): ProcessAggRow {
         count: r.count,
         category: classifyProcess(name),
         lastSeen: r.last_seen,
-        agents: new Set(Array.from({ length: r.agent_count }, (_, i) => `agent-${i}`)),
+        hostnames: (r.hostnames ?? []).filter(Boolean),
     };
 }
 

@@ -10,6 +10,7 @@ import {
 import { useProcessAnalytics } from './useProcessAnalytics';
 import { CATEGORY_META, type ProcessCategory } from './types';
 import { isHighAttention } from './classifyProcess';
+import HostsCell from './HostsCell';
 
 // ─── Category badge ──────────────────────────────────────────────────────────
 
@@ -350,7 +351,9 @@ export default function ProcessAnalyticsTab() {
                                         <td className="px-4 py-3 text-xs text-slate-500 whitespace-nowrap">
                                             {new Date(row.lastSeen).toLocaleString()}
                                         </td>
-                                        <td className="px-4 py-3 tabular-nums text-slate-600 dark:text-slate-400">{row.agents.size}</td>
+                                        <td className="px-4 py-3">
+                                            <HostsCell hostnames={row.hostnames} fallbackCount={0} />
+                                        </td>
                                         <td className="px-4 py-3 text-xs text-slate-400 max-w-[280px] truncate font-mono" title={row.executable}>
                                             {row.executable || '—'}
                                         </td>

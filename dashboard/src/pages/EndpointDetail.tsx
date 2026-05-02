@@ -2532,48 +2532,68 @@ function ResponseTab({
     const { showToast } = useToast();
     const queryClient = useQueryClient();
     const [upgradeOpen, setUpgradeOpen] = useState(false);
-    // @ts-ignore
     const [upgradeForm, setUpgradeForm] = useState<{
         serverIP: string;
         serverDomain: string;
         serverPort: string;
         installSysmon: boolean;
     }>({ serverIP: '', serverDomain: '', serverPort: '47051', installSysmon: false });
+    const [upgradeErrors, setUpgradeErrors] = useState<Record<string, string>>({});
+    const [upgradeStep, setUpgradeStep] = useState<'form' | 'building' | 'pushing'>('form');
 
-    // @ts-ignore
-    const upgradeMutation = useMutation({
+    const validateUpgrade = (): boolean => {
+        const e: Record<string, string> = {};
+        if (!upgradeForm.serverIP.trim() && !upgradeForm.serverDomain.trim()) {
+            e.server = 'Server IP or Server Domain is required.';
+        }
+        if (!upgradeForm.serverPort.trim()) {
+            e.port = 'Server port is required.';
+        } else if (!/^\d+$/.test(upgradeForm.serverPort.trim())) {
+            e.port = 'Port must be a valid number.';
+        }
+        setUpgradeErrors(e);
+        return Object.keys(e).length === 0;
+    };
+
+    const upgradeMutation = useMutation<{ package_id: string; url: string; sha256: string }, Error, void>({
         mutationFn: async () => {
+            setUpgradeStep('building');
             const pkg = await agentPackagesApi.create({
-                server_ip: upgradeForm.serverIP || undefined,
-                server_domain: upgradeForm.serverDomain || undefined,
-                server_port: upgradeForm.serverPort || undefined,
+                server_ip: upgradeForm.serverIP.trim() || undefined,
+                server_domain: upgradeForm.serverDomain.trim() || undefined,
+                server_port: upgradeForm.serverPort.trim() || undefined,
                 public_api_base_url: typeof window !== 'undefined' ? window.location.origin : undefined,
                 skip_config: false,
                 install_sysmon: (_agent.sysmon_installed && _agent.sysmon_running) ? false : upgradeForm.installSysmon,
                 expires_in_seconds: 900,
                 agent_id: agentId,
             });
+            setUpgradeStep('pushing');
             await agentsApi.executeCommand(agentId, {
                 command_type: 'update_agent',
                 parameters: {
                     url: pkg.url,
                     checksum: pkg.sha256,
                     version: pkg.package_id,
-                    server_domain: upgradeForm.serverDomain,
-                    server_port: upgradeForm.serverPort,
-                    server_ip: upgradeForm.serverIP,
+                    server_domain: upgradeForm.serverDomain.trim(),
+                    server_port: upgradeForm.serverPort.trim(),
+                    server_ip: upgradeForm.serverIP.trim(),
                 },
                 timeout: 3600,
             });
             return pkg;
         },
         onSuccess: (pkg) => {
-            showToast(`Upgrade queued (package ${pkg.package_id.slice(0, 8)})`, 'success');
+            showToast(`✅ Upgrade queued — package ${pkg.package_id.slice(0, 8)}`, 'success');
             queryClient.invalidateQueries({ queryKey: ['agent-commands', agentId] });
             queryClient.invalidateQueries({ queryKey: ['commands'] });
             setUpgradeOpen(false);
+            setUpgradeStep('form');
         },
-        onError: (e: Error) => showToast(e.message || 'Upgrade failed', 'error'),
+        onError: (e: Error) => {
+            showToast(e.message || 'Upgrade failed', 'error');
+            setUpgradeStep('form');
+        },
     });
 
     const isCriticalAsset = useMemo(() => {
@@ -2875,38 +2895,136 @@ function ResponseTab({
                 </div>
             </div>
 
-            <Modal isOpen={upgradeOpen} onClose={() => setUpgradeOpen(false)} title="Upgrade Agent">
-                <div className="space-y-4 p-1">
-                    <p className="text-sm text-slate-600 dark:text-slate-400">Build a new agent package and push an upgrade command to this endpoint.</p>
-                    <div>
-                        <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Server IP</label>
-                        <input className="input w-full text-sm" placeholder="e.g. 192.168.1.100" value={upgradeForm.serverIP} onChange={(e) => setUpgradeForm(f => ({...f, serverIP: e.target.value}))} />
+            <Modal
+                isOpen={upgradeOpen}
+                onClose={() => { if (!upgradeMutation.isPending) { setUpgradeOpen(false); setUpgradeStep('form'); setUpgradeErrors({}); } }}
+                title="Upgrade Agent"
+                footer={
+                    <div className="flex items-center justify-between gap-3">
+                        <button
+                            type="button"
+                            className="px-4 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-40"
+                            disabled={upgradeMutation.isPending}
+                            onClick={() => { setUpgradeOpen(false); setUpgradeStep('form'); setUpgradeErrors({}); }}
+                        >
+                            Cancel
+                        </button>
+                        <button
+                            type="button"
+                            className="flex items-center gap-2 px-5 py-2 text-sm rounded-lg bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-semibold disabled:opacity-50 transition-all shadow-sm"
+                            disabled={upgradeMutation.isPending}
+                            onClick={() => { if (validateUpgrade()) upgradeMutation.mutate(); }}
+                        >
+                            {upgradeMutation.isPending
+                                ? <><Loader2 className="w-4 h-4 animate-spin" /> {upgradeStep === 'building' ? 'Building package…' : 'Pushing to agent…'}</>
+                                : <><RefreshCw className="w-4 h-4" /> Start Upgrade</>
+                            }
+                        </button>
                     </div>
-                    <div>
-                        <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Server Domain</label>
-                        <input className="input w-full text-sm" placeholder="e.g. edr.company.com" value={upgradeForm.serverDomain} onChange={(e) => setUpgradeForm(f => ({...f, serverDomain: e.target.value}))} />
-                    </div>
-                    <div>
-                        <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Server Port</label>
-                        <input className="input w-full text-sm" value={upgradeForm.serverPort} onChange={(e) => setUpgradeForm(f => ({...f, serverPort: e.target.value}))} />
-                    </div>
-                    {/* Hide Sysmon option when already installed & running on this endpoint */}
-                    {!(_agent.sysmon_installed && _agent.sysmon_running) ? (
-                        <label className="flex items-center gap-2 text-sm">
-                            <input type="checkbox" className="rounded" checked={upgradeForm.installSysmon} onChange={(e) => setUpgradeForm(f => ({...f, installSysmon: e.target.checked}))} />
-                            Install Sysmon with upgrade
-                        </label>
-                    ) : (
-                        <div className="flex items-center gap-2 text-sm text-emerald-600 dark:text-emerald-400">
-                            <CheckCircle2 className="w-4 h-4" />
-                            Sysmon is already installed and running on this endpoint
+                }
+            >
+                <div className="space-y-5 p-1">
+                    {/* Progress steps */}
+                    {upgradeMutation.isPending && (
+                        <div className="flex items-center gap-0 rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700">
+                            {(['Building', 'Pushing', 'Done'] as const).map((step, i) => {
+                                const active = (i === 0 && upgradeStep === 'building') || (i === 1 && upgradeStep === 'pushing');
+                                const done = (i === 0 && upgradeStep === 'pushing');
+                                return (
+                                    <div key={step} className={`flex-1 px-3 py-2 text-center text-xs font-semibold transition-colors ${
+                                        active ? 'bg-cyan-500 text-white' : done ? 'bg-emerald-500/20 text-emerald-700 dark:text-emerald-300' : 'bg-slate-50 dark:bg-slate-800 text-slate-400'
+                                    }`}>
+                                        {done ? '✓ ' : active ? '⟳ ' : ''}{step}
+                                    </div>
+                                );
+                            })}
                         </div>
                     )}
-                    <div className="flex justify-end gap-2 pt-3 border-t border-slate-200 dark:border-slate-700">
-                        <button type="button" className="px-4 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-700" onClick={() => setUpgradeOpen(false)}>Cancel</button>
-                        <button type="button" className="px-4 py-2 text-sm rounded-lg bg-cyan-600 hover:bg-cyan-700 text-white font-semibold disabled:opacity-50" disabled={upgradeMutation.isPending} onClick={() => upgradeMutation.mutate()}>
-                            {upgradeMutation.isPending ? 'Upgrading...' : 'Start Upgrade'}
-                        </button>
+
+                    <div className="p-3 rounded-xl bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800/40 text-xs text-blue-800 dark:text-blue-300">
+                        <p className="font-semibold mb-1 flex items-center gap-1.5"><RefreshCw className="w-3.5 h-3.5" /> How it works</p>
+                        <ol className="list-decimal list-inside space-y-0.5 text-blue-700 dark:text-blue-400">
+                            <li>A signed agent package is built on the server for this endpoint.</li>
+                            <li>An <code className="font-mono">update_agent</code> command is pushed to the agent.</li>
+                            <li>The agent downloads, verifies, and installs the new binary in-place.</li>
+                        </ol>
+                    </div>
+
+                    {/* Server connectivity */}
+                    <div className="space-y-3">
+                        <p className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Server Connectivity</p>
+                        {upgradeErrors.server && (
+                            <p className="text-xs text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-900/20 border border-rose-200 dark:border-rose-800/40 px-3 py-2 rounded-lg flex items-center gap-2">
+                                <AlertTriangle className="w-3.5 h-3.5 shrink-0" /> {upgradeErrors.server}
+                            </p>
+                        )}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            <div>
+                                <label className="block text-[10px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">Server IP</label>
+                                <input
+                                    className={`input w-full text-sm font-mono ${
+                                        upgradeErrors.server ? 'border-rose-400 ring-1 ring-rose-400' : ''
+                                    }`}
+                                    placeholder="e.g. 192.168.1.100"
+                                    value={upgradeForm.serverIP}
+                                    onChange={(e) => { setUpgradeForm(f => ({...f, serverIP: e.target.value})); setUpgradeErrors(prev => ({...prev, server: ''})); }}
+                                    disabled={upgradeMutation.isPending}
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-[10px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">Server Domain</label>
+                                <input
+                                    className={`input w-full text-sm font-mono ${
+                                        upgradeErrors.server ? 'border-rose-400 ring-1 ring-rose-400' : ''
+                                    }`}
+                                    placeholder="e.g. edr.company.com"
+                                    value={upgradeForm.serverDomain}
+                                    onChange={(e) => { setUpgradeForm(f => ({...f, serverDomain: e.target.value})); setUpgradeErrors(prev => ({...prev, server: ''})); }}
+                                    disabled={upgradeMutation.isPending}
+                                />
+                            </div>
+                        </div>
+                        <p className="text-[10px] text-slate-400">Provide IP <em>or</em> Domain — at least one is required. Domain takes priority if both are given.</p>
+                        <div>
+                            <label className="block text-[10px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">Server Port</label>
+                            <input
+                                className={`input w-full text-sm font-mono ${
+                                    upgradeErrors.port ? 'border-rose-400 ring-1 ring-rose-400' : ''
+                                }`}
+                                value={upgradeForm.serverPort}
+                                onChange={(e) => { setUpgradeForm(f => ({...f, serverPort: e.target.value})); setUpgradeErrors(prev => ({...prev, port: ''})); }}
+                                disabled={upgradeMutation.isPending}
+                            />
+                            {upgradeErrors.port && <p className="text-[10px] text-rose-500 mt-0.5">{upgradeErrors.port}</p>}
+                        </div>
+                    </div>
+
+                    {/* Sysmon status */}
+                    <div className="pt-3 border-t border-slate-200 dark:border-slate-700">
+                        <p className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">Sysmon</p>
+                        {(_agent.sysmon_installed && _agent.sysmon_running) ? (
+                            <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800/40">
+                                <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                                <div>
+                                    <p className="text-xs font-semibold text-emerald-700 dark:text-emerald-300">Sysmon is installed and running</p>
+                                    <p className="text-[10px] text-emerald-600 dark:text-emerald-400">No re-installation needed — Sysmon will be preserved during upgrade.</p>
+                                </div>
+                            </div>
+                        ) : (
+                            <label className="flex items-start gap-3 cursor-pointer p-3 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors">
+                                <input
+                                    type="checkbox"
+                                    className="rounded mt-0.5 text-cyan-500 focus:ring-cyan-500"
+                                    checked={upgradeForm.installSysmon}
+                                    onChange={(e) => setUpgradeForm(f => ({...f, installSysmon: e.target.checked}))}
+                                    disabled={upgradeMutation.isPending}
+                                />
+                                <div>
+                                    <p className="text-sm font-medium text-slate-700 dark:text-slate-200">Install Sysmon with this upgrade</p>
+                                    <p className="text-[10px] text-slate-400">Bundles the Sysmon installer and default config into the package.</p>
+                                </div>
+                            </label>
+                        )}
                     </div>
                 </div>
             </Modal>

@@ -55,6 +55,7 @@ const SettingsUserProfile = lazy(() => import('./components/settings/UserProfile
 const SettingsSystemConfiguration = lazy(() => import('./pages/settings/SystemConfiguration'));
 const SettingsContextPolicies = lazy(() => import('./pages/settings/ContextPolicies'));
 const SettingsReliabilityHealth = lazy(() => import('./pages/settings/ReliabilityHealth'));
+const SettingsSignaturesManagement = lazy(() => import('./pages/settings/SignaturesManagement'));
 const SettingsAccessManagement = lazy(() => import('./components/settings/AccessManagement'));
 const SettingsRBACMatrix = lazy(() => import('./components/settings/RBACMatrix'));
 
@@ -282,6 +283,13 @@ function AppRoutes() {
                 <ProtectedRoute>
                   <Suspense fallback={<SettingsTabFallback />}>
                     <SettingsReliabilityHealth />
+                  </Suspense>
+                </ProtectedRoute>
+              } />
+              <Route path="signatures" element={
+                <ProtectedRoute>
+                  <Suspense fallback={<SettingsTabFallback />}>
+                    <SettingsSignaturesManagement />
                   </Suspense>
                 </ProtectedRoute>
               } />

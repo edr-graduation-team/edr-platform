@@ -4,8 +4,15 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"time"
 
+	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
+	"google.golang.org/protobuf/types/known/timestamppb"
+
+	"github.com/edr-platform/connection-manager/internal/repository"
+	"github.com/edr-platform/connection-manager/pkg/models"
+	edrv1 "github.com/edr-platform/connection-manager/proto/v1"
 )
 
 // GetSignatureVersion returns the current max version and total hash count.
@@ -144,5 +151,135 @@ func (h *Handlers) ListSignatureHashes(c echo.Context) error {
 		"data":  hashes,
 		"total": count,
 		"meta":  responseMeta(c),
+	})
+}
+
+type pushSignatureUpdateRequest struct {
+	IncludeOffline *bool `json:"include_offline"`
+	Limit          int   `json:"limit"`
+	Timeout        int   `json:"timeout"`
+}
+
+// PushSignatureUpdateAll queues/sends UPDATE_SIGNATURES to all matching agents.
+// POST /api/v1/signatures/push-update  (JWT protected)
+func (h *Handlers) PushSignatureUpdateAll(c echo.Context) error {
+	if h.agentSvc == nil || h.commandRepo == nil {
+		return errorResponse(c, http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE", "Agent command pipeline is not available")
+	}
+
+	req := pushSignatureUpdateRequest{}
+	if err := c.Bind(&req); err != nil && err.Error() != "EOF" {
+		return errorResponse(c, http.StatusBadRequest, "INVALID_REQUEST", "Invalid request body")
+	}
+
+	includeOffline := true
+	if req.IncludeOffline != nil {
+		includeOffline = *req.IncludeOffline
+	}
+	limit := req.Limit
+	if limit <= 0 {
+		limit = 10000
+	}
+	if limit > 20000 {
+		limit = 20000
+	}
+	timeoutSec := req.Timeout
+	if timeoutSec <= 0 {
+		timeoutSec = 180
+	}
+	if timeoutSec > 3600 {
+		timeoutSec = 3600
+	}
+
+	agents, err := h.agentSvc.ListAgents(c.Request().Context(), repository.AgentFilter{
+		Limit:     limit,
+		Offset:    0,
+		SortBy:    "last_seen",
+		SortOrder: "desc",
+	})
+	if err != nil {
+		h.logger.WithError(err).Error("[signatures] ListAgents failed for push-update")
+		return errorResponse(c, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to list agents")
+	}
+
+	sent := 0
+	queued := 0
+	failed := 0
+	skippedOffline := 0
+	skippedUninstalled := 0
+
+	for _, a := range agents {
+		if a.Status == models.AgentStatusUninstalled {
+			skippedUninstalled++
+			continue
+		}
+
+		online := h.registry != nil && h.registry.IsOnline(a.ID.String())
+		if !online && !includeOffline {
+			skippedOffline++
+			continue
+		}
+
+		cmdID := uuid.New()
+		meta := map[string]any{
+			"bulk_signature_update": true,
+		}
+		if user := getCurrentUser(c); user != nil {
+			meta["issued_by_username"] = user.Username
+			if len(user.Roles) > 0 {
+				meta["issued_by_role"] = user.Roles[0]
+			}
+		}
+
+		dbCmd := &models.Command{
+			ID:             cmdID,
+			AgentID:        a.ID,
+			CommandType:    models.CommandType("update_signatures"),
+			Parameters:     map[string]any{},
+			Priority:       5,
+			Status:         models.CommandStatusPending,
+			TimeoutSeconds: timeoutSec,
+			IssuedBy:       nil,
+			Metadata:       meta,
+		}
+		if err := h.commandRepo.Create(c.Request().Context(), dbCmd); err != nil {
+			failed++
+			continue
+		}
+
+		if !online {
+			queued++
+			continue
+		}
+
+		cmd := &edrv1.Command{
+			CommandId:  cmdID.String(),
+			Timestamp:  timestamppb.Now(),
+			Type:       mapCommandType("update_signatures"),
+			Parameters: map[string]string{},
+			Priority:   5,
+			ExpiresAt:  timestamppb.New(time.Now().Add(time.Duration(timeoutSec) * time.Second)),
+		}
+		if err := h.registry.Send(a.ID.String(), cmd); err != nil {
+			_ = h.commandRepo.UpdateStatus(c.Request().Context(), cmdID, models.CommandStatusFailed, nil, err.Error())
+			failed++
+			continue
+		}
+		_ = h.commandRepo.UpdateStatus(c.Request().Context(), cmdID, models.CommandStatusSent, nil, "")
+		sent++
+	}
+
+	return c.JSON(http.StatusAccepted, map[string]interface{}{
+		"message": "Bulk signature update dispatch completed",
+		"data": map[string]interface{}{
+			"processed":           len(agents),
+			"sent":                sent,
+			"queued":              queued,
+			"failed":              failed,
+			"skipped_offline":     skippedOffline,
+			"skipped_uninstalled": skippedUninstalled,
+			"include_offline":     includeOffline,
+		},
+		"meta": responseMeta(c),
 	})
 }

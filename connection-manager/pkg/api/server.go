@@ -267,6 +267,7 @@ func (s *Server) RegisterRoutes(handlers *Handlers) {
 	signatures := protected.Group("/signatures")
 	signatures.GET("/stats", handlers.GetSignatureStats, handlers.RequirePermission("settings", "read"))
 	signatures.POST("/sync", handlers.TriggerSignatureSync, handlers.RequirePermission("settings", "write"))
+	signatures.POST("/push-update", handlers.PushSignatureUpdateAll, handlers.RequirePermission("settings", "write"))
 	signatures.GET("", handlers.ListSignatureHashes, handlers.RequirePermission("settings", "read"))
 
 	// ── Automation endpoints ─────────────────────────────────────────────

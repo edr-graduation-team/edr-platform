@@ -598,6 +598,11 @@ function dmComponentsLabel(agent: Agent): string {
     return eff === 'online' || eff === 'degraded' ? 'EDR' : '—';
 }
 
+function dmSignatureVersion(agent: Agent): string {
+    const raw = agent.tags?.signature_server_version ?? agent.metadata?.signature_server_version ?? '';
+    return String(raw || '').trim();
+}
+
 function criticalityPillClass(v?: string): string {
     switch ((v || 'medium').toLowerCase()) {
         case 'critical':
@@ -1054,6 +1059,7 @@ export default function Endpoints() {
                                     <th className="py-3 px-2">Criticality</th>
                                     <th className="py-3 px-2">Profile</th>
                                     <th className="py-3 px-2">Active components</th>
+                                    <th className="py-3 px-2">Signatures DB</th>
                                     <th className="py-3 px-2 min-w-[120px]">Last logged in user</th>
                                     <th className="py-3 px-2">Last activity</th>
                                 </tr>
@@ -1130,6 +1136,11 @@ export default function Endpoints() {
                                             </td>
                                             <td className="py-3 px-2 align-middle text-xs text-slate-600 dark:text-slate-300">
                                                 {dmComponentsLabel(agent)}
+                                            </td>
+                                            <td className="py-3 px-2 align-middle text-xs text-slate-600 dark:text-slate-300">
+                                                {dmSignatureVersion(agent)
+                                                    ? <span className="font-mono">v{dmSignatureVersion(agent)}</span>
+                                                    : '—'}
                                             </td>
                                             <td className="py-3 px-2 align-middle text-xs text-slate-600 dark:text-slate-300 max-w-[140px] truncate" title={dmLastUser(agent) || undefined}>
                                                 {dmLastUser(agent) || '—'}

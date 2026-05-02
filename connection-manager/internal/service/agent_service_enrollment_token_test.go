@@ -56,7 +56,7 @@ func (r *fakeAgentRepo) UpsertByHostname(ctx context.Context, agent *models.Agen
 func (r *fakeAgentRepo) UpdateBusinessContext(ctx context.Context, id uuid.UUID, ctxFields repository.AgentBusinessContext) error {
 	return nil
 }
-func (r *fakeAgentRepo) UpdateDeviceInfo(ctx context.Context, id uuid.UUID, profile, loggedInUser string) error {
+func (r *fakeAgentRepo) UpdateDeviceInfo(ctx context.Context, id uuid.UUID, profile, loggedInUser, signatureServerVersion string) error {
 	return nil
 }
 

@@ -649,19 +649,21 @@ func joinStrings(parts []string, sep string) string {
 	return out
 }
 
-// UpdateDeviceInfo merges profile and logged_in_user into the agent's JSONB tags column.
+// UpdateDeviceInfo merges profile, logged_in_user, and signature_server_version
+// into the agent's JSONB tags column.
 // Only non-empty values overwrite existing tag entries; other tags are preserved.
 // Called on every heartbeat when the agent reports these fields via gRPC metadata.
-func (r *PostgresAgentRepository) UpdateDeviceInfo(ctx context.Context, id uuid.UUID, profile, loggedInUser string) error {
+func (r *PostgresAgentRepository) UpdateDeviceInfo(ctx context.Context, id uuid.UUID, profile, loggedInUser, signatureServerVersion string) error {
 	_, err := r.pool.Exec(ctx, `
 		UPDATE agents
 		SET
 			tags = tags
 				|| CASE WHEN $2 != '' THEN jsonb_build_object('profile', $2) ELSE '{}'::jsonb END
-				|| CASE WHEN $3 != '' THEN jsonb_build_object('logged_in_user', $3) ELSE '{}'::jsonb END,
+				|| CASE WHEN $3 != '' THEN jsonb_build_object('logged_in_user', $3) ELSE '{}'::jsonb END
+				|| CASE WHEN $4 != '' THEN jsonb_build_object('signature_server_version', $4) ELSE '{}'::jsonb END,
 			updated_at = NOW()
 		WHERE id = $1
-	`, id, profile, loggedInUser)
+	`, id, profile, loggedInUser, signatureServerVersion)
 	if err != nil {
 		return fmt.Errorf("UpdateDeviceInfo %s: %w", id, err)
 	}

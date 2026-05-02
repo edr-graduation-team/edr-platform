@@ -140,28 +140,32 @@ func (h *HeartbeatHandler) Heartbeat(ctx context.Context, req *edrv1.HeartbeatRe
 		}
 	}
 
-	// 7. Update device-reported tags (profile, logged_in_user) from gRPC metadata.
+	// 7. Update device-reported tags from gRPC metadata.
 	// The agent sends these as x-agent-* headers to avoid proto schema changes.
 	// The DB update runs in a goroutine so it never delays the heartbeat response.
 	if h.agentService != nil {
 		if md, ok := metadata.FromIncomingContext(ctx); ok {
 			profile := ""
 			loggedInUser := ""
+			signatureServerVersion := ""
 			if vals := md.Get("x-agent-profile"); len(vals) > 0 {
 				profile = vals[0]
 			}
 			if vals := md.Get("x-agent-logged-in-user"); len(vals) > 0 {
 				loggedInUser = vals[0]
 			}
-			if profile != "" || loggedInUser != "" {
+			if vals := md.Get("x-agent-signature-server-version"); len(vals) > 0 {
+				signatureServerVersion = vals[0]
+			}
+			if profile != "" || loggedInUser != "" || signatureServerVersion != "" {
 				if agentUUID, parseErr := uuid.Parse(agentID); parseErr == nil {
-					go func(id uuid.UUID, p, u string) {
+					go func(id uuid.UUID, p, u, sv string) {
 						upCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 						defer cancel()
-						if err := h.agentService.UpdateDeviceInfo(upCtx, id, p, u); err != nil {
+						if err := h.agentService.UpdateDeviceInfo(upCtx, id, p, u, sv); err != nil {
 							logger.WithError(err).Warn("Failed to update device info tags")
 						}
-					}(agentUUID, profile, loggedInUser)
+					}(agentUUID, profile, loggedInUser, signatureServerVersion)
 				}
 			}
 		}

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"encoding/hex"
 	"fmt"
 	"io"
@@ -227,7 +228,31 @@ func (h *Handler) updateSignatures(ctx context.Context, params map[string]string
 		if err != nil {
 			return "", fmt.Errorf("merge signatures: %w", err)
 		}
+		// For server-managed feed responses, persist the highest returned version so
+		// future delta pulls continue from the correct cursor.
+		if serverFeed {
+			if maxVer := extractMaxVersionFromNDJSON(body); maxVer > 0 {
+				_ = st.SetServerVersion(maxVer)
+			}
+		}
 	}
 	n, _ := st.Version()
 	return fmt.Sprintf("UPDATE_SIGNATURES: inserted=%d skipped=%d db_version=v%d total_entries=%d", inserted, skipped, n, n), nil
+}
+
+func extractMaxVersionFromNDJSON(body []byte) int64 {
+	var maxV int64
+	dec := json.NewDecoder(bytes.NewReader(body))
+	for dec.More() {
+		var row struct {
+			Version int64 `json:"version"`
+		}
+		if err := dec.Decode(&row); err != nil {
+			break
+		}
+		if row.Version > maxV {
+			maxV = row.Version
+		}
+	}
+	return maxV
 }

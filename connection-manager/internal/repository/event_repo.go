@@ -320,16 +320,27 @@ func (r *PostgresEventRepository) GetProcessAnalytics(ctx context.Context, hours
 	}
 
 	const q = `
+		WITH per_name AS (
+			SELECT
+				LOWER(COALESCE(raw->'data'->>'name', raw->>'name', 'unknown')) AS proc_name,
+				COALESCE(raw->'data'->>'executable', raw->>'executable', '') AS executable,
+				COUNT(*) AS exec_count,
+				COUNT(DISTINCT agent_id) AS agent_count,
+				MAX(ts) AS last_seen
+			FROM events
+			WHERE event_type = 'process'
+			  AND ts >= NOW() - ($1 || ' hours')::interval
+			GROUP BY proc_name, executable
+		)
 		SELECT
-			COALESCE(raw->'data'->>'name', raw->>'name', 'unknown') AS proc_name,
-			COALESCE(raw->'data'->>'executable', raw->>'executable', '') AS executable,
-			COUNT(*) AS exec_count,
-			COUNT(DISTINCT agent_id) AS agent_count,
-			MAX(ts) AS last_seen
-		FROM events
-		WHERE event_type = 'process'
-		  AND ts >= NOW() - ($1 || ' hours')::interval
-		GROUP BY proc_name, executable
+			proc_name,
+			-- pick the longest (most specific) executable path per process name
+			(array_agg(executable ORDER BY length(executable) DESC))[1] AS executable,
+			SUM(exec_count)::bigint AS exec_count,
+			SUM(agent_count)::bigint AS agent_count,
+			MAX(last_seen) AS last_seen
+		FROM per_name
+		GROUP BY proc_name
 		ORDER BY exec_count DESC
 		LIMIT 500`
 
@@ -376,12 +387,12 @@ func (r *PostgresEventRepository) GetSoftwareInventory(ctx context.Context) ([]S
 			COALESCE(raw->'data'->>'name', raw->>'name', 'unknown') AS app_name,
 			COALESCE(raw->'data'->>'version', raw->>'version', '') AS version,
 			COALESCE(raw->'data'->>'publisher', raw->>'publisher', '') AS publisher,
-			COALESCE(raw->'data'->>'install_date', '') AS install_date,
+			MAX(COALESCE(raw->'data'->>'install_date', '')) AS install_date,
 			COUNT(DISTINCT agent_id) AS agent_count,
 			MAX(ts) AS last_reported
 		FROM events
 		WHERE event_type = 'software_inventory'
-		GROUP BY app_name, version, publisher, install_date
+		GROUP BY app_name, version, publisher
 		ORDER BY agent_count DESC, app_name ASC
 		LIMIT 1000`
 
@@ -405,43 +416,61 @@ func (r *PostgresEventRepository) GetSoftwareInventory(ctx context.Context) ([]S
 	return out, nil
 }
 
-// BandwidthAggRow is an aggregated bandwidth-per-application row.
+// BandwidthAggRow is an aggregated network-activity-per-application row.
+// Note: the agent's network events (Sysmon EventID 3) do not include
+// bytes_sent/bytes_received. We track connection counts and unique
+// destinations as a proxy for bandwidth/activity.
 type BandwidthAggRow struct {
-	ProcessName   string `json:"process_name"`
-	Executable    string `json:"executable"`
-	BytesSent     int64  `json:"bytes_sent"`
-	BytesReceived int64  `json:"bytes_received"`
-	TotalBytes    int64  `json:"total_bytes"`
-	Connections   int    `json:"connections"`
-	AgentCount    int    `json:"agent_count"`
-	LastSeen      string `json:"last_seen"`
+	ProcessName        string `json:"process_name"`
+	Executable         string `json:"executable"`
+	BytesSent          int64  `json:"bytes_sent"`
+	BytesReceived      int64  `json:"bytes_received"`
+	TotalBytes         int64  `json:"total_bytes"`
+	Connections        int    `json:"connections"`
+	UniqueDestinations int    `json:"unique_destinations"`
+	UniquePorts        int    `json:"unique_ports"`
+	AgentCount         int    `json:"agent_count"`
+	LastSeen           string `json:"last_seen"`
 }
 
-// GetBandwidthAnalytics aggregates network events by process name within a time window,
-// summing bytes_sent and bytes_received to show bandwidth consumption per application.
+// GetBandwidthAnalytics aggregates network events by process name within a time window.
+// Since the ETW/Sysmon telemetry doesn't include byte counts, this uses connection
+// count and unique destinations as activity metrics.
 func (r *PostgresEventRepository) GetBandwidthAnalytics(ctx context.Context, hoursBack int) ([]BandwidthAggRow, error) {
 	if hoursBack <= 0 {
 		hoursBack = 24
 	}
 
 	const q = `
+		WITH per_proc AS (
+			SELECT
+				LOWER(COALESCE(raw->'data'->>'process_name', raw->>'process_name', raw->'data'->>'name', raw->>'name', 'unknown')) AS proc_name,
+				COALESCE(raw->'data'->>'executable', raw->>'executable', raw->'data'->>'Image', '') AS executable,
+				COALESCE(raw->'data'->>'bytes_sent', '0') AS bs,
+				COALESCE(raw->'data'->>'bytes_received', '0') AS br,
+				COALESCE(raw->'data'->>'destination_ip', raw->'data'->>'DestinationIp', '') AS dest_ip,
+				COALESCE(raw->'data'->>'destination_port', raw->'data'->>'DestinationPort', '') AS dest_port,
+				agent_id,
+				ts
+			FROM events
+			WHERE event_type = 'network'
+			  AND ts >= NOW() - ($1 || ' hours')::interval
+		)
 		SELECT
-			COALESCE(raw->'data'->>'process_name', raw->>'process_name', 'unknown') AS proc_name,
-			COALESCE(raw->'data'->>'executable', raw->>'executable', '') AS executable,
-			COALESCE(SUM((raw->'data'->>'bytes_sent')::bigint), 0) AS total_sent,
-			COALESCE(SUM((raw->'data'->>'bytes_received')::bigint), 0) AS total_received,
-			COALESCE(SUM((raw->'data'->>'bytes_sent')::bigint), 0) +
-			COALESCE(SUM((raw->'data'->>'bytes_received')::bigint), 0) AS total_bytes,
+			proc_name,
+			(array_agg(executable ORDER BY length(executable) DESC))[1] AS executable,
+			COALESCE(SUM(CASE WHEN bs ~ '^\d+$' THEN bs::bigint ELSE 0 END), 0) AS total_sent,
+			COALESCE(SUM(CASE WHEN br ~ '^\d+$' THEN br::bigint ELSE 0 END), 0) AS total_received,
+			COALESCE(SUM(CASE WHEN bs ~ '^\d+$' THEN bs::bigint ELSE 0 END), 0) +
+			COALESCE(SUM(CASE WHEN br ~ '^\d+$' THEN br::bigint ELSE 0 END), 0) AS total_bytes,
 			COUNT(*) AS connections,
+			COUNT(DISTINCT dest_ip) AS unique_destinations,
+			COUNT(DISTINCT dest_port) AS unique_ports,
 			COUNT(DISTINCT agent_id) AS agent_count,
 			MAX(ts) AS last_seen
-		FROM events
-		WHERE event_type = 'network'
-		  AND ts >= NOW() - ($1 || ' hours')::interval
-		GROUP BY proc_name, executable
-		HAVING COALESCE(SUM((raw->'data'->>'bytes_sent')::bigint), 0) +
-		       COALESCE(SUM((raw->'data'->>'bytes_received')::bigint), 0) > 0
-		ORDER BY total_bytes DESC
+		FROM per_proc
+		GROUP BY proc_name
+		ORDER BY connections DESC
 		LIMIT 200`
 
 	rows, err := r.db.Query(ctx, q, fmt.Sprintf("%d", hoursBack))
@@ -454,7 +483,12 @@ func (r *PostgresEventRepository) GetBandwidthAnalytics(ctx context.Context, hou
 	for rows.Next() {
 		var r BandwidthAggRow
 		var lastSeen time.Time
-		if err := rows.Scan(&r.ProcessName, &r.Executable, &r.BytesSent, &r.BytesReceived, &r.TotalBytes, &r.Connections, &r.AgentCount, &lastSeen); err != nil {
+		if err := rows.Scan(
+			&r.ProcessName, &r.Executable,
+			&r.BytesSent, &r.BytesReceived, &r.TotalBytes,
+			&r.Connections, &r.UniqueDestinations, &r.UniquePorts,
+			&r.AgentCount, &lastSeen,
+		); err != nil {
 			return nil, fmt.Errorf("scan bandwidth agg: %w", err)
 		}
 		r.LastSeen = lastSeen.Format(time.RFC3339)
@@ -463,4 +497,3 @@ func (r *PostgresEventRepository) GetBandwidthAnalytics(ctx context.Context, hou
 
 	return out, nil
 }
-

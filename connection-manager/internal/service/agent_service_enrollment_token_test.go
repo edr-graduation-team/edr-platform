@@ -29,7 +29,7 @@ func (r *fakeAgentRepo) UpdateStatus(ctx context.Context, id uuid.UUID, status s
 func (r *fakeAgentRepo) UpdateMetrics(ctx context.Context, id uuid.UUID, cpuUsage float64, memoryUsedMB int64,
 	memoryTotalMB int64, queueDepth int, eventsGenerated, eventsSent, eventsDropped int64,
 	agentVersion string, ipAddresses []string, cpuCount int, healthScore float64,
-	sysmonInstalled, sysmonRunning bool, osVersion string,
+	sysmonInstalled, sysmonRunning bool,
 ) error {
 	return nil
 }

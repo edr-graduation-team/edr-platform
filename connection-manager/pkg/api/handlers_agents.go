@@ -156,13 +156,6 @@ func (h *Handlers) GetAgent(c echo.Context) error {
 			Criticality:     a.Criticality,
 			BusinessUnit:    a.BusinessUnit,
 			Environment:     a.Environment,
-			// Enrollment metadata — must be copied explicitly (AgentDetail embeds
-			// AgentSummary but GetAgent builds it field-by-field, so zero values
-			// are used by default when a field is omitted).
-			CreatedAt: a.CreatedAt,
-			UpdatedAt: a.UpdatedAt,
-			Tags:      a.Tags,
-			Metadata:  a.Metadata,
 		},
 		IPAddresses:     ipAddresses,
 		CPUCount:        a.CPUCount,

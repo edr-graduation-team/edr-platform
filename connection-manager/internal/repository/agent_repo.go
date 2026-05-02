@@ -657,7 +657,7 @@ func (r *PostgresAgentRepository) UpdateDeviceInfo(ctx context.Context, id uuid.
 	_, err := r.pool.Exec(ctx, `
 		UPDATE agents
 		SET
-			tags = tags
+			tags = COALESCE(tags, '{}'::jsonb)
 				|| CASE WHEN $2 != '' THEN jsonb_build_object('profile', $2) ELSE '{}'::jsonb END
 				|| CASE WHEN $3 != '' THEN jsonb_build_object('logged_in_user', $3) ELSE '{}'::jsonb END
 				|| CASE WHEN $4 != '' THEN jsonb_build_object('signature_server_version', $4) ELSE '{}'::jsonb END,

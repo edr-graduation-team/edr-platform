@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
     ArrowDownUp, Search, RefreshCw, AlertTriangle, ArrowUpDown,
@@ -76,6 +76,8 @@ export default function BandwidthAnalyticsTab() {
     const [search, setSearch] = useState('');
     const [sortKey, setSortKey] = useState<SortKey>('connections');
     const [sortDir, setSortDir] = useState<SortDir>('desc');
+    const [page, setPage] = useState(1);
+    const pageSize = 10;
 
     const rows = data?.data ?? [];
 
@@ -134,6 +136,18 @@ export default function BandwidthAnalyticsTab() {
             return sortDir === 'desc' ? -cmp : cmp;
         });
     }, [rows, search, sortKey, sortDir]);
+
+    const totalPages = Math.max(1, Math.ceil(displayed.length / pageSize));
+    useEffect(() => {
+        if (page > totalPages) setPage(totalPages);
+    }, [page, totalPages]);
+    useEffect(() => {
+        setPage(1);
+    }, [search, sortKey, sortDir]);
+    const pageRows = useMemo(() => {
+        const start = (page - 1) * pageSize;
+        return displayed.slice(start, start + pageSize);
+    }, [displayed, page]);
 
     const toggleSort = (key: SortKey) => {
         if (sortKey === key) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
@@ -358,7 +372,7 @@ export default function BandwidthAnalyticsTab() {
                             </tr>
                         </thead>
                         <tbody>
-                            {displayed.slice(0, 100).map((row, i) => {
+                            {pageRows.map((row, i) => {
                                 const topConns = rows[0]?.connections || 1;
                                 const pct = ((row.connections / topConns) * 100);
                                 return (
@@ -413,10 +427,30 @@ export default function BandwidthAnalyticsTab() {
                 </div>
             </div>
 
-            {displayed.length > 100 && (
-                <p className="text-xs text-slate-400 text-center">
-                    Showing top 100 of {displayed.length} applications. Use search to narrow results.
-                </p>
+            {displayed.length > 0 && (
+                <div className="flex items-center justify-between text-xs text-slate-500">
+                    <span>
+                        Page {page} / {totalPages} · Showing {pageRows.length} of {displayed.length}
+                    </span>
+                    <div className="flex items-center gap-2">
+                        <button
+                            type="button"
+                            onClick={() => setPage((p) => Math.max(1, p - 1))}
+                            disabled={page <= 1}
+                            className="px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-600 disabled:opacity-50"
+                        >
+                            Prev
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                            disabled={page >= totalPages}
+                            className="px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-600 disabled:opacity-50"
+                        >
+                            Next
+                        </button>
+                    </div>
+                </div>
             )}
         </div>
     );

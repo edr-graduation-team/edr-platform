@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
     Terminal, KeyRound, Wrench, Cog, AlertTriangle,
     RefreshCw, Search, ChevronDown, ChevronRight, Monitor,
@@ -98,6 +98,21 @@ function ToolSection({ config, rows }: { config: SectionConfig; rows: ProcessAgg
         // Auto-expand high-attention categories
         config.category === 'scripting' || config.category === 'remote_access' || config.category === 'admin'
     );
+    const [page, setPage] = useState(1);
+    const pageSize = 10;
+
+    const totalPages = Math.max(1, Math.ceil(rows.length / pageSize));
+    useEffect(() => {
+        if (page > totalPages) setPage(totalPages);
+    }, [page, totalPages]);
+    useEffect(() => {
+        // reset when collapsing/expanding or data changes
+        setPage(1);
+    }, [expanded, rows.length]);
+    const pageRows = useMemo(() => {
+        const start = (page - 1) * pageSize;
+        return rows.slice(start, start + pageSize);
+    }, [rows, page]);
 
     const totalExecs = rows.reduce((s, r) => s + r.count, 0);
     const uniqueHosts = new Set(rows.flatMap(r => Array.from(r.agents))).size;
@@ -158,7 +173,7 @@ function ToolSection({ config, rows }: { config: SectionConfig; rows: ProcessAgg
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {rows.slice(0, 50).map((row, i) => (
+                                    {pageRows.map((row, i) => (
                                         <tr
                                             key={row.name}
                                             className={`border-t border-slate-100 dark:border-slate-800/60 transition-colors hover:bg-cyan-500/5 dark:hover:bg-slate-800/40 ${
@@ -190,11 +205,29 @@ function ToolSection({ config, rows }: { config: SectionConfig; rows: ProcessAgg
                                     ))}
                                 </tbody>
                             </table>
-                            {rows.length > 50 && (
-                                <p className="px-4 py-2 text-[10px] text-slate-400">
-                                    Showing 50 of {rows.length} — use Process Analytics tab for full search.
-                                </p>
-                            )}
+                            <div className="flex items-center justify-between px-4 py-2 border-t border-slate-200 dark:border-slate-700 text-[11px] text-slate-500">
+                                <span>
+                                    Page {page} / {totalPages} · Showing {pageRows.length} of {rows.length}
+                                </span>
+                                <div className="flex items-center gap-2">
+                                    <button
+                                        type="button"
+                                        onClick={() => setPage((p) => Math.max(1, p - 1))}
+                                        disabled={page <= 1}
+                                        className="px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-600 disabled:opacity-50"
+                                    >
+                                        Prev
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                                        disabled={page >= totalPages}
+                                        className="px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-600 disabled:opacity-50"
+                                    >
+                                        Next
+                                    </button>
+                                </div>
+                            </div>
                         </div>
                     )}
                 </div>

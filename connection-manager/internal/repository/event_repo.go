@@ -416,6 +416,43 @@ func (r *PostgresEventRepository) GetSoftwareInventory(ctx context.Context) ([]S
 	return out, nil
 }
 
+// GetSoftwareInventoryByAgent returns software inventory rows for a single agent.
+// This is used by the EndpointDetail "Software" tab to show per-endpoint inventory.
+func (r *PostgresEventRepository) GetSoftwareInventoryByAgent(ctx context.Context, agentID uuid.UUID) ([]SoftwareInventoryRow, error) {
+	const q = `
+		SELECT
+			COALESCE(raw->'data'->>'name', raw->>'name', 'unknown') AS app_name,
+			COALESCE(raw->'data'->>'version', raw->>'version', '') AS version,
+			COALESCE(raw->'data'->>'publisher', raw->>'publisher', '') AS publisher,
+			MAX(COALESCE(raw->'data'->>'install_date', '')) AS install_date,
+			1 AS agent_count,
+			MAX(ts) AS last_reported
+		FROM events
+		WHERE event_type = 'software_inventory'
+		  AND agent_id = $1
+		GROUP BY app_name, version, publisher
+		ORDER BY app_name ASC, version ASC
+		LIMIT 5000`
+
+	rows, err := r.db.Query(ctx, q, agentID)
+	if err != nil {
+		return nil, fmt.Errorf("software inventory by agent query: %w", err)
+	}
+	defer rows.Close()
+
+	var out []SoftwareInventoryRow
+	for rows.Next() {
+		var r SoftwareInventoryRow
+		var lastReported time.Time
+		if err := rows.Scan(&r.Name, &r.Version, &r.Publisher, &r.InstallDate, &r.AgentCount, &lastReported); err != nil {
+			return nil, fmt.Errorf("scan software inv by agent: %w", err)
+		}
+		r.LastReported = lastReported.Format(time.RFC3339)
+		out = append(out, r)
+	}
+	return out, nil
+}
+
 // BandwidthAggRow is an aggregated network-activity-per-application row.
 // Note: the agent's network events (Sysmon EventID 3) do not include
 // bytes_sent/bytes_received. We track connection counts and unique

@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
     Activity, AlertTriangle, Search, Terminal, Cpu,
     ArrowUpDown, ChevronDown, Monitor, RefreshCw,
@@ -60,6 +60,8 @@ export default function ProcessAnalyticsTab() {
     const [catFilter, setCatFilter] = useState<ProcessCategory | ''>('');
     const [sortKey, setSortKey] = useState<SortKey>('count');
     const [sortDir, setSortDir] = useState<SortDir>('desc');
+    const [page, setPage] = useState(1);
+    const pageSize = 10;
 
     // ── Aggregated KPIs ──
     const kpis = useMemo(() => {
@@ -95,6 +97,18 @@ export default function ProcessAnalyticsTab() {
         });
         return sorted;
     }, [rows, catFilter, search, sortKey, sortDir]);
+
+    const totalPages = Math.max(1, Math.ceil(displayed.length / pageSize));
+    useEffect(() => {
+        if (page > totalPages) setPage(totalPages);
+    }, [page, totalPages]);
+    useEffect(() => {
+        setPage(1);
+    }, [search, catFilter, sortKey, sortDir]);
+    const pageRows = useMemo(() => {
+        const start = (page - 1) * pageSize;
+        return displayed.slice(start, start + pageSize);
+    }, [displayed, page]);
 
     // ── Chart: Top 12 processes ──
     const chartData = useMemo(() => {
@@ -310,7 +324,7 @@ export default function ProcessAnalyticsTab() {
                                 </tr>
                             </thead>
                             <tbody>
-                                {displayed.slice(0, 100).map((row, i) => (
+                                {pageRows.map((row, i) => (
                                     <tr
                                         key={row.name}
                                         className={`border-b border-slate-100 dark:border-slate-800/80 transition-colors hover:bg-cyan-500/5 dark:hover:bg-slate-800/60 ${
@@ -348,10 +362,30 @@ export default function ProcessAnalyticsTab() {
                 )}
             </div>
 
-            {displayed.length > 100 && (
-                <p className="text-xs text-slate-400 text-center">
-                    Showing top 100 of {displayed.length} processes. Use search/category filters to narrow results.
-                </p>
+            {displayed.length > 0 && (
+                <div className="flex items-center justify-between text-xs text-slate-500">
+                    <span>
+                        Page {page} / {totalPages} · Showing {pageRows.length} of {displayed.length}
+                    </span>
+                    <div className="flex items-center gap-2">
+                        <button
+                            type="button"
+                            onClick={() => setPage((p) => Math.max(1, p - 1))}
+                            disabled={page <= 1}
+                            className="px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-600 disabled:opacity-50"
+                        >
+                            Prev
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                            disabled={page >= totalPages}
+                            className="px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-600 disabled:opacity-50"
+                        >
+                            Next
+                        </button>
+                    </div>
+                </div>
             )}
         </div>
     );

@@ -87,6 +87,8 @@ export default function SoftwareInventoryTab() {
     const [search, setSearch] = useState('');
     const [sortKey, setSortKey] = useState<SortKey>('agent_count');
     const [sortDir, setSortDir] = useState<SortDir>('desc');
+    const [page, setPage] = useState(1);
+    const pageSize = 10;
 
     const rows = data?.data ?? [];
 
@@ -135,6 +137,18 @@ export default function SoftwareInventoryTab() {
             return sortDir === 'desc' ? -cmp : cmp;
         });
     }, [rows, search, sortKey, sortDir]);
+
+    const totalPages = Math.max(1, Math.ceil(displayed.length / pageSize));
+    React.useEffect(() => {
+        if (page > totalPages) setPage(totalPages);
+    }, [page, totalPages]);
+    React.useEffect(() => {
+        setPage(1);
+    }, [search, sortKey, sortDir]);
+    const pageRows = useMemo(() => {
+        const start = (page - 1) * pageSize;
+        return displayed.slice(start, start + pageSize);
+    }, [displayed, page]);
 
     const toggleSort = (key: SortKey) => {
         if (sortKey === key) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
@@ -358,7 +372,7 @@ export default function SoftwareInventoryTab() {
                             </tr>
                         </thead>
                         <tbody>
-                            {displayed.slice(0, 200).map((row, i) => (
+                            {pageRows.map((row, i) => (
                                 <tr
                                     key={`${row.name}-${row.version}`}
                                     className={`border-b border-slate-100 dark:border-slate-800/80 transition-colors hover:bg-violet-500/5 dark:hover:bg-slate-800/60 ${
@@ -400,10 +414,30 @@ export default function SoftwareInventoryTab() {
                 </div>
             </div>
 
-            {displayed.length > 200 && (
-                <p className="text-xs text-slate-400 text-center">
-                    Showing 200 of {displayed.length} applications. Use search to narrow results.
-                </p>
+            {displayed.length > 0 && (
+                <div className="flex items-center justify-between text-xs text-slate-500">
+                    <span>
+                        Page {page} / {totalPages} · Showing {pageRows.length} of {displayed.length}
+                    </span>
+                    <div className="flex items-center gap-2">
+                        <button
+                            type="button"
+                            onClick={() => setPage((p) => Math.max(1, p - 1))}
+                            disabled={page <= 1}
+                            className="px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-600 disabled:opacity-50"
+                        >
+                            Prev
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                            disabled={page >= totalPages}
+                            className="px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-600 disabled:opacity-50"
+                        >
+                            Next
+                        </button>
+                    </div>
+                </div>
             )}
         </div>
     );

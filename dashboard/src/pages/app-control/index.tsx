@@ -78,66 +78,12 @@ export default function ApplicationControlPage() {
                 accent="violet"
                 eyebrow="Management"
                 title="Application Control"
-                segments={[
-                    {
-                        heading: 'Process visibility',
-                        children: (
-                            <>
-                                Real-time process execution analytics from{' '}
-                                <strong className="font-medium text-slate-800 dark:text-slate-200">ETW kernel telemetry</strong>.
-                                Every process creation event is categorised and ranked by frequency to surface
-                                scripting engines, admin tools, and remote-access utilities.
-                            </>
-                        ),
-                    },
-                    {
-                        heading: 'Vulnerability context',
-                        children: (
-                            <>
-                                <strong className="font-medium text-slate-800 dark:text-slate-200">Trivy</strong> scans
-                                installed packages every 6 hours and reports CVE findings enriched with CISA KEV data
-                                and EDR exploit signals.
-                            </>
-                        ),
-                    },
-                    {
-                        heading: 'Bandwidth & special tools',
-                        children: (
-                            <>
-                                Network bandwidth consumption per application from{' '}
-                                <code className="text-[11px] font-mono px-1 rounded bg-slate-200/90 dark:bg-slate-800">
-                                    bytes_sent / bytes_received
-                                </code>{' '}
-                                telemetry, plus dedicated drill-down views for scripting engines, remote access,
-                                and admin tools detected across the fleet.
-                            </>
-                        ),
-                    },
-                    {
-                        heading: 'Data sources',
-                        children: (
-                            <>
-                                Process events from{' '}
-                                <code className="text-[11px] font-mono px-1 rounded bg-slate-200/90 dark:bg-slate-800">
-                                    GET /app-control/process-analytics
-                                </code>
-                                , bandwidth from{' '}
-                                <code className="text-[11px] font-mono px-1 rounded bg-slate-200/90 dark:bg-slate-800">
-                                    GET /app-control/bandwidth-analytics
-                                </code>
-                                , software from{' '}
-                                <code className="text-[11px] font-mono px-1 rounded bg-slate-200/90 dark:bg-slate-800">
-                                    GET /app-control/software-inventory
-                                </code>
-                                , and vulnerability findings from{' '}
-                                <code className="text-[11px] font-mono px-1 rounded bg-slate-200/90 dark:bg-slate-800">
-                                    GET /vuln/findings
-                                </code>
-                                {' '} — all powered by real backend data.
-                            </>
-                        ),
-                    },
-                ]}
+                lead={
+                    <>
+                        Fleet-wide application analytics: executions, vulnerabilities, network activity, special tools, and installed software.
+                        Use the tabs below to drill into each dataset.
+                    </>
+                }
             />
 
             {/* Tab bar */}

@@ -26,6 +26,7 @@ const EnrollmentTokens = lazy(() => import('./pages/EnrollmentTokens'));
 const ActionCenter = lazy(() => import('./pages/ActionCenter'));
 const AgentDeployment = lazy(() => import('./pages/AgentDeployment'));
 const SystemLayout = lazy(() => import('./pages/SystemLayout'));
+const ReportPreviewPage = lazy(() => import('./pages/ReportPreviewPage'));
 
 const DashboardsLayout = lazy(() => import('./pages/parity/DashboardsLayout'));
 const DashboardEndpointPage = lazy(() => import('./pages/parity/dashboardPages').then((m) => ({ default: m.DashboardEndpointPage })));
@@ -129,6 +130,13 @@ function AppRoutes() {
       <Route path="/login" element={
         <Suspense fallback={<PageLoader />}>
           <Login />
+        </Suspense>
+      } />
+
+      {/* Report Preview — standalone page, no sidebar/layout */}
+      <Route path="/report-preview" element={
+        <Suspense fallback={<PageLoader />}>
+          <ReportPreviewPage />
         </Suspense>
       } />
 

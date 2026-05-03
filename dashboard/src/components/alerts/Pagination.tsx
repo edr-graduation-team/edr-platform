@@ -29,6 +29,7 @@ export const Pagination = React.memo(function Pagination({
                         className="bg-transparent border border-slate-300 dark:border-slate-700 rounded-md py-1 pl-2 pr-6 text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-1 focus:ring-primary-500 hover:border-slate-400 dark:hover:border-slate-500 transition-colors appearance-none cursor-pointer"
                         style={{ backgroundImage: 'url("data:image/svg+xml,%3csvg xmlns=\'http://www.w3.org/2000/svg\' fill=\'none\' viewBox=\'0 0 20 20\'%3e%3cpath stroke=\'%236b7280\' stroke-linecap=\'round\' stroke-linejoin=\'round\' stroke-width=\'1.5\' d=\'M6 8l4 4 4-4\'/%3e%3c/svg%3e")', backgroundPosition: 'right 0.2rem center', backgroundRepeat: 'no-repeat', backgroundSize: '1.5em 1.5em' }}
                     >
+                        <option value={10}>10</option>
                         <option value={25}>25</option>
                         <option value={50}>50</option>
                         <option value={100}>100</option>

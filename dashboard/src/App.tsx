@@ -322,6 +322,7 @@ function AppRoutes() {
               <Route path="roi" element={<Navigate to="endpoint" replace />} />
             </Route>
 
+            <Route path="/security" element={<Navigate to="/security/endpoint-zero-trust" replace />} />
             <Route path="/security/endpoint-zero-trust" element={<ProtectedRoute><SecurityEndpointZeroTrustPage /></ProtectedRoute>} />
             <Route path="/security/siem-x" element={<ProtectedRoute><SecuritySiemPage /></ProtectedRoute>} />
             <Route path="/security/cloud-zero-trust" element={<Navigate to="/security/endpoint-zero-trust" replace />} />

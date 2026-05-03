@@ -42,6 +42,7 @@ export const DASHBOARD_MORE_TABS: ContextTab[] = [
 export const SECURITY_MODULE_TABS: ContextTab[] = [
     { to: '/security/endpoint-zero-trust', label: 'Endpoint Zero Trust' },
     { to: '/security/siem-x', label: 'SIEM — X' },
+    { to: '/security/tokens', label: 'Enrollment Tokens' },
 ];
 
 export const SOC_CONTEXT_TABS: ContextTab[] = [

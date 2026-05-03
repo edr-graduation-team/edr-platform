@@ -527,7 +527,10 @@ export function PlaybooksPage() {
 
                     {/* Metadata Badges */}
                     <div className="flex flex-wrap items-center gap-3 text-xs mb-5">
-                      <div className="flex items-center gap-1.5 px-2.5 py-1 bg-slate-100 dark:bg-slate-800 rounded-md text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
+                      <div 
+                        className="flex items-center gap-1.5 px-2.5 py-1 bg-slate-100 dark:bg-slate-800 rounded-md text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 cursor-help transition-colors hover:bg-slate-200 dark:hover:bg-slate-700"
+                        title={playbook.commands.map((c, i) => `${i + 1}. ${c.type}`).join('\n')}
+                      >
                         <Terminal className="w-3.5 h-3.5" />
                         <span className="font-semibold">{playbook.commands.length} Commands</span>
                       </div>

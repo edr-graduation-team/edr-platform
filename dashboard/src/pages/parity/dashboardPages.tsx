@@ -1126,7 +1126,7 @@ export function DashboardRoiPage() {
 export function DashboardReportsPage() {
     useEffect(() => { document.title = 'Reports \u2014 EDR Platform'; }, []);
 
-    // Import the new professional report generator
+    // Import the new Report Generator
     const ReportGenerator = React.lazy(() => import('../../components/reports').then(m => ({ default: m.ReportGenerator })));
 
     return (

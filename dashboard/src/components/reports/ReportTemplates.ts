@@ -36,7 +36,7 @@ export const REPORT_TEMPLATES: Record<ReportTemplate, ReportTemplateConfig> = {
     executive: {
         id: 'executive',
         name: 'Executive Summary',
-        description: 'High-level overview for leadership with KPIs and trends',
+        description: 'Overview for leadership showing KPIs and trends',
         icon: 'BarChart3',
         defaultFormat: 'pdf',
         colorScheme: {
@@ -59,7 +59,7 @@ export const REPORT_TEMPLATES: Record<ReportTemplate, ReportTemplateConfig> = {
     technical: {
         id: 'technical',
         name: 'Technical Analysis',
-        description: 'Detailed technical report with MITRE ATT&CK mapping',
+        description: 'Technical report with MITRE ATT&CK mapping',
         icon: 'Terminal',
         defaultFormat: 'pdf',
         colorScheme: {

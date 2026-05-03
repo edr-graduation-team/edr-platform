@@ -34,6 +34,8 @@ interface ProfessionalReportViewProps {
     onDownload: (format: ReportFormat) => void;
     isGenerating: boolean;
     customSections?: string[];
+    /** When true, hides the internal header/download bar (used by ReportPreviewPage which has its own). */
+    hideActionBar?: boolean;
 }
 
 const CHART_COLORS = {
@@ -58,7 +60,8 @@ export function ProfessionalReportView({
     format, 
     onDownload, 
     isGenerating,
-    customSections
+    customSections,
+    hideActionBar = false,
 }: ProfessionalReportViewProps) {
     const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set(['summary', 'kpis']));
     const config = REPORT_TEMPLATES[template];
@@ -92,44 +95,46 @@ export function ProfessionalReportView({
     const formatInfo = REPORT_FORMATS.find(f => f.id === format);
 
     return (
-        <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden">
-            {/* Header */}
-            <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-700 bg-gradient-to-r from-slate-50 to-white dark:from-slate-800 dark:to-slate-900">
-                <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-lg flex items-center justify-center" 
-                             style={{ backgroundColor: `${config.colorScheme.primary}20`, color: config.colorScheme.primary }}>
-                            <BarChart3 className="w-5 h-5" />
+        <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden print:border-none print:rounded-none">
+            {/* Internal header — hidden when parent page has its own action bar */}
+            {!hideActionBar && (
+                <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-700 bg-gradient-to-r from-slate-50 to-white dark:from-slate-800 dark:to-slate-900">
+                    <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 rounded-lg flex items-center justify-center" 
+                                 style={{ backgroundColor: `${config.colorScheme.primary}20`, color: config.colorScheme.primary }}>
+                                <BarChart3 className="w-5 h-5" />
+                            </div>
+                            <div>
+                                <h3 className="font-semibold text-slate-900 dark:text-white">{config.name}</h3>
+                                <p className="text-xs text-slate-500">
+                                    Preview • {new Date(data.generatedAt).toLocaleString()} • {formatInfo?.name}
+                                </p>
+                            </div>
                         </div>
-                        <div>
-                            <h3 className="font-semibold text-slate-900 dark:text-white">{config.name}</h3>
-                            <p className="text-xs text-slate-500">
-                                Preview • {new Date(data.generatedAt).toLocaleString()} • {formatInfo?.name}
-                            </p>
-                        </div>
+                        <button
+                            onClick={() => onDownload(format)}
+                            disabled={isGenerating}
+                            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-cyan-600 hover:bg-cyan-700 text-white text-sm font-medium disabled:opacity-50 transition-colors"
+                        >
+                            {isGenerating ? (
+                                <>
+                                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                                    Generating...
+                                </>
+                            ) : (
+                                <>
+                                    <Download className="w-4 h-4" />
+                                    Download {formatInfo?.extension.toUpperCase()}
+                                </>
+                            )}
+                        </button>
                     </div>
-                    <button
-                        onClick={() => onDownload(format)}
-                        disabled={isGenerating}
-                        className="flex items-center gap-2 px-4 py-2 rounded-lg bg-cyan-600 hover:bg-cyan-700 text-white text-sm font-medium disabled:opacity-50 transition-colors"
-                    >
-                        {isGenerating ? (
-                            <>
-                                <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                                Generating...
-                            </>
-                        ) : (
-                            <>
-                                <Download className="w-4 h-4" />
-                                Download {formatInfo?.extension.toUpperCase()}
-                            </>
-                        )}
-                    </button>
                 </div>
-            </div>
+            )}
 
-            {/* Preview Content */}
-            <div className="p-6 space-y-6 max-h-[600px] overflow-y-auto">
+            {/* Preview Content — scrollable in modal, full-height in standalone page */}
+            <div className={`p-6 space-y-6 ${hideActionBar ? '' : 'max-h-[600px] overflow-y-auto'}`}>
                 {/* Executive Summary */}
                 {shouldShowSection('summary') && <ReportSection 
                         title="Executive Summary"

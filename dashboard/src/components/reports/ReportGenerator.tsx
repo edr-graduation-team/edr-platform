@@ -4,19 +4,26 @@
  */
 
 import { useState, useCallback, useMemo } from 'react';
-import { 
-    FileText, FileSpreadsheet, FileCode, Download, RefreshCw, 
+import {
+    FileText, FileSpreadsheet, FileCode, Download, RefreshCw,
     Eye, AlertTriangle, Calendar, Filter,
     BarChart3, Shield, Activity, Terminal, Server, Settings
 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
-import { 
-    alertsApi, 
-    agentsApi, 
+import {
+    alertsApi,
+    agentsApi,
     commandsApi,
 } from '../../api/client';
-import { ProfessionalReportView } from './ProfessionalReportView';
 import { REPORT_TEMPLATES, REPORT_FORMATS, type ReportTemplate, type ReportFormat, type ReportData } from './ReportTemplates';
+
+/** Key used to pass report data to the standalone preview tab via sessionStorage. */
+const SESSION_KEY = 'edr_report_preview';
+
+/** Formats that support a visual preview page (opens in new tab). */
+const PREVIEWABLE_FORMATS = new Set<ReportFormat>(['pdf', 'word', 'html']);
+/** Formats that are data-only — trigger a direct download without preview. */
+const DOWNLOAD_ONLY_FORMATS = new Set<ReportFormat>(['excel', 'csv', 'json']);
 
 const TEMPLATE_ICONS: Record<string, any> = {
     BarChart3, Terminal, Shield, Activity, Settings,
@@ -49,7 +56,7 @@ export function ReportGenerator() {
     const [isGenerating, setIsGenerating] = useState(false);
     const [generatedData, setGeneratedData] = useState<ReportData | null>(null);
     const [error, setError] = useState<string | null>(null);
-    const [showPreview, setShowPreview] = useState(false);
+    // showPreview no longer needed — preview opens in a separate tab
 
     // Custom report sections
     const [customSections, setCustomSections] = useState<string[]>(['summary', 'kpis', 'charts', 'tables']);
@@ -71,9 +78,9 @@ export function ReportGenerator() {
 
         // Fetch all required data in parallel
         const [alertsRes, agentsRes, commandsRes] = await Promise.all([
-            alertsApi.list({ 
-                limit: 1000, 
-                date_from: fromIso, 
+            alertsApi.list({
+                limit: 1000,
+                date_from: fromIso,
                 date_to: toIso,
                 agent_id: reportScope === 'specific' && selectedAgent ? selectedAgent : undefined,
                 sort: 'timestamp',
@@ -102,7 +109,7 @@ export function ReportGenerator() {
             const date = new Date();
             date.setDate(date.getDate() - i);
             const dateStr = date.toISOString().split('T')[0];
-            
+
             const dayAlerts = alerts.filter((a: { timestamp: string }) => a.timestamp.startsWith(dateStr));
             timeline.push({
                 date: dateStr,
@@ -185,7 +192,22 @@ export function ReportGenerator() {
         try {
             const data = await generateReportData();
             setGeneratedData(data);
-            setShowPreview(true);
+
+            if (PREVIEWABLE_FORMATS.has(selectedFormat)) {
+                // PDF / Word / HTML → store payload and open a new browser tab
+                const payload = {
+                    data,
+                    format: selectedFormat,
+                    template: selectedTemplate,
+                    customSections: selectedTemplate === 'custom' ? customSections : undefined,
+                };
+                sessionStorage.setItem(SESSION_KEY, JSON.stringify(payload));
+                window.open('/report-preview', '_blank', 'noopener,noreferrer');
+            } else {
+                // Excel / CSV / JSON → direct download without preview
+                const { exportReport } = await import('./reportExport');
+                await exportReport(data, selectedFormat, selectedTemplate);
+            }
         } catch (err: any) {
             setError(err.message || 'Failed to generate report');
         } finally {
@@ -193,13 +215,12 @@ export function ReportGenerator() {
         }
     };
 
-    // Handle download
+    // Handle download for already-generated data
     const handleDownload = async (format: ReportFormat) => {
         if (!generatedData) return;
-        
+
         setIsGenerating(true);
         try {
-            // Dynamic import to reduce initial bundle size
             const { exportReport } = await import('./reportExport');
             await exportReport(generatedData, format, selectedTemplate);
         } catch (err: any) {
@@ -226,8 +247,8 @@ export function ReportGenerator() {
     }, []);
 
     const toggleCustomSection = (sectionId: string) => {
-        setCustomSections(prev => 
-            prev.includes(sectionId) 
+        setCustomSections(prev =>
+            prev.includes(sectionId)
                 ? prev.filter(id => id !== sectionId)
                 : [...prev, sectionId]
         );
@@ -243,9 +264,9 @@ export function ReportGenerator() {
                             <BarChart3 className="w-5 h-5" />
                         </div>
                         <div>
-                            <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Professional Report Generator</h2>
+                            <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Report Generator</h2>
                             <p className="text-sm text-slate-500 dark:text-slate-400">
-                                Create beautiful, data-rich reports with charts and visualizations
+                                Create reports with charts and data visualizations
                             </p>
                         </div>
                     </div>
@@ -262,16 +283,15 @@ export function ReportGenerator() {
                                 const config = REPORT_TEMPLATES[template];
                                 const Icon = TEMPLATE_ICONS[config.icon] || FileText;
                                 const isSelected = selectedTemplate === template;
-                                
+
                                 return (
                                     <button
                                         key={template}
                                         onClick={() => setSelectedTemplate(template)}
-                                        className={`p-4 rounded-xl border-2 text-left transition-all ${
-                                            isSelected 
-                                                ? 'border-violet-500 bg-violet-50 dark:bg-violet-950/30' 
-                                                : 'border-slate-200 dark:border-slate-700 hover:border-violet-300 dark:hover:border-violet-700'
-                                        }`}
+                                        className={`p-4 rounded-xl border-2 text-left transition-all ${isSelected
+                                            ? 'border-violet-500 bg-violet-50 dark:bg-violet-950/30'
+                                            : 'border-slate-200 dark:border-slate-700 hover:border-violet-300 dark:hover:border-violet-700'
+                                            }`}
                                     >
                                         <Icon className={`w-6 h-6 mb-2 ${isSelected ? 'text-violet-600 dark:text-violet-400' : 'text-slate-500'}`} />
                                         <p className={`font-semibold ${isSelected ? 'text-violet-900 dark:text-violet-100' : 'text-slate-900 dark:text-white'}`}>
@@ -303,18 +323,16 @@ export function ReportGenerator() {
                                     <button
                                         key={section.id}
                                         onClick={() => toggleCustomSection(section.id)}
-                                        className={`p-2 rounded-lg border text-left transition-all ${
-                                            customSections.includes(section.id)
-                                                ? 'border-violet-500 bg-violet-50 dark:bg-violet-950/30 text-violet-700 dark:text-violet-300'
-                                                : 'border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600 opacity-60'
-                                        }`}
+                                        className={`p-2 rounded-lg border text-left transition-all ${customSections.includes(section.id)
+                                            ? 'border-violet-500 bg-violet-50 dark:bg-violet-950/30 text-violet-700 dark:text-violet-300'
+                                            : 'border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600 opacity-60'
+                                            }`}
                                     >
                                         <div className="flex items-center gap-2">
-                                            <div className={`w-4 h-4 rounded border flex items-center justify-center ${
-                                                customSections.includes(section.id)
-                                                    ? 'bg-violet-500 border-violet-500'
-                                                    : 'border-slate-300 dark:border-slate-600'
-                                            }`}>
+                                            <div className={`w-4 h-4 rounded border flex items-center justify-center ${customSections.includes(section.id)
+                                                ? 'bg-violet-500 border-violet-500'
+                                                : 'border-slate-300 dark:border-slate-600'
+                                                }`}>
                                                 {customSections.includes(section.id) && (
                                                     <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
@@ -341,16 +359,15 @@ export function ReportGenerator() {
                             {REPORT_FORMATS.map((fmt) => {
                                 const Icon = FORMAT_ICONS[fmt.id] || FileText;
                                 const isSelected = selectedFormat === fmt.id;
-                                
+
                                 return (
                                     <button
                                         key={fmt.id}
                                         onClick={() => setSelectedFormat(fmt.id)}
-                                        className={`flex items-center gap-2 px-4 py-2 rounded-lg border transition-all ${
-                                            isSelected
-                                                ? 'border-cyan-500 bg-cyan-50 dark:bg-cyan-950/30 text-cyan-700 dark:text-cyan-300'
-                                                : 'border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600'
-                                        }`}
+                                        className={`flex items-center gap-2 px-4 py-2 rounded-lg border transition-all ${isSelected
+                                            ? 'border-cyan-500 bg-cyan-50 dark:bg-cyan-950/30 text-cyan-700 dark:text-cyan-300'
+                                            : 'border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600'
+                                            }`}
                                     >
                                         <Icon className="w-4 h-4" />
                                         <span className="text-sm font-medium">{fmt.name}</span>
@@ -441,6 +458,7 @@ export function ReportGenerator() {
 
                     {/* Action Buttons */}
                     <div className="flex flex-wrap gap-3 pt-4 border-t border-slate-200 dark:border-slate-700">
+                        {/* Primary action — label changes based on format type */}
                         <button
                             onClick={handleGenerate}
                             disabled={isGenerating || (reportScope === 'specific' && !selectedAgent)}
@@ -449,41 +467,47 @@ export function ReportGenerator() {
                             {isGenerating ? (
                                 <>
                                     <RefreshCw className="w-5 h-5 animate-spin" />
-                                    Generating Report...
+                                    {PREVIEWABLE_FORMATS.has(selectedFormat) ? 'Opening Preview…' : 'Downloading…'}
                                 </>
-                            ) : (
+                            ) : PREVIEWABLE_FORMATS.has(selectedFormat) ? (
                                 <>
                                     <Eye className="w-5 h-5" />
                                     Preview Report
                                 </>
+                            ) : (
+                                <>
+                                    <Download className="w-5 h-5" />
+                                    Download {selectedFormat.toUpperCase()}
+                                </>
                             )}
                         </button>
 
-                        {generatedData && (
+                        {/* Re-download button: shown after generation for download-only formats */}
+                        {generatedData && DOWNLOAD_ONLY_FORMATS.has(selectedFormat) && (
                             <button
                                 onClick={() => handleDownload(selectedFormat)}
                                 disabled={isGenerating}
-                                className="flex items-center gap-2 px-6 py-3 rounded-xl bg-slate-800 dark:bg-slate-700 hover:bg-slate-900 dark:hover:bg-slate-600 text-white font-semibold disabled:opacity-50 transition-all"
+                                className="flex items-center gap-2 px-5 py-3 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 font-semibold disabled:opacity-50 transition-all"
                             >
-                                <Download className="w-5 h-5" />
+                                <Download className="w-4 h-4" />
+                                Re-download {selectedFormat.toUpperCase()}
+                            </button>
+                        )}
+
+                        {/* For previewable formats, offer a direct download too after first preview */}
+                        {generatedData && PREVIEWABLE_FORMATS.has(selectedFormat) && (
+                            <button
+                                onClick={() => handleDownload(selectedFormat)}
+                                disabled={isGenerating}
+                                className="flex items-center gap-2 px-5 py-3 rounded-xl bg-slate-800 dark:bg-slate-700 hover:bg-slate-900 dark:hover:bg-slate-600 text-white font-semibold disabled:opacity-50 transition-all"
+                            >
+                                <Download className="w-4 h-4" />
                                 Download {selectedFormat.toUpperCase()}
                             </button>
                         )}
                     </div>
                 </div>
             </div>
-
-            {/* Report Preview */}
-            {showPreview && generatedData && (
-                <ProfessionalReportView
-                    data={generatedData}
-                    template={selectedTemplate}
-                    format={selectedFormat}
-                    onDownload={handleDownload}
-                    isGenerating={isGenerating}
-                    customSections={selectedTemplate === 'custom' ? customSections : undefined}
-                />
-            )}
 
             {/* Quick Stats */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">

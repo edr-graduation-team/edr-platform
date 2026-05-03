@@ -17,6 +17,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -145,6 +146,13 @@ func main() {
 	// RUNTIME PATH — detect execution mode FIRST, then load config
 	// ══════════════════════════════════════════════════════════════════════════
 
+	// Self-heal a common drift scenario: registry says one C2 hostname while
+	// the binary was built (via dashboard / agent-builder ldflags) for a
+	// different deployment domain. Without this step the agent will keep
+	// trying the stale hostname forever, so commands like ISOLATE_NETWORK
+	// fail with "DNS resolution of <stale-host> failed".
+	reconcileServerAddressWithEmbedded(logger)
+
 	// ── Execution mode detection — MUST happen BEFORE config loading ──────────
 	// CRITICAL: When the SCM starts this process, svc.Run() must be called as
 	// early as possible so the service handler is registered with the SCM.
@@ -204,6 +212,94 @@ func main() {
 	}
 
 	runStandalone(cfg, logger, *configPath)
+}
+
+// reconcileServerAddressWithEmbedded compares the C2 hostname currently
+// persisted in the registry against the EmbeddedServerDomain that was baked
+// into this binary at build time. If they disagree AND the registry hostname
+// fails DNS resolution, it rewrites the registry to use the embedded domain
+// and (best-effort) re-patches the Windows hosts file so DNS works.
+//
+// Why this exists:
+//
+//	In real deployments we have seen the registry retain "edr.local" from an
+//	older install while a freshly-built binary was shipped pointing at, e.g.,
+//	"protosoft.cloud". The agent then tries to resolve the stale hostname for
+//	every C2 operation that needs an IP (ISOLATE_NETWORK, watchdog re-resolve,
+//	etc.) and fails with "DNS resolution of edr.local failed".
+//
+// Safety:
+//
+//	The reconciliation is GATED by net.LookupHost(currentHost) == error. If
+//	the operator legitimately set Server.Address to a hostname that DOES
+//	resolve, we leave it alone — even when it differs from the embedded
+//	domain. This preserves intentional overrides while fixing genuine drift.
+func reconcileServerAddressWithEmbedded(logger *logging.Logger) {
+	embDomain := strings.TrimSpace(EmbeddedServerDomain)
+	embIP := strings.TrimSpace(EmbeddedServerIP)
+	embPort := strings.TrimSpace(EmbeddedServerPort)
+	if embDomain == "" {
+		return // not a dashboard / agent-builder build — nothing to reconcile against
+	}
+
+	cfg, err := config.LoadFromRegistry()
+	if err != nil || cfg == nil {
+		return // first boot or registry locked — install path will populate it
+	}
+
+	currentHost, currentPort, splitErr := net.SplitHostPort(cfg.Server.Address)
+	if splitErr != nil {
+		// Address has no :port — treat the whole string as host.
+		currentHost = strings.TrimSpace(cfg.Server.Address)
+		currentPort = ""
+	}
+	if strings.EqualFold(currentHost, embDomain) {
+		return // already aligned
+	}
+
+	// If the operator-configured host actually resolves, respect it.
+	if _, lookupErr := net.LookupHost(currentHost); lookupErr == nil {
+		logger.Debugf("Reconcile: registry host %q resolves OK; embedded %q ignored",
+			currentHost, embDomain)
+		return
+	}
+
+	logger.Warnf("Reconcile: registry C2 host %q does not resolve and differs from embedded %q — self-healing",
+		currentHost, embDomain)
+
+	// Re-patch the hosts file (only meaningful when we have an embedded IP).
+	if embIP != "" {
+		if patchErr := installer.PatchHostsFile(embIP, embDomain); patchErr != nil {
+			logger.Warnf("Reconcile: hosts file patch failed (non-fatal): %v", patchErr)
+		} else {
+			logger.Infof("Reconcile: hosts file patched %s → %s", embIP, embDomain)
+		}
+	}
+
+	port := currentPort
+	if port == "" {
+		port = embPort
+	}
+	if port == "" {
+		port = "50051"
+	}
+	cfg.Server.Address = embDomain + ":" + port
+
+	// The Connection Manager certificate is issued for the internal service
+	// name, not the public deployment domain. Reset TLSServerName so TLS
+	// verification succeeds after the rewrite (mirrors the rule applied by
+	// runInstall / runUpdateStage2).
+	tlsName := strings.TrimSpace(cfg.Server.TLSServerName)
+	if tlsName == "" || strings.EqualFold(tlsName, currentHost) || strings.EqualFold(tlsName, embDomain) {
+		cfg.Server.TLSServerName = config.DefaultGRPCServerCertName
+	}
+
+	if saveErr := cfg.SaveToRegistry(); saveErr != nil {
+		logger.Errorf("Reconcile: SaveToRegistry failed: %v", saveErr)
+		return
+	}
+	logger.Infof("Reconcile: registry C2 host updated %s → %s",
+		currentHost, cfg.Server.Address)
 }
 
 // resolveInstallParam returns the effective value for an install parameter.

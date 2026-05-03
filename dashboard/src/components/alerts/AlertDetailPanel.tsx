@@ -182,7 +182,23 @@ export function AlertDetailPanel({
                             </div>
                             <div>
                                 <label className="text-[10px] text-slate-400 uppercase tracking-wider font-bold">Source Host</label>
-                                <p className="text-slate-700 dark:text-slate-300 text-sm mt-0.5 font-semibold">{alert.source_hostname || '—'}</p>
+                                <p className="text-slate-700 dark:text-slate-300 text-sm mt-0.5 font-semibold">{alert.source_hostname || alert.context_data?.source?.hostname || '—'}</p>
+                            </div>
+                            <div>
+                                <label className="text-[10px] text-slate-400 uppercase tracking-wider font-bold">IP Address</label>
+                                <p className="text-slate-700 dark:text-slate-300 text-sm mt-0.5 font-mono">{alert.context_data?.ip_address || alert.context_data?.source?.ip_address || '—'}</p>
+                            </div>
+                            <div>
+                                <label className="text-[10px] text-slate-400 uppercase tracking-wider font-bold">Operating System</label>
+                                <p className="text-slate-700 dark:text-slate-300 text-sm mt-0.5">
+                                    {alert.context_data?.source?.os_type
+                                        ? `${alert.context_data.source.os_type}${alert.context_data.source.os_version && alert.context_data.source.os_version !== 'unknown' ? ' ' + alert.context_data.source.os_version : ''}`
+                                        : '—'}
+                                </p>
+                            </div>
+                            <div>
+                                <label className="text-[10px] text-slate-400 uppercase tracking-wider font-bold">Agent Version</label>
+                                <p className="text-slate-700 dark:text-slate-300 text-sm mt-0.5 font-mono">{alert.context_data?.source?.agent_version || '—'}</p>
                             </div>
                             <div>
                                 <label className="text-[10px] text-slate-400 uppercase tracking-wider font-bold">Agent ID</label>
@@ -282,10 +298,56 @@ export function AlertDetailPanel({
                                     </div>
                                 )}
 
+                                {/* Lineage suspicion verdict */}
+                                {snapshot!.lineage_suspicion && (() => {
+                                    const sus = snapshot!.lineage_suspicion.toLowerCase();
+                                    const tone =
+                                        sus === 'high' ? 'bg-red-50 dark:bg-red-950/30 border-red-200 dark:border-red-800 text-red-700 dark:text-red-300'
+                                        : sus === 'medium' ? 'bg-orange-50 dark:bg-orange-950/30 border-orange-200 dark:border-orange-800 text-orange-700 dark:text-orange-300'
+                                        : sus === 'low' ? 'bg-yellow-50 dark:bg-yellow-950/30 border-yellow-200 dark:border-yellow-800 text-yellow-700 dark:text-yellow-300'
+                                        : 'bg-slate-50 dark:bg-slate-900/30 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300';
+                                    return (
+                                        <div className={`rounded-lg p-3 border flex items-center gap-3 ${tone}`}>
+                                            <AlertTriangle className="w-4 h-4 shrink-0" />
+                                            <div className="text-sm">
+                                                <span className="font-bold uppercase tracking-wider text-[11px]">Lineage Suspicion: </span>
+                                                <span className="font-semibold">{snapshot!.lineage_suspicion}</span>
+                                            </div>
+                                        </div>
+                                    );
+                                })()}
+
                                 {/* Process Lineage */}
                                 <div className="rounded-xl border border-slate-200 dark:border-slate-700 p-4">
                                     <LineageTree snapshot={snapshot!} />
                                 </div>
+
+                                {/* Correlation graph signal */}
+                                {snapshot!.correlation && (snapshot!.correlation.edges_added !== undefined || snapshot!.correlation.primary_type) && (
+                                    <div className="rounded-xl border border-slate-200 dark:border-slate-700 p-4">
+                                        <label className="text-[10px] text-slate-400 uppercase tracking-wider font-bold block mb-2">Correlation Graph</label>
+                                        <div className="grid grid-cols-3 gap-3">
+                                            {snapshot!.correlation.edges_added !== undefined && (
+                                                <div>
+                                                    <p className="text-[10px] text-slate-400 uppercase tracking-wider">Edges Added</p>
+                                                    <p className="text-lg font-bold text-indigo-600 dark:text-indigo-400">{snapshot!.correlation.edges_added}</p>
+                                                </div>
+                                            )}
+                                            {snapshot!.correlation.primary_type && (
+                                                <div>
+                                                    <p className="text-[10px] text-slate-400 uppercase tracking-wider">Primary Type</p>
+                                                    <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">{snapshot!.correlation.primary_type.replace(/_/g, ' ')}</p>
+                                                </div>
+                                            )}
+                                            {snapshot!.correlation.strongest_score !== undefined && (
+                                                <div>
+                                                    <p className="text-[10px] text-slate-400 uppercase tracking-wider">Strongest Score</p>
+                                                    <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">{(snapshot!.correlation.strongest_score * 100).toFixed(1)}%</p>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                )}
 
                                 {/* UEBA & Burst Signals */}
                                 <div className="rounded-xl border border-slate-200 dark:border-slate-700 p-4">
@@ -349,37 +411,120 @@ export function AlertDetailPanel({
                                 </div>
                             </div>
                         )}
-                        {/* Simplified event key fields + toggleable raw JSON */}
-                        {alert.event_data && (
-                            <div>
-                                <label className="text-[10px] text-slate-400 uppercase tracking-wider font-bold block mb-2">Key Event Details</label>
-                                <div className="space-y-1.5 mb-3">
-                                    {(['process_name', 'command_line', 'executable', 'user_name', 'pid', 'ppid', 'parent_name', 'integrity_level', 'action', 'name', 'path'] as const).map(field => {
-                                        const data = alert.event_data as Record<string, unknown>;
-                                        const val = data?.[field];
-                                        if (val === undefined || val === null || val === '') return null;
-                                        return (
-                                            <div key={field} className="flex items-start gap-3 p-2 bg-slate-50 dark:bg-slate-800 rounded-lg text-sm">
-                                                <span className="font-mono text-indigo-600 dark:text-indigo-400 text-xs shrink-0 mt-0.5 w-32 truncate" title={field}>{field}</span>
+                        {/* Simplified event key fields + toggleable raw JSON.
+                            The by-id endpoint returns the agent envelope under
+                            `context_data` (with a nested `data` sub-map for
+                            collector-specific fields). Older summaries used
+                            `event_data`; we read both for backward compat. */}
+                        {(alert.context_data || alert.event_data) && (() => {
+                            const ctx = (alert.context_data ?? {}) as Record<string, unknown>;
+                            const inner = (ctx.data ?? {}) as Record<string, unknown>;
+                            const legacy = (alert.event_data ?? {}) as Record<string, unknown>;
+                            // Prefer nested data → top-level context_data → legacy event_data.
+                            const pick = (k: string): unknown =>
+                                inner[k] ?? ctx[k] ?? legacy[k];
+
+                            const fields: { key: string; label: string }[] = [
+                                { key: 'name', label: 'Process Name' },
+                                { key: 'executable', label: 'Executable Path' },
+                                { key: 'command_line', label: 'Command Line' },
+                                { key: 'pid', label: 'PID' },
+                                { key: 'ppid', label: 'Parent PID' },
+                                { key: 'parent_name', label: 'Parent Name' },
+                                { key: 'parent_executable', label: 'Parent Path' },
+                                { key: 'user_name', label: 'User' },
+                                { key: 'user_sid', label: 'User SID' },
+                                { key: 'integrity_level', label: 'Integrity Level' },
+                                { key: 'is_elevated', label: 'Elevated' },
+                                { key: 'signature_status', label: 'Signature Status' },
+                                { key: 'signature_issuer', label: 'Signature Issuer' },
+                                { key: 'action', label: 'Action' },
+                                { key: 'event_type', label: 'Event Type' },
+                                { key: 'event_id', label: 'Event ID' },
+                                { key: 'timestamp', label: 'Event Timestamp' },
+                                { key: 'batch_id', label: 'Batch ID' },
+                            ];
+
+                            const rendered = fields
+                                .map(f => ({ ...f, val: pick(f.key) }))
+                                .filter(f => f.val !== undefined && f.val !== null && f.val !== '');
+
+                            const kafka = {
+                                topic: ctx._kafka_topic,
+                                partition: ctx._kafka_partition,
+                                offset: ctx._kafka_offset,
+                                time: ctx._kafka_time,
+                                key: ctx._kafka_key,
+                            };
+                            const hasKafka = Object.values(kafka).some(v => v !== undefined && v !== null && v !== '');
+
+                            const rawSource = alert.context_data ?? alert.event_data;
+
+                            return (
+                                <div>
+                                    <label className="text-[10px] text-slate-400 uppercase tracking-wider font-bold block mb-2">Key Event Details</label>
+                                    <div className="space-y-1.5 mb-3">
+                                        {rendered.map(({ key, label, val }) => (
+                                            <div key={key} className="flex items-start gap-3 p-2 bg-slate-50 dark:bg-slate-800 rounded-lg text-sm">
+                                                <span className="text-indigo-600 dark:text-indigo-400 text-xs shrink-0 mt-0.5 w-36" title={key}>{label}</span>
                                                 <span className="font-mono text-slate-700 dark:text-slate-300 text-xs break-all">{String(val)}</span>
                                             </div>
-                                        );
-                                    })}
+                                        ))}
+                                    </div>
+
+                                    {hasKafka && (
+                                        <div className="mb-3">
+                                            <label className="text-[10px] text-slate-400 uppercase tracking-wider font-bold block mb-2">Kafka Pipeline Metadata</label>
+                                            <div className="grid grid-cols-2 gap-1.5 text-xs">
+                                                {kafka.topic !== undefined && (
+                                                    <div className="flex items-start gap-2 p-2 bg-slate-50 dark:bg-slate-800 rounded-lg">
+                                                        <span className="text-slate-400 w-20 shrink-0">topic</span>
+                                                        <span className="font-mono text-slate-700 dark:text-slate-300 break-all">{String(kafka.topic)}</span>
+                                                    </div>
+                                                )}
+                                                {kafka.partition !== undefined && (
+                                                    <div className="flex items-start gap-2 p-2 bg-slate-50 dark:bg-slate-800 rounded-lg">
+                                                        <span className="text-slate-400 w-20 shrink-0">partition</span>
+                                                        <span className="font-mono text-slate-700 dark:text-slate-300">{String(kafka.partition)}</span>
+                                                    </div>
+                                                )}
+                                                {kafka.offset !== undefined && (
+                                                    <div className="flex items-start gap-2 p-2 bg-slate-50 dark:bg-slate-800 rounded-lg">
+                                                        <span className="text-slate-400 w-20 shrink-0">offset</span>
+                                                        <span className="font-mono text-slate-700 dark:text-slate-300">{String(kafka.offset)}</span>
+                                                    </div>
+                                                )}
+                                                {kafka.time !== undefined && (
+                                                    <div className="flex items-start gap-2 p-2 bg-slate-50 dark:bg-slate-800 rounded-lg">
+                                                        <span className="text-slate-400 w-20 shrink-0">time</span>
+                                                        <span className="font-mono text-slate-700 dark:text-slate-300 break-all">{String(kafka.time)}</span>
+                                                    </div>
+                                                )}
+                                                {kafka.key !== undefined && (
+                                                    <div className="flex items-start gap-2 p-2 bg-slate-50 dark:bg-slate-800 rounded-lg col-span-2">
+                                                        <span className="text-slate-400 w-20 shrink-0">key</span>
+                                                        <span className="font-mono text-slate-700 dark:text-slate-300 break-all">{String(kafka.key)}</span>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    <button
+                                        onClick={() => setShowRawJson(!showRawJson)}
+                                        className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 transition-colors mb-2"
+                                    >
+                                        {showRawJson ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                                        {showRawJson ? 'Hide full JSON' : 'Show full JSON'}
+                                    </button>
+                                    {showRawJson && rawSource && (
+                                        <pre className="p-3 bg-slate-100 dark:bg-slate-900 rounded-lg overflow-auto max-h-64 text-[11px] font-mono text-slate-700 dark:text-slate-300 whitespace-pre-wrap break-all">
+                                            {JSON.stringify(rawSource, null, 2)}
+                                        </pre>
+                                    )}
                                 </div>
-                                <button
-                                    onClick={() => setShowRawJson(!showRawJson)}
-                                    className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 transition-colors mb-2"
-                                >
-                                    {showRawJson ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-                                    {showRawJson ? 'Hide full JSON' : 'Show full JSON'}
-                                </button>
-                                {showRawJson && (
-                                    <pre className="p-3 bg-slate-100 dark:bg-slate-900 rounded-lg overflow-auto max-h-64 text-[11px] font-mono text-slate-700 dark:text-slate-300 whitespace-pre-wrap break-all">
-                                        {JSON.stringify(alert.event_data, null, 2)}
-                                    </pre>
-                                )}
-                            </div>
-                        )}
+                            );
+                        })()}
                     </div>
                 )}
 

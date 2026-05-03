@@ -141,6 +141,12 @@ export interface ContextSnapshot {
     quality_factor?: number;
     missing_context_fields?: string[];
     warnings?: string[];
+    correlation?: {
+        edges_added?: number;
+        primary_type?: string;
+        strongest_score?: number;
+    };
+    related_rules?: string[];
 }
 
 export type ForensicCollection = {
@@ -196,6 +202,52 @@ export interface Alert {
     // Analyst-friendly enrichment (computed by server)
     human_summary?: string;
     source_hostname?: string;
+    // Raw event payload that triggered the alert. Returned only by the
+    // by-id endpoint (/api/v1/sigma/alerts/{id}). Shape mirrors the agent
+    // event envelope plus Kafka metadata.
+    context_data?: {
+        event_id?: string;
+        event_type?: string;
+        timestamp?: string;
+        agent_id?: string;
+        batch_id?: string;
+        ip_address?: string;
+        executable?: string;
+        command_line?: string;
+        name?: string;
+        pid?: number;
+        ppid?: number;
+        integrity_level?: string;
+        is_elevated?: boolean;
+        signature_status?: string;
+        signature_issuer?: string;
+        user_name?: string;
+        user_sid?: string;
+        severity?: string;
+        context_quality_score?: number;
+        source?: {
+            agent_version?: string;
+            hostname?: string;
+            ip_address?: string;
+            os_type?: string;
+            os_version?: string;
+        };
+        data?: Record<string, unknown>;
+        _kafka_topic?: string;
+        _kafka_partition?: number;
+        _kafka_offset?: number;
+        _kafka_time?: string;
+        _kafka_key?: string;
+        [k: string]: unknown;
+    };
+    // Correlated raw event UUIDs (populated for aggregated alerts)
+    event_ids?: string[];
+    // Aggregation / promotion metadata (server-side correlation engine)
+    match_count?: number;
+    related_rules?: string[];
+    combined_confidence?: number;
+    severity_promoted?: boolean;
+    original_severity?: string;
 }
 
 export interface Rule {

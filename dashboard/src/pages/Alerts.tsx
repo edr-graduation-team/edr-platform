@@ -184,15 +184,6 @@ export default function Alerts() {
                 </>
             )}
 
-            {/* Mobile modal */}
-            <div className="lg:hidden">
-                <AlertDetailPanel
-                    alert={selectedAlert}
-                    isOpen={!!selectedAlert}
-                    onClose={() => setSelectedAlert(null)}
-                    onStatusChange={handleStatusChange}
-                />
-            </div>
         </>
     );
 }

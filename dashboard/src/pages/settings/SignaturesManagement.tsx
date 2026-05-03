@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Database, RefreshCw, Send, ShieldCheck, Workflow } from 'lucide-react';
+import { ChevronDown, ChevronUp, Database, RefreshCw, Send, ShieldCheck, Workflow } from 'lucide-react';
 import { authApi, signaturesApi } from '../../api/client';
 import { useToast } from '../../components/Toast';
 import InsightHero from '../../components/InsightHero';
@@ -17,6 +17,7 @@ export default function SignaturesManagement() {
     const { showToast } = useToast();
     const canWrite = authApi.canWriteSettings();
     const [includeOffline, setIncludeOffline] = useState(true);
+    const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
 
     useEffect(() => {
         document.title = 'Signatures — System | EDR Platform';
@@ -52,6 +53,11 @@ export default function SignaturesManagement() {
         },
         onError: (err: any) => showToast(err?.message || 'Failed to push update', 'error'),
     });
+
+    const historyRows = useMemo(() => {
+        const rows = [...(historyQuery.data?.data || [])];
+        return rows.sort((a, b) => sortDir === 'asc' ? a.generation - b.generation : b.generation - a.generation);
+    }, [historyQuery.data, sortDir]);
 
     const sourceRows = useMemo(() => {
         const src = statsQuery.data?.sources || {};
@@ -139,13 +145,22 @@ export default function SignaturesManagement() {
                         <table className="w-full text-sm">
                             <thead>
                                 <tr className="text-left text-xs uppercase text-slate-500 border-b border-slate-200 dark:border-slate-700">
-                                    <th className="pb-2 pr-6 font-semibold">Version</th>
+                                    <th className="pb-2 pr-6 font-semibold">
+                                        <button
+                                            type="button"
+                                            onClick={() => setSortDir(d => d === 'asc' ? 'desc' : 'asc')}
+                                            className="inline-flex items-center gap-1 hover:text-slate-800 dark:hover:text-slate-200"
+                                        >
+                                            Version
+                                            {sortDir === 'asc' ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                                        </button>
+                                    </th>
                                     <th className="pb-2 pr-6 font-semibold">Hashes added</th>
                                     <th className="pb-2 font-semibold">Date &amp; time</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                                {(historyQuery.data?.data || []).map((row) => (
+                                {historyRows.map((row) => (
                                     <tr key={row.id}>
                                         <td className="py-2 pr-6">
                                             <span className="inline-flex items-center px-2 py-0.5 rounded bg-emerald-100 dark:bg-emerald-900/30 text-emerald-800 dark:text-emerald-300 font-mono text-xs font-semibold">

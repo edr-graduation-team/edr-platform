@@ -17,7 +17,7 @@ import {
 } from '../../api/client';
 import { REPORT_TEMPLATES, REPORT_FORMATS, type ReportTemplate, type ReportFormat, type ReportData } from './ReportTemplates';
 
-/** Key used to pass report data to the standalone preview tab via sessionStorage. */
+/** Key used to pass report data to the standalone preview tab via localStorage. */
 const SESSION_KEY = 'edr_report_preview';
 
 /** Formats that support a visual preview page (opens in new tab). */
@@ -201,8 +201,8 @@ export function ReportGenerator() {
                     template: selectedTemplate,
                     customSections: selectedTemplate === 'custom' ? customSections : undefined,
                 };
-                sessionStorage.setItem(SESSION_KEY, JSON.stringify(payload));
-                window.open('/report-preview', '_blank', 'noopener,noreferrer');
+                localStorage.setItem(SESSION_KEY, JSON.stringify(payload));
+                window.open('/report-preview', '_blank');
             } else {
                 // Excel / CSV / JSON → direct download without preview
                 const { exportReport } = await import('./reportExport');

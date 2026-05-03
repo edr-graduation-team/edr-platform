@@ -45,6 +45,35 @@ function safeHostnameLabel(hostname?: string) {
     return hostname && hostname.trim().length > 0 ? hostname.trim() : 'Unknown host';
 }
 
+function formatEventSubtitle(e: CmEventSummary): string {
+    if (!e.data) return e.summary?.slice(0, 120) || '—';
+    try {
+        const d = e.data;
+        if (e.event_type === 'process') {
+            const exe = d.name || d.executable || 'Unknown Process';
+            const cmd = d.command_line ? ` — ${d.command_line}` : '';
+            return `${exe}${cmd}`.slice(0, 180);
+        }
+        if (e.event_type === 'image_load') {
+            const name = d.name || 'Unknown DLL';
+            const proc = d.process_name && d.process_name !== 'unknown' ? ` by ${d.process_name}` : '';
+            return `Loaded: ${name}${proc}`.slice(0, 180);
+        }
+        if (e.event_type === 'file') {
+            const path = d.path || d.directory || 'Unknown Path';
+            return `File: ${path}`.slice(0, 180);
+        }
+        if (e.event_type === 'network') {
+            const proto = d.protocol || 'IP';
+            const dst = d.destination_ip ? `${d.destination_ip}:${d.destination_port || '*'}` : 'Unknown Dest';
+            return `${proto} connection to ${dst}`.slice(0, 180);
+        }
+        return e.summary?.slice(0, 120) || '—';
+    } catch {
+        return e.summary?.slice(0, 120) || '—';
+    }
+}
+
 type FusionKind = 'alert' | 'command' | 'event';
 
 type FusionTimelineRow = {
@@ -54,6 +83,7 @@ type FusionTimelineRow = {
     title: string;
     subtitle: string;
     accent: string;
+    tags?: { label: string; color?: string }[];
 };
 
 const TOOLTIP_STYLE = {
@@ -302,8 +332,12 @@ export default function SocCorrelation() {
                 ts: new Date(a.timestamp).getTime(),
                 id: a.id,
                 title: a.rule_title || a.rule_id || 'Alert',
-                subtitle: `${a.severity} · ${a.status}`,
+                subtitle: `Mitre: ${(a.mitre_techniques || []).join(', ') || 'N/A'}`,
                 accent: fusionAccent('alert'),
+                tags: [
+                    { label: a.severity.toUpperCase(), color: 'bg-amber-500/10 text-amber-600 dark:text-amber-500 border border-amber-500/20' },
+                    { label: a.status.toUpperCase(), color: a.status === 'open' ? 'bg-rose-500/10 text-rose-600 dark:text-rose-500 border border-rose-500/20' : 'bg-slate-500/10 text-slate-500 border border-slate-500/20' }
+                ]
             });
         }
         for (const c of commands) {
@@ -312,18 +346,33 @@ export default function SocCorrelation() {
                 ts: new Date(c.issued_at).getTime(),
                 id: c.id,
                 title: c.command_type.replace(/_/g, ' '),
-                subtitle: `${c.status} · ${c.issued_by_user || 'system'}`,
+                subtitle: `Issued by ${c.issued_by_user || 'system'}`,
                 accent: fusionAccent('command'),
+                tags: [
+                    { label: c.status.toUpperCase(), color: c.status === 'completed' ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-500 border border-emerald-500/20' : 'bg-cyan-500/10 text-cyan-600 dark:text-cyan-500 border border-cyan-500/20' }
+                ]
             });
         }
         for (const e of eventRows) {
+            const tags = [];
+            if (e.severity && e.severity !== 'low' && e.severity !== 'informational') {
+                 tags.push({ label: e.severity.toUpperCase(), color: 'bg-rose-500/10 text-rose-600 dark:text-rose-500 border border-rose-500/20' });
+            }
+            if (e.data?.pid) {
+                 tags.push({ label: `PID: ${e.data.pid}`, color: 'bg-slate-500/10 text-slate-600 dark:text-slate-400 border border-slate-500/20' });
+            }
+            if (e.data?.action) {
+                 tags.push({ label: String(e.data.action), color: 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20' });
+            }
+
             rows.push({
                 kind: 'event',
                 ts: new Date(e.timestamp).getTime(),
                 id: e.id,
-                title: e.event_type,
-                subtitle: e.summary?.slice(0, 120) || '—',
+                title: e.event_type.toUpperCase(),
+                subtitle: formatEventSubtitle(e),
                 accent: fusionAccent('event'),
+                tags
             });
         }
         return rows.sort((a, b) => b.ts - a.ts).slice(0, 120);
@@ -593,14 +642,21 @@ export default function SocCorrelation() {
                                         <div className="w-36 shrink-0 text-[11px] font-mono text-slate-500 dark:text-slate-400 whitespace-nowrap">
                                             {new Date(row.ts).toLocaleString()}
                                         </div>
-                                        <div className="w-20 shrink-0">
+                                        <div className="w-20 shrink-0 flex flex-col items-start gap-1">
                                             <span className="text-[10px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300">
                                                 {kindLabel(row.kind)}
                                             </span>
                                         </div>
                                         <div className="min-w-0 flex-1">
-                                            <div className="text-sm font-medium text-slate-900 dark:text-white truncate">{row.title}</div>
-                                            <div className="text-xs text-slate-600 dark:text-slate-400 line-clamp-2">{row.subtitle}</div>
+                                            <div className="flex flex-wrap items-center gap-2 mb-0.5">
+                                                <div className="text-sm font-semibold text-slate-900 dark:text-white truncate">{row.title}</div>
+                                                {row.tags?.map((t, idx) => (
+                                                    <span key={idx} className={`text-[9px] px-1.5 py-0.5 rounded uppercase tracking-wide font-medium ${t.color || 'bg-slate-100 text-slate-600'}`}>
+                                                        {t.label}
+                                                    </span>
+                                                ))}
+                                            </div>
+                                            <div className="text-xs text-slate-600 dark:text-slate-400 font-mono leading-relaxed line-clamp-2" title={row.subtitle}>{row.subtitle}</div>
                                         </div>
                                     </div>
                                 ))

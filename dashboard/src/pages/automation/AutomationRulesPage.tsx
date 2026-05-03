@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
 import { AlertContextPanel } from '../../components/automation/AlertContextPanel';
 import { UserAssistant } from '../../components/automation/UserAssistant';
-import { Settings, TrendingUp, Clock, AlertTriangle, Plus, Activity, Power, X, CheckCircle, Trash2 } from 'lucide-react';
+import { Settings, TrendingUp, Clock, AlertTriangle, Plus, Activity, Power, X, CheckCircle, Trash2, Zap, Target } from 'lucide-react';
 import { automationApi } from '../../api/client';
 
 interface AutomationRule {
@@ -319,61 +319,60 @@ export function AutomationRulesPage() {
                     </p>
                     
                     {/* Metadata Badges — all driven from DB data */}
-                    <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm mb-4">
-
+                    <div className="flex flex-wrap items-center gap-3 text-xs mb-5">
                       {/* Success Rate */}
-                      <div className="flex items-center gap-2">
-                        <TrendingUp className="w-4 h-4 text-slate-400 shrink-0" />
-                        <span className="text-slate-500">Success Rate:</span>
-                        <span className={`font-bold ${getSuccessRateColor(rule.successRate)}`}>
-                          {rule.successRate > 0 ? `${(rule.successRate * 100).toFixed(1)}%` : 'No data yet'}
-                        </span>
+                      <div className="flex items-center gap-1.5 px-2.5 py-1 bg-slate-100 dark:bg-slate-800 rounded-md text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
+                        <TrendingUp className="w-3.5 h-3.5" />
+                        <span className="font-semibold">Success: <span className={getSuccessRateColor(rule.successRate)}>{rule.successRate > 0 ? `${(rule.successRate * 100).toFixed(1)}%` : 'N/A'}</span></span>
                       </div>
 
                       {/* Cooldown */}
-                      <div className="flex items-center gap-2">
-                        <Clock className="w-4 h-4 text-slate-400 shrink-0" />
-                        <span className="text-slate-500">Cooldown:</span>
-                        <span className="font-semibold text-slate-700 dark:text-slate-300">
-                          {rule.cooldownMinutes === 0 ? 'None' : `${rule.cooldownMinutes} min`}
-                        </span>
+                      <div className="flex items-center gap-1.5 px-2.5 py-1 bg-slate-100 dark:bg-slate-800 rounded-md text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
+                        <Clock className="w-3.5 h-3.5" />
+                        <span className="font-semibold">Cooldown: {rule.cooldownMinutes === 0 ? 'None' : `${rule.cooldownMinutes} min`}</span>
+                      </div>
+
+                      {/* Auto Execute */}
+                      <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md border ${rule.autoExecute ? 'bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 border-indigo-200 dark:border-indigo-800/50' : 'bg-slate-50 dark:bg-slate-800/50 text-slate-500 border-slate-200 dark:border-slate-700'}`}>
+                        <Zap className="w-3.5 h-3.5" />
+                        <span className="font-semibold text-nowrap">{rule.autoExecute ? 'Auto Execute' : 'Manual Trigger'}</span>
                       </div>
 
                       {/* Linked Playbook */}
                       {rule.playbookId && (() => {
                         const pb = playbooks.find((p: any) => p.id === rule.playbookId);
                         return pb ? (
-                          <div className="flex items-center gap-2">
-                            <Activity className="w-4 h-4 text-slate-400 shrink-0" />
-                            <span className="text-slate-500">Playbook:</span>
-                            <span className="font-semibold text-indigo-600 dark:text-indigo-400 truncate max-w-[200px]" title={pb.name}>
-                              {pb.name}
+                          <div className="flex items-center gap-1.5 px-2.5 py-1 bg-blue-50 dark:bg-blue-900/20 rounded-md text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-800/50">
+                            <Activity className="w-3.5 h-3.5" />
+                            <span className="font-semibold truncate max-w-[200px]" title={pb.name}>
+                              PB: {pb.name}
                             </span>
                           </div>
                         ) : null;
                       })()}
 
                       {/* Last Run — only shown if DB has an actual last_execution value */}
-                      {rule.lastExecution ? (
-                        <div className="flex items-center gap-2 text-slate-500">
-                          <Clock className="w-4 h-4 shrink-0" />
-                          <span>Last Run: {new Date(rule.lastExecution).toLocaleString()}</span>
-                        </div>
-                      ) : (
-                        <div className="flex items-center gap-2 text-slate-400">
-                          <Clock className="w-4 h-4 shrink-0" />
-                          <span className="italic">Never executed</span>
+                      {rule.lastExecution && (
+                        <div className="flex items-center gap-1.5 px-2.5 py-1 text-slate-500 font-medium">
+                          <Clock className="w-3.5 h-3.5" />
+                          <span>Last Run: {new Date(rule.lastExecution).toLocaleDateString()}</span>
                         </div>
                       )}
                     </div>
 
                     {/* Trigger Conditions */}
                     {rule.triggerConditions && (
-                      <div className="text-xs bg-slate-100 dark:bg-slate-800/60 rounded-lg px-3 py-2 font-mono text-slate-600 dark:text-slate-400 max-w-xl truncate" title={JSON.stringify(rule.triggerConditions)}>
-                        <span className="font-sans font-semibold text-slate-500 mr-2 not-italic">Trigger:</span>
-                        {typeof rule.triggerConditions === 'string'
-                          ? rule.triggerConditions
-                          : JSON.stringify(rule.triggerConditions)}
+                      <div className="text-xs bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg p-3 font-mono text-slate-600 dark:text-slate-400 w-full overflow-hidden">
+                        <div className="font-sans font-bold text-slate-700 dark:text-slate-300 mb-1.5 flex items-center gap-1.5">
+                           <Target className="w-4 h-4 text-blue-500" />
+                           Trigger Condition
+                        </div>
+                        <div className="pl-5 text-blue-600 dark:text-blue-400 font-semibold break-all whitespace-pre-wrap">
+                          {rule.triggerConditions.rule_name ? `RuleName == "${rule.triggerConditions.rule_name}"` : 
+                           rule.triggerConditions.condition ? rule.triggerConditions.condition : 
+                           typeof rule.triggerConditions === 'string' ? rule.triggerConditions :
+                           JSON.stringify(rule.triggerConditions)}
+                        </div>
                       </div>
                     )}
                   </div>
@@ -418,8 +417,8 @@ export function AutomationRulesPage() {
       {/* Create Rule Modal */}
       {isCreatingRule && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden border border-slate-200 dark:border-slate-800">
-            <div className="flex items-center justify-between p-6 border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/30">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-2xl flex flex-col border border-slate-200 dark:border-slate-800" style={{ maxHeight: '92vh' }}>
+            <div className="flex items-center justify-between p-6 border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/30 shrink-0">
               <div>
                 <h2 className="text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
                   <Activity className="w-5 h-5 text-blue-500" />
@@ -435,7 +434,7 @@ export function AutomationRulesPage() {
               </button>
             </div>
             
-            <div className="p-6 space-y-5">
+            <div className="p-6 space-y-5 overflow-y-auto flex-1">
               <div>
                 <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">
                   Rule Name <span className="text-rose-500">*</span>
@@ -496,7 +495,7 @@ export function AutomationRulesPage() {
               </div>
             </div>
 
-            <div className="flex items-center justify-end gap-3 p-6 border-t border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/30">
+            <div className="flex items-center justify-end gap-3 p-6 border-t border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/30 shrink-0">
               <button 
                 onClick={() => setIsCreatingRule(false)}
                 className="px-5 py-2.5 font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-800 rounded-lg transition-colors"

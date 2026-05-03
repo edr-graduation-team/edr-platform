@@ -160,7 +160,7 @@ func (h *Handlers) GetSignatureSyncHistory(c echo.Context) error {
 	epochs, err := h.malwareHashRepo.GetSyncHistory(c.Request().Context(), limit)
 	if err != nil {
 		h.logger.WithError(err).Error("[signatures] GetSyncHistory failed")
-		return errorResponse(c, http.StatusInternalServerError, "INTERNAL_ERROR", fmt.Sprintf("Failed to fetch sync history: %v", err))
+		return errorResponse(c, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to fetch sync history")
 	}
 	return c.JSON(http.StatusOK, map[string]interface{}{
 		"data": epochs,

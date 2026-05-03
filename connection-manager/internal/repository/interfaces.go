@@ -455,4 +455,7 @@ type MalwareHashRepository interface {
 
 	// GetSyncHistory returns the N most recent completed sync generations, newest first.
 	GetSyncHistory(ctx context.Context, limit int) ([]*SyncEpoch, error)
+
+	// CountEpochs returns the number of successfully committed sync generations.
+	CountEpochs(ctx context.Context) (int64, error)
 }

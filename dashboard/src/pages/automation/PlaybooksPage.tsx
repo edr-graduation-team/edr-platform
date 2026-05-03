@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
 import { AlertContextPanel } from '../../components/automation/AlertContextPanel';
 import { UserAssistant } from '../../components/automation/UserAssistant';
-import { Play, Shield, Clock, TrendingUp, AlertTriangle, Plus, Terminal, X, CheckCircle, Target, Trash2 } from 'lucide-react';
+import { Play, Shield, Clock, TrendingUp, AlertTriangle, Plus, Terminal, X, CheckCircle, Target, Trash2, Filter, Zap, ToggleRight, Check } from 'lucide-react';
 import { automationApi, agentsApi } from '../../api/client';
 
 // Windows event log channels available for collection.
@@ -51,6 +51,8 @@ interface Playbook {
   mitreTechniques: string[];
   enabled: boolean;
   createdAt: string;
+  severityFilter?: string[];
+  rulePattern?: string;
 }
 
 interface AlertContext {
@@ -125,7 +127,7 @@ export function PlaybooksPage() {
       setLoading(true);
       const res = await automationApi.listPlaybooks();
 
-      let mappedPlaybooks: Playbook[] = (res.playbooks || []).map((p) => ({
+      let mappedPlaybooks: Playbook[] = (res.playbooks || []).map((p: any) => ({
         id: p.id,
         name: p.name,
         description: p.description,
@@ -139,6 +141,8 @@ export function PlaybooksPage() {
         mitreTechniques: p.mitre_techniques || [],
         enabled: p.enabled,
         createdAt: p.created_at || new Date().toISOString(),
+        severityFilter: p.severity_filter || [],
+        rulePattern: p.rule_pattern || '',
       }));
 
       setPlaybooks(mappedPlaybooks);
@@ -444,25 +448,43 @@ export function PlaybooksPage() {
           </h3>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {suggestions.map((playbook) => (
-              <div key={playbook.id} className="bg-white dark:bg-slate-800 rounded-lg border border-indigo-100 dark:border-indigo-800 p-5 shadow-sm hover:shadow-md transition-shadow">
-                <div className="flex items-center justify-between mb-3">
-                  <h4 className="font-semibold text-slate-900 dark:text-white truncate" title={playbook.name}>
+              <div key={playbook.id} className="bg-white dark:bg-slate-800 rounded-lg border border-indigo-100 dark:border-indigo-800 p-5 shadow-sm hover:shadow-md transition-shadow flex flex-col h-full">
+                <div className="flex items-center justify-between mb-3 gap-2">
+                  <h4 className="font-semibold text-slate-900 dark:text-white truncate flex-1" title={playbook.name}>
                     {playbook.name}
                   </h4>
-                  <span className={`px-2.5 py-0.5 text-xs rounded-full font-semibold ${getCategoryColor(playbook.category)}`}>
+                  <span className={`shrink-0 px-2.5 py-0.5 text-[10px] uppercase tracking-wider rounded-full font-bold ${getCategoryColor(playbook.category)}`}>
                     {getCategoryLabel(playbook.category)}
                   </span>
                 </div>
-                <p className="text-sm text-slate-600 dark:text-slate-400 mb-5 line-clamp-2" title={playbook.description}>
+                <p className="text-sm text-slate-600 dark:text-slate-400 mb-4 line-clamp-2" title={playbook.description}>
                   {playbook.description}
                 </p>
-                <button
-                  onClick={() => openExecuteModal(playbook)}
-                  className="w-full px-4 py-2.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 font-medium flex items-center justify-center gap-2 transition-colors"
-                >
-                  <Play className="w-4 h-4" />
-                  Run Playbook
-                </button>
+
+                <div className="flex flex-wrap gap-2 mb-5">
+                  {playbook.severityFilter && playbook.severityFilter.length > 0 && (
+                    <div className="flex items-center gap-1 px-2 py-0.5 bg-rose-50 dark:bg-rose-900/20 text-rose-600 dark:text-rose-400 rounded text-[10px] font-bold uppercase border border-rose-200 dark:border-rose-800/50">
+                      <Filter className="w-3 h-3" />
+                      {playbook.severityFilter.join(', ')}
+                    </div>
+                  )}
+                  {playbook.rulePattern && (
+                    <div className="flex items-center gap-1 px-2 py-0.5 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 rounded text-[10px] font-mono border border-indigo-200 dark:border-indigo-800/50 max-w-full truncate" title={playbook.rulePattern}>
+                      <Zap className="w-3 h-3 shrink-0" />
+                      <span className="truncate">{playbook.rulePattern}</span>
+                    </div>
+                  )}
+                </div>
+
+                <div className="mt-auto">
+                  <button
+                    onClick={() => openExecuteModal(playbook)}
+                    className="w-full px-4 py-2.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 font-medium flex items-center justify-center gap-2 transition-colors"
+                  >
+                    <Play className="w-4 h-4" />
+                    Run Playbook
+                  </button>
+                </div>
               </div>
             ))}
           </div>
@@ -504,26 +526,43 @@ export function PlaybooksPage() {
                     </p>
 
                     {/* Metadata Badges */}
-                    <div className="flex flex-wrap items-center gap-4 text-xs mb-5">
-                      <div className="flex items-center gap-1.5 text-slate-500">
-                        <Terminal className="w-4 h-4" />
-                        <span className="font-semibold text-slate-700 dark:text-slate-300">
-                          {playbook.commands.length} Commands
-                        </span>
+                    <div className="flex flex-wrap items-center gap-3 text-xs mb-5">
+                      <div className="flex items-center gap-1.5 px-2.5 py-1 bg-slate-100 dark:bg-slate-800 rounded-md text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
+                        <Terminal className="w-3.5 h-3.5" />
+                        <span className="font-semibold">{playbook.commands.length} Commands</span>
                       </div>
-                      {playbook.mitreTechniques && playbook.mitreTechniques.length > 0 && (
-                        <div className="flex items-center gap-1.5 text-slate-500">
-                          <Shield className="w-4 h-4" />
-                          <span className="font-semibold text-slate-700 dark:text-slate-300">
-                            {playbook.mitreTechniques.join(', ')}
+                      
+                      {playbook.severityFilter && playbook.severityFilter.length > 0 && (
+                        <div className="flex items-center gap-1.5 px-2.5 py-1 bg-rose-50 dark:bg-rose-900/20 rounded-md text-rose-600 dark:text-rose-400 border border-rose-200 dark:border-rose-800/50">
+                          <Filter className="w-3.5 h-3.5" />
+                          <span className="font-semibold capitalize">Severity: {playbook.severityFilter.join(', ')}</span>
+                        </div>
+                      )}
+
+                      {playbook.rulePattern && (
+                        <div className="flex items-center gap-1.5 px-2.5 py-1 bg-indigo-50 dark:bg-indigo-900/20 rounded-md text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800/50">
+                          <Zap className="w-3.5 h-3.5" />
+                          <span className="font-semibold font-mono text-[10px] truncate max-w-[200px]" title={playbook.rulePattern}>
+                            {playbook.rulePattern}
                           </span>
                         </div>
                       )}
-                      <div className="flex items-center gap-1.5 text-slate-500">
-                        <Clock className="w-4 h-4" />
-                        <span>
-                          Created {new Date(playbook.createdAt).toLocaleDateString()}
-                        </span>
+
+                      {playbook.mitreTechniques && playbook.mitreTechniques.length > 0 && (
+                        <div className="flex items-center gap-1.5 px-2.5 py-1 bg-slate-100 dark:bg-slate-800 rounded-md text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
+                          <Shield className="w-3.5 h-3.5" />
+                          <span className="font-semibold">{playbook.mitreTechniques.join(', ')}</span>
+                        </div>
+                      )}
+
+                      <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md border ${playbook.enabled ? 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800/50' : 'bg-slate-50 dark:bg-slate-800/50 text-slate-500 border-slate-200 dark:border-slate-700'}`}>
+                         <ToggleRight className="w-3.5 h-3.5" />
+                         <span className="font-semibold">{playbook.enabled ? 'Enabled' : 'Disabled'}</span>
+                      </div>
+
+                      <div className="flex items-center gap-1.5 px-2.5 py-1 text-slate-500">
+                        <Clock className="w-3.5 h-3.5" />
+                        <span>Created {new Date(playbook.createdAt).toLocaleDateString()}</span>
                       </div>
                     </div>
                   </div>

@@ -1177,6 +1177,13 @@ export const signaturesApi = {
         }>('/api/v1/signatures/push-update', payload ?? {});
         return response.data;
     },
+    syncHistory: async (limit = 50): Promise<{
+        data: Array<{ id: number; generation: number; hashes_inserted: number; synced_at: string }>;
+        meta?: unknown;
+    }> => {
+        const response = await connectionApi.get('/api/v1/signatures/sync-history', { params: { limit } });
+        return response.data;
+    },
 };
 
 // ============================================================================

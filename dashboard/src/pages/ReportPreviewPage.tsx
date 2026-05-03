@@ -2,7 +2,7 @@
  * ReportPreviewPage — Opens in a NEW browser tab.
  *
  * Data flow:
- *   ReportGenerator → sessionStorage['edr_report_preview'] → this page
+ *   ReportGenerator → localStorage['edr_report_preview'] → this page
  *
  * The page is rendered WITHOUT the main PlatformAppShell so it has its
  * own clean layout suitable for printing / saving as PDF.
@@ -78,10 +78,10 @@ export default function ReportPreviewPage() {
         }
     }, []);
 
-    // Read report data from sessionStorage
+    // Read report data from localStorage
     useEffect(() => {
         try {
-            const raw = sessionStorage.getItem(SESSION_KEY);
+            const raw = localStorage.getItem(SESSION_KEY);
             if (!raw) {
                 setError('No report data found. Please go back to the Reports page and generate a report first.');
                 return;
@@ -89,6 +89,9 @@ export default function ReportPreviewPage() {
             const parsed: PreviewPayload = JSON.parse(raw);
             setPayload(parsed);
             document.title = `Report Preview — EDR Platform`;
+            
+            // Optional: clean up localStorage so it doesn't persist forever
+            // localStorage.removeItem(SESSION_KEY);
         } catch {
             setError('Failed to parse report data. The session may have expired.');
         }

@@ -523,11 +523,12 @@ export interface CmEventSummary {
     event_type: string;
     timestamp: string;
     summary: string;
+    severity?: string;
+    data?: any;
 }
 
 /** Single event from `GET /api/v1/events/:id` (includes ingestion `raw`). */
 export interface CmEventDetail extends CmEventSummary {
-    severity: string;
     raw: unknown;
 }
 

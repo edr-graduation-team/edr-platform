@@ -154,6 +154,7 @@ func (c *WMICollector) collectProcesses() {
 		pid, _ := strconv.ParseUint(proc["ProcessId"], 10, 32)
 		ppid, _ := strconv.ParseUint(proc["ParentProcessId"], 10, 32)
 		name := proc["Name"]
+		cmdLine := proc["CommandLine"]
 
 		// Check if this is a new process
 		c.cacheMu.RLock()
@@ -161,15 +162,22 @@ func (c *WMICollector) collectProcesses() {
 		c.cacheMu.RUnlock()
 
 		if !exists && pid > 4 { // Skip System and Idle
-			evt := event.NewEvent(event.EventTypeProcess, event.SeverityLow, map[string]interface{}{
-				"action":       "created",
-				"pid":          pid,
-				"ppid":         ppid,
-				"name":         name,
-				"executable":   proc["ExecutablePath"],
-				"command_line": proc["CommandLine"],
-			})
-			c.sendEvent(evt)
+			// Self-exclusion: suppress the agent and its short-lived child
+			// processes (e.g. the PowerShell spawned by this very WMI query).
+			// Without this, each inventory pass re-discovers its own helper
+			// process and fires a "new-process" event that downstream Sigma
+			// rules (T1021/T1059) flag as suspicious.
+			if !isSelfOrChildProcess(strings.ToLower(name), cmdLine) {
+				evt := event.NewEvent(event.EventTypeProcess, event.SeverityLow, map[string]interface{}{
+					"action":       "created",
+					"pid":          pid,
+					"ppid":         ppid,
+					"name":         name,
+					"executable":   proc["ExecutablePath"],
+					"command_line": cmdLine,
+				})
+				c.sendEvent(evt)
+			}
 		}
 
 		newCache[uint32(pid)] = name

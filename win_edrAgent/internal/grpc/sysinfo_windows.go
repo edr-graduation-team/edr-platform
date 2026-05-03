@@ -3,21 +3,29 @@
 package grpcclient
 
 import (
-	"bytes"
-	"context"
-	"encoding/json"
-	"os/exec"
 	"runtime"
 	"strings"
 	"syscall"
-	"time"
 	"unsafe"
+
+	"golang.org/x/sys/windows/registry"
 )
 
 var (
 	kernel32                 = syscall.NewLazyDLL("kernel32.dll")
 	procGlobalMemoryStatusEx = kernel32.NewProc("GlobalMemoryStatusEx")
+	procGetSystemPowerStatus = kernel32.NewProc("GetSystemPowerStatus")
 )
+
+// systemPowerStatus mirrors the Win32 SYSTEM_POWER_STATUS struct.
+type systemPowerStatus struct {
+	ACLineStatus        byte
+	BatteryFlag         byte
+	BatteryLifePercent  byte
+	SystemStatusFlag    byte
+	BatteryLifeTime     uint32
+	BatteryFullLifeTime uint32
+}
 
 // memoryStatusEx matches the Windows MEMORYSTATUSEX struct.
 type memoryStatusEx struct {
@@ -53,69 +61,71 @@ func getSystemCPUCount() int {
 // getDeviceProfile classifies this Windows endpoint as one of:
 // "Domain Controller", "Server", "Laptop", or "Workstation".
 //
+// Implementation uses only native Win32 registry + API reads (no child
+// processes) to avoid generating self-inflicted process-creation telemetry
+// that would match Atomic Red Team / Sigma T1059 rules on our own agent.
+//
 // Detection order:
-//  1. DomainRole ≥ 4  → Domain Controller (most specific)
-//  2. ProductType = 3 → Server OS
-//  3. PCSystemType = 2 → Mobile / Laptop chassis
-//  4. Default         → Workstation
+//  1. Registry ProductType = "LanmanNT" → Domain Controller
+//  2. Registry ProductType = "ServerNT" → Server
+//  3. GetSystemPowerStatus reports a battery present → Laptop
+//  4. Default → Workstation
 func getDeviceProfile() string {
-	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
-	defer cancel()
-
-	script := `$cs = Get-CimInstance Win32_ComputerSystem -Property PCSystemType,DomainRole; ` +
-		`$os = Get-CimInstance Win32_OperatingSystem -Property ProductType; ` +
-		`[PSCustomObject]@{DomainRole=$cs.DomainRole;PCSystemType=$cs.PCSystemType;ProductType=$os.ProductType} | ConvertTo-Json`
-
-	out, err := exec.CommandContext(ctx, "powershell", "-NoProfile", "-NonInteractive", "-Command", script).Output()
-	if err != nil {
-		return ""
-	}
-
-	var info struct {
-		DomainRole   int `json:"DomainRole"`
-		PCSystemType int `json:"PCSystemType"`
-		ProductType  int `json:"ProductType"`
-	}
-	if json.Unmarshal(bytes.TrimSpace(out), &info) != nil {
-		return ""
-	}
-
-	if info.DomainRole >= 4 {
+	productType := readRegistryString(
+		registry.LOCAL_MACHINE,
+		`SYSTEM\CurrentControlSet\Control\ProductOptions`,
+		"ProductType",
+	)
+	switch productType {
+	case "LanmanNT":
 		return "Domain Controller"
-	}
-	if info.ProductType == 3 {
+	case "ServerNT":
 		return "Server"
 	}
-	if info.PCSystemType == 2 {
+
+	if hasBattery() {
 		return "Laptop"
 	}
 	return "Workstation"
 }
 
-// getLoggedInUser returns the currently logged-in interactive user via
-// Win32_ComputerSystem.UserName.  Falls back to the LogonUI registry key
-// (LastLoggedOnUser) when no interactive session is active (e.g. on servers).
+// getLoggedInUser returns the last interactively logged-on user.
+//
+// Reads HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Authentication\LogonUI
+// value LastLoggedOnUser directly via the registry API — no powershell.exe
+// spawn — so the agent does not trigger its own T1059 detections.
 func getLoggedInUser() string {
-	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
-	defer cancel()
+	u := readRegistryString(
+		registry.LOCAL_MACHINE,
+		`SOFTWARE\Microsoft\Windows\CurrentVersion\Authentication\LogonUI`,
+		"LastLoggedOnUser",
+	)
+	return strings.TrimSpace(u)
+}
 
-	out, err := exec.CommandContext(ctx, "powershell", "-NoProfile", "-NonInteractive", "-Command",
-		`(Get-CimInstance Win32_ComputerSystem).UserName`).Output()
-	if err == nil {
-		if u := strings.TrimSpace(string(out)); u != "" {
-			return u
-		}
+// readRegistryString opens a registry key read-only and returns the string
+// value for the given name. Returns "" on any error (missing key/value/type).
+func readRegistryString(root registry.Key, path, name string) string {
+	k, err := registry.OpenKey(root, path, registry.QUERY_VALUE)
+	if err != nil {
+		return ""
 	}
+	defer k.Close()
+	v, _, err := k.GetStringValue(name)
+	if err != nil {
+		return ""
+	}
+	return v
+}
 
-	ctx2, cancel2 := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel2()
-	out2, err2 := exec.CommandContext(ctx2, "powershell", "-NoProfile", "-NonInteractive", "-Command",
-		`(Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Authentication\LogonUI' `+
-			`-Name 'LastLoggedOnUser' -ErrorAction SilentlyContinue).LastLoggedOnUser`).Output()
-	if err2 == nil {
-		if u := strings.TrimSpace(string(out2)); u != "" {
-			return u
-		}
+// hasBattery reports whether the system exposes a battery, which is a strong
+// signal for a laptop/portable device. Uses GetSystemPowerStatus; the
+// BatteryFlag byte equals 128 ("No system battery") on desktops/servers.
+func hasBattery() bool {
+	var st systemPowerStatus
+	ret, _, _ := procGetSystemPowerStatus.Call(uintptr(unsafe.Pointer(&st)))
+	if ret == 0 {
+		return false
 	}
-	return ""
+	return st.BatteryFlag != 128 && st.BatteryFlag != 255
 }

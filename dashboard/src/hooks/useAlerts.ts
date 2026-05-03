@@ -132,6 +132,29 @@ export function useAlerts(): UseAlertsReturn {
     const total = data?.total || 0;
     const totalPages = Math.ceil(total / pageSize);
 
+    // Fetch full alert details when one is selected.
+    //
+    // The list endpoint (/api/v1/sigma/alerts) returns a compact projection
+    // suitable for table rendering — it omits context_snapshot, score_breakdown,
+    // ancestor_chain, matched_fields, mitre_*, human_summary, etc. Those fields
+    // are only returned by /api/v1/sigma/alerts/{id}. Without this query the
+    // detail drawer would render placeholder/empty sections even though the
+    // data exists server-side.
+    const { data: selectedAlertFull } = useQuery({
+        queryKey: ['alert', selectedAlert?.id],
+        queryFn: () => alertsApi.get(selectedAlert!.id),
+        enabled: !!selectedAlert?.id,
+        staleTime: 30_000,
+    });
+
+    // Prefer the fully-hydrated record when it matches the currently-selected
+    // alert; fall back to the list row while the detail fetch is in-flight so
+    // the drawer never flashes empty.
+    const effectiveSelectedAlert =
+        selectedAlertFull && selectedAlertFull.id === selectedAlert?.id
+            ? selectedAlertFull
+            : selectedAlert;
+
     // Track IDs already rendered from DB
     useEffect(() => {
         for (const alert of alerts) {
@@ -293,7 +316,7 @@ export function useAlerts(): UseAlertsReturn {
 
         // Selection
         selectedIds,
-        selectedAlert,
+        selectedAlert: effectiveSelectedAlert,
         toggleSelectAll,
         toggleSelect,
         setSelectedAlert,

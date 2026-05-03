@@ -24,6 +24,7 @@ interface AlertsTableProps {
     onSelectAlert: (alert: Alert | null) => void;
     onStatusChange: (id: string, status: string) => void;
     onToggleSort: (field: SortField) => void;
+    newAlertIds?: Set<string>;
 }
 
 export function AlertsTable({
@@ -39,6 +40,7 @@ export function AlertsTable({
     onSelectAlert,
     onStatusChange,
     onToggleSort,
+    newAlertIds = new Set(),
 }: AlertsTableProps) {
     if (isLoading) {
         return (
@@ -123,6 +125,7 @@ export function AlertsTable({
                         const uebaSignal = alert.score_breakdown?.ueba_signal || alert.context_snapshot?.score_breakdown?.ueba_signal;
                         const isSelected = selectedAlert?.id === alert.id;
                         const hostname = alert.source_hostname || agentHostnameMap[alert.agent_id || ''] || alert.agent_id?.slice(0, 12) + '…';
+                        const isNew = newAlertIds.has(alert.id) || (new Date().getTime() - new Date(alert.timestamp).getTime() < 5 * 60 * 1000);
                         return (
                             <tr
                                 key={alert.id}
@@ -158,9 +161,16 @@ export function AlertsTable({
                                 </td>
                                 <td className="py-3 px-3">
                                     <div className="max-w-[220px]">
-                                        <p className="font-semibold text-slate-800 dark:text-slate-200 truncate text-sm">
-                                            {alert.rule_title}
-                                        </p>
+                                        <div className="flex items-center gap-2">
+                                            <p className="font-semibold text-slate-800 dark:text-slate-200 truncate text-sm">
+                                                {alert.rule_title}
+                                            </p>
+                                            {isNew && (
+                                                <span className="shrink-0 px-1.5 py-0.5 rounded text-[9px] font-bold bg-cyan-500 text-white animate-pulse shadow-[0_0_8px_rgba(6,182,212,0.6)]">
+                                                    NEW
+                                                </span>
+                                            )}
+                                        </div>
                                         <div className="flex flex-wrap items-center gap-1 mt-1">
                                             {(alert.mitre_tactics || []).slice(0, 2).map(t => (
                                                 <span key={t} className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-purple-500/10 text-purple-600 dark:text-purple-300 border border-purple-500/20">

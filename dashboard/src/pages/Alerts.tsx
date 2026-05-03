@@ -49,6 +49,7 @@ export default function Alerts() {
         // Actions
         handleStatusChange,
         handleBulkAction,
+        newAlertIds,
     } = useAlerts();
 
     if (isError) {
@@ -113,6 +114,7 @@ export default function Alerts() {
                             onSelectAlert={setSelectedAlert}
                             onStatusChange={handleStatusChange}
                             onToggleSort={toggleSort as (field: SortField) => void}
+                            newAlertIds={newAlertIds}
                         />
 
                         {/* Pagination */}

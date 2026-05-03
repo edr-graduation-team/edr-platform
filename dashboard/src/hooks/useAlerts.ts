@@ -55,6 +55,7 @@ export interface UseAlertsReturn {
     handleBulkAction: (status: string) => void;
     isUpdating: boolean;
     isBulkUpdating: boolean;
+    newAlertIds: Set<string>;
 }
 
 export function useAlerts(): UseAlertsReturn {
@@ -70,9 +71,10 @@ export function useAlerts(): UseAlertsReturn {
     const [selectedAlert, setSelectedAlert] = useState<Alert | null>(null);
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
     const [page, setPage] = useState(1);
-    const [pageSize, setPageSize] = useState(50);
-    const [sortBy, setSortBy] = useState<SortField>('risk_score');
+    const [pageSize, setPageSize] = useState(10);
+    const [sortBy, setSortBy] = useState<SortField>('timestamp');
     const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
+    const [newAlertIds, setNewAlertIds] = useState<Set<string>>(new Set());
 
     const [filters, setFilters] = useState<AlertFilters>({
         severities: [],
@@ -120,7 +122,7 @@ export function useAlerts(): UseAlertsReturn {
             date_from: dateRange.from?.toISOString(),
             date_to: new Date().toISOString(),
             search: debouncedSearch || undefined,
-            sort: sortBy,
+            sort: sortOrder === 'desc' ? `-${sortBy}` : sortBy,
             order: sortOrder,
         }),
         refetchInterval: 1000,
@@ -145,6 +147,15 @@ export function useAlerts(): UseAlertsReturn {
             }
             streamSyncTimerRef.current = setTimeout(() => {
                 const newCount = pendingStreamIdsRef.current.size;
+                
+                if (newCount > 0) {
+                    setNewAlertIds(prev => {
+                        const next = new Set(prev);
+                        pendingStreamIdsRef.current.forEach(id => next.add(id));
+                        return next;
+                    });
+                }
+                
                 pendingStreamIdsRef.current.clear();
 
                 queryClient.invalidateQueries({ queryKey: ['alerts'] });
@@ -293,6 +304,7 @@ export function useAlerts(): UseAlertsReturn {
         handleBulkAction,
         isUpdating: updateStatusMutation.isPending,
         isBulkUpdating: bulkUpdateMutation.isPending,
+        newAlertIds,
     };
 }
 

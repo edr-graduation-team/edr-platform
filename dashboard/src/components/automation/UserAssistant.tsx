@@ -141,17 +141,7 @@ export function UserAssistant({ alertContext, onSuggestionAction }: UserAssistan
   };
 
   if (!alertContext) {
-    return (
-      <div className="border border-slate-200 dark:border-slate-800 rounded-xl p-6 bg-slate-50 dark:bg-slate-900/20 shadow-sm">
-        <div className="flex items-center gap-2 text-slate-500 dark:text-slate-400">
-          <BrainCircuit className="w-5 h-5 text-indigo-500" />
-          <span className="font-bold text-slate-700 dark:text-slate-300">AI Assistant</span>
-        </div>
-        <p className="text-sm text-slate-500 dark:text-slate-400 mt-2">
-          No active context. Select an alert from the Triage board to view AI-driven recommendations.
-        </p>
-      </div>
-    );
+    return null;
   }
 
   return (

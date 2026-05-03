@@ -3075,14 +3075,6 @@ export function ManagementAccountPage() {
                             
                             <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-100 dark:border-slate-800 space-y-3">
                                 <div className="flex items-center justify-between">
-                                    <span className="font-medium text-slate-700 dark:text-slate-300">2FA / MFA</span>
-                                    <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/20 px-2 py-0.5 rounded">Enabled</span>
-                                </div>
-                                <div className="flex items-center justify-between">
-                                    <span className="font-medium text-slate-700 dark:text-slate-300">API Access</span>
-                                    <span className="text-xs font-bold text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 px-2 py-0.5 rounded">Read-Only</span>
-                                </div>
-                                <div className="flex items-center justify-between">
                                     <span className="font-medium text-slate-700 dark:text-slate-300">Session TTL</span>
                                     <span className="text-xs font-bold text-slate-500 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded">2 Hours</span>
                                 </div>

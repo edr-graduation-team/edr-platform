@@ -23,7 +23,5 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
-
-# Documentation / Markdown
+/docs/
 *.md
-!README.md

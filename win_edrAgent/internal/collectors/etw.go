@@ -14,6 +14,7 @@ import "C"
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -275,9 +276,9 @@ func goFileIoEvent(evt *C.ParsedFileIoEvent) {
 // the initial snapshot, returning the raw \Device\HarddiskVolumeN path which
 // did NOT match monitoredPath() → responder was silently skipped for Desktop.
 var (
-	devMapMu  sync.RWMutex
-	devMap    map[string]string // lowercase \device\harddiskvolumen → "C:"
-	devMapInit sync.Once        // ensures the refresh goroutine starts exactly once
+	devMapMu   sync.RWMutex
+	devMap     map[string]string // lowercase \device\harddiskvolumen → "C:"
+	devMapInit sync.Once         // ensures the refresh goroutine starts exactly once
 )
 
 // startDevMapRefresher starts a goroutine that refreshes the device map
@@ -432,28 +433,83 @@ var trustedOSProcess = map[string]bool{
 	"wuauclt.exe":             true,
 }
 
+// agentSelfPSMarkers is the consolidated catalogue of substrings that the
+// agent embeds in every PowerShell command it shells out to (WMI inventory,
+// network adapter snapshot, Authenticode checks, USB enumeration, volume
+// serial lookup, kill-process logging, etc.). Any powershell.exe invocation
+// whose command line contains one of these is the agent's own helper —
+// never an attacker.
+//
+// Keep this list lower-case; matching is performed against a lower-cased
+// command line.
+var agentSelfPSMarkers = []string{
+	// WMI / CIM family
+	"get-ciminstance",
+	"win32_process",
+	"win32_computersystem",
+	"win32_logicaldisk",
+	"win32_operatingsystem",
+	// Network
+	"get-nettcpconnection",
+	"get-netadapter",
+	// Process inspection used by responder/executor
+	"get-process -id",
+	// Authenticode signature check used by triage handler
+	"get-authenticodesignature",
+	// Registry-based logon-user lookup (legacy fallback path; the agent now
+	// uses native registry, but keep marker for safety on older agents)
+	"lastloggedonuser",
+	"hklm:\\software\\microsoft\\windows\\currentversion\\authentication\\logonui",
+	// Output serialisation invariably appended by every helper script
+	"convertto-json",
+	"convertto-csv",
+}
+
 // isSelfOrChildProcess returns true if the process is the EDR agent itself
-// or a child process spawned by it (e.g., PowerShell for WMI/Network queries).
-// This prevents a telemetry feedback loop where the agent's own activity
-// generates events that flood the pipeline.
+// or a short-lived helper it spawned (PowerShell for WMI/Network/Authenticode
+// checks). Suppressing these prevents a telemetry feedback loop in which the
+// agent's own activity floods the detection pipeline and produces self-alerts
+// (T1059, T1021, etc.).
+//
+// The function is intentionally defensive — any of the following make a
+// process "self":
+//   - basename matches the agent executable;
+//   - basename is powershell.exe AND the command line carries any marker that
+//     the agent embeds in its own helper invocations.
 func isSelfOrChildProcess(nameLow, cmdLine string) bool {
-	// Skip the agent executable itself
-	if nameLow == "edr-agent.exe" || nameLow == "agent.exe" {
+	// Skip the agent executable itself.
+	if nameLow == "edr-agent.exe" || nameLow == "agent.exe" || nameLow == "edr_agent.exe" {
 		return true
 	}
 
-	// Skip PowerShell instances launched by the agent for WMI/Network collection.
-	// These use -NoProfile and contain known query cmdlets.
-	if nameLow == "powershell.exe" && strings.Contains(cmdLine, "-NoProfile") {
-		if containsAny(cmdLine,
-			"Get-NetTCPConnection", "Get-CimInstance",
-			"Get-NetAdapter", "ConvertTo-Json", "ConvertTo-Csv",
-			"Win32_Process", "Win32_ComputerSystem") {
-			return true
+	// Skip PowerShell helper invocations spawned by the agent.
+	if nameLow == "powershell.exe" || nameLow == "pwsh.exe" {
+		cmdLow := strings.ToLower(cmdLine)
+		// The agent always passes -NoProfile to its helpers; require it as a
+		// cheap pre-filter so we never suppress an attacker-launched shell
+		// that happens to mention one of the marker cmdlets.
+		if strings.Contains(cmdLow, "-noprofile") {
+			for _, marker := range agentSelfPSMarkers {
+				if strings.Contains(cmdLow, marker) {
+					return true
+				}
+			}
 		}
 	}
 
 	return false
+}
+
+// agentPID is captured once at process start; it never changes for the lifetime
+// of the agent and lets us perform an O(1) check against any incoming ppid.
+var agentPID = uint32(os.Getpid())
+
+// isAgentChildByPPID returns true when ppid equals the agent's own PID.
+// This is the deterministic, content-agnostic way to recognise a helper
+// process: regardless of what the helper executes, if its parent is us, it is
+// us. Use this in any code path where the parent PID is available.
+func isAgentChildByPPID(ppid uint32) bool {
+	return ppid != 0 && ppid == agentPID
 }
 
 func (c *ETWCollector) processStart(pid, ppid uint32, eventImg, eventCmd string) {
@@ -490,7 +546,12 @@ func (c *ETWCollector) processStart(pid, ppid uint32, eventImg, eventCmd string)
 	// Self-exclusion: skip the agent's own child processes.
 	// The agent spawns PowerShell for WMI/Network queries; these generate
 	// noise and create a telemetry feedback loop.
-	if isSelfOrChildProcess(nameLow, cmdLine) {
+	//
+	// Two layers:
+	//  1. Deterministic ppid match — any direct child of edr-agent.exe.
+	//  2. Heuristic name+cmdline match — covers indirect helpers (e.g.
+	//     powershell launching cmd.exe) and historical patterns.
+	if isAgentChildByPPID(ppid) || isSelfOrChildProcess(nameLow, cmdLine) {
 		return
 	}
 

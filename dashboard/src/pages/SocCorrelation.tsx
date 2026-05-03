@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import {
@@ -181,6 +181,13 @@ function kindLabel(kind: FusionKind): string {
 export default function SocCorrelation() {
     const [agentId, setAgentId] = useState<string>('');
     const [range, setRange] = useState<DateRange>(() => last24hRange());
+    const [fusionPage, setFusionPage] = useState(0);
+    const [rawAlertsPage, setRawAlertsPage] = useState(0);
+
+    useEffect(() => {
+        setFusionPage(0);
+        setRawAlertsPage(0);
+    }, [agentId, range]);
 
     const fromIso = isoOrNull(range.from);
     const toIso = isoOrNull(range.to);
@@ -637,29 +644,54 @@ export default function SocCorrelation() {
                             {fusionTimeline.length === 0 ? (
                                 <div className="p-8 text-center text-sm text-slate-500 dark:text-slate-400">Nothing to show for this window.</div>
                             ) : (
-                                fusionTimeline.map((row) => (
-                                    <div key={`${row.kind}-${row.id}`} className={`flex gap-3 px-3 py-2.5 border-l-4 ${row.accent}`}>
-                                        <div className="w-36 shrink-0 text-[11px] font-mono text-slate-500 dark:text-slate-400 whitespace-nowrap">
-                                            {new Date(row.ts).toLocaleString()}
-                                        </div>
-                                        <div className="w-20 shrink-0 flex flex-col items-start gap-1">
-                                            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300">
-                                                {kindLabel(row.kind)}
-                                            </span>
-                                        </div>
-                                        <div className="min-w-0 flex-1">
-                                            <div className="flex flex-wrap items-center gap-2 mb-0.5">
-                                                <div className="text-sm font-semibold text-slate-900 dark:text-white truncate">{row.title}</div>
-                                                {row.tags?.map((t, idx) => (
-                                                    <span key={idx} className={`text-[9px] px-1.5 py-0.5 rounded uppercase tracking-wide font-medium ${t.color || 'bg-slate-100 text-slate-600'}`}>
-                                                        {t.label}
-                                                    </span>
-                                                ))}
+                                <>
+                                    {fusionTimeline.slice(fusionPage * 10, (fusionPage + 1) * 10).map((row) => (
+                                        <div key={`${row.kind}-${row.id}`} className={`flex gap-3 px-3 py-2.5 border-l-4 ${row.accent}`}>
+                                            <div className="w-36 shrink-0 text-[11px] font-mono text-slate-500 dark:text-slate-400 whitespace-nowrap">
+                                                {new Date(row.ts).toLocaleString()}
                                             </div>
-                                            <div className="text-xs text-slate-600 dark:text-slate-400 font-mono leading-relaxed line-clamp-2" title={row.subtitle}>{row.subtitle}</div>
+                                            <div className="w-20 shrink-0 flex flex-col items-start gap-1">
+                                                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300">
+                                                    {kindLabel(row.kind)}
+                                                </span>
+                                            </div>
+                                            <div className="min-w-0 flex-1">
+                                                <div className="flex flex-wrap items-center gap-2 mb-0.5">
+                                                    <div className="text-sm font-semibold text-slate-900 dark:text-white truncate">{row.title}</div>
+                                                    {row.tags?.map((t, idx) => (
+                                                        <span key={idx} className={`text-[9px] px-1.5 py-0.5 rounded uppercase tracking-wide font-medium ${t.color || 'bg-slate-100 text-slate-600'}`}>
+                                                            {t.label}
+                                                        </span>
+                                                    ))}
+                                                </div>
+                                                <div className="text-xs text-slate-600 dark:text-slate-400 font-mono leading-relaxed line-clamp-2" title={row.subtitle}>{row.subtitle}</div>
+                                            </div>
                                         </div>
-                                    </div>
-                                ))
+                                    ))}
+                                    {fusionTimeline.length > 10 && (
+                                        <div className="flex items-center justify-between px-4 py-3 bg-slate-50/50 dark:bg-slate-800/50">
+                                            <div className="text-xs text-slate-500 dark:text-slate-400">
+                                                Showing {fusionPage * 10 + 1} to {Math.min((fusionPage + 1) * 10, fusionTimeline.length)} of {fusionTimeline.length} entries
+                                            </div>
+                                            <div className="flex gap-2">
+                                                <button
+                                                    onClick={() => setFusionPage(p => Math.max(0, p - 1))}
+                                                    disabled={fusionPage === 0}
+                                                    className="px-3 py-1.5 text-xs font-medium rounded-md border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-300 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-slate-50 dark:hover:bg-slate-600 transition-colors"
+                                                >
+                                                    Prev
+                                                </button>
+                                                <button
+                                                    onClick={() => setFusionPage(p => Math.min(Math.ceil(fusionTimeline.length / 10) - 1, p + 1))}
+                                                    disabled={(fusionPage + 1) * 10 >= fusionTimeline.length}
+                                                    className="px-3 py-1.5 text-xs font-medium rounded-md border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-300 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-slate-50 dark:hover:bg-slate-600 transition-colors"
+                                                >
+                                                    Next
+                                                </button>
+                                            </div>
+                                        </div>
+                                    )}
+                                </>
                             )}
                         </div>
                     </div>
@@ -683,7 +715,7 @@ export default function SocCorrelation() {
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        {alerts.slice(0, 25).map((a) => (
+                                        {alerts.slice(rawAlertsPage * 10, (rawAlertsPage + 1) * 10).map((a) => (
                                             <tr key={a.id} className="border-t border-slate-100 dark:border-slate-800">
                                                 <td className="px-2 py-1.5 whitespace-nowrap">{new Date(a.timestamp).toLocaleString()}</td>
                                                 <td className="px-2 py-1.5 font-mono">{a.severity}</td>
@@ -699,6 +731,29 @@ export default function SocCorrelation() {
                                         )}
                                     </tbody>
                                 </table>
+                                {alerts.length > 10 && (
+                                    <div className="flex items-center justify-between px-3 py-2 border-t border-slate-200 dark:border-slate-700/60 bg-slate-50/50 dark:bg-slate-800/50">
+                                        <div className="text-[10px] text-slate-500">
+                                            Showing {rawAlertsPage * 10 + 1} to {Math.min((rawAlertsPage + 1) * 10, alerts.length)} of {alerts.length}
+                                        </div>
+                                        <div className="flex gap-1">
+                                            <button
+                                                onClick={() => setRawAlertsPage(p => Math.max(0, p - 1))}
+                                                disabled={rawAlertsPage === 0}
+                                                className="px-2 py-1 text-[10px] font-medium rounded border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-300 disabled:opacity-50 hover:bg-slate-50 dark:hover:bg-slate-600 transition-colors"
+                                            >
+                                                Prev
+                                            </button>
+                                            <button
+                                                onClick={() => setRawAlertsPage(p => Math.min(Math.ceil(alerts.length / 10) - 1, p + 1))}
+                                                disabled={(rawAlertsPage + 1) * 10 >= alerts.length}
+                                                className="px-2 py-1 text-[10px] font-medium rounded border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-300 disabled:opacity-50 hover:bg-slate-50 dark:hover:bg-slate-600 transition-colors"
+                                            >
+                                                Next
+                                            </button>
+                                        </div>
+                                    </div>
+                                )}
                             </div>
                             <div>
                                 <div className="text-xs font-semibold text-slate-600 dark:text-slate-300 mb-2">Telemetry by type</div>

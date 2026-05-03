@@ -206,25 +206,6 @@ export default function ReportPreviewPage() {
 
             {/* ── Report content ──────────────────────────────────────────── */}
             <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 print:px-0 print:py-0 print:max-w-none">
-                {/* Print-specific overrides requested by the user */}
-                <style type="text/css" media="print">
-                    {`
-                        @page {
-                            /* Set default paper size to Tabloid and orientation to Landscape */
-                            size: tabloid landscape;
-                            margin: 10mm;
-                        }
-                        /* Apply 120% scale */
-                        html, body {
-                            zoom: 1.2;
-                        }
-                        /* Ensure background colors print properly */
-                        * {
-                            -webkit-print-color-adjust: exact !important;
-                            print-color-adjust: exact !important;
-                        }
-                    `}
-                </style>
                 <Suspense fallback={<LoadingSpinner label="Rendering report…" />}>
                     <ProfessionalReportView
                         data={payload.data}

@@ -1,4 +1,5 @@
 # Compiled binaries
+*.pdf
 *.exe
 *.exe~
 *.dll

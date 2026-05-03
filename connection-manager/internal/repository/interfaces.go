@@ -452,4 +452,7 @@ type MalwareHashRepository interface {
 
 	// GetLatest returns the most recently inserted hashes, ordered newest-first.
 	GetLatest(ctx context.Context, limit int) ([]*models.MalwareHash, error)
+
+	// GetSyncHistory returns the N most recent completed sync generations, newest first.
+	GetSyncHistory(ctx context.Context, limit int) ([]*SyncEpoch, error)
 }

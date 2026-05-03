@@ -145,6 +145,29 @@ func (h *Handlers) TriggerSignatureSync(c echo.Context) error {
 	})
 }
 
+// GetSignatureSyncHistory returns recent completed sync generations with stats.
+// GET /api/v1/signatures/sync-history  (JWT protected)
+func (h *Handlers) GetSignatureSyncHistory(c echo.Context) error {
+	if h.malwareHashRepo == nil {
+		return errorResponse(c, http.StatusServiceUnavailable, "DB_UNAVAILABLE", "Signature store not available")
+	}
+	limit := 50
+	if v := c.QueryParam("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 200 {
+			limit = n
+		}
+	}
+	epochs, err := h.malwareHashRepo.GetSyncHistory(c.Request().Context(), limit)
+	if err != nil {
+		h.logger.WithError(err).Error("[signatures] GetSyncHistory failed")
+		return errorResponse(c, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to fetch sync history")
+	}
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"data": epochs,
+		"meta": responseMeta(c),
+	})
+}
+
 // ListSignatureHashes returns a paginated list of stored hashes (admin view).
 // GET /api/v1/signatures  (JWT protected)
 func (h *Handlers) ListSignatureHashes(c echo.Context) error {

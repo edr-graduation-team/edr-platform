@@ -5,6 +5,13 @@ import { authApi, signaturesApi } from '../../api/client';
 import { useToast } from '../../components/Toast';
 import InsightHero from '../../components/InsightHero';
 
+function formatDateTime(iso: string) {
+    return new Date(iso).toLocaleString(undefined, {
+        year: 'numeric', month: 'short', day: '2-digit',
+        hour: '2-digit', minute: '2-digit', second: '2-digit',
+    });
+}
+
 export default function SignaturesManagement() {
     const queryClient = useQueryClient();
     const { showToast } = useToast();
@@ -21,9 +28,9 @@ export default function SignaturesManagement() {
         refetchInterval: 10000,
     });
 
-    const listQuery = useQuery({
-        queryKey: ['signatures', 'latest-list'],
-        queryFn: () => signaturesApi.list({ limit: 25 }),
+    const historyQuery = useQuery({
+        queryKey: ['signatures', 'sync-history'],
+        queryFn: () => signaturesApi.syncHistory(50),
         refetchInterval: 15000,
     });
 
@@ -120,20 +127,37 @@ export default function SignaturesManagement() {
             </div>
 
             <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-5">
-                <h3 className="font-semibold text-slate-900 dark:text-slate-100 mb-3">Recent signature entries</h3>
-                {listQuery.isLoading ? (
+                <h3 className="font-semibold text-slate-900 dark:text-slate-100 mb-3">Sync history</h3>
+                {historyQuery.isLoading ? (
                     <p className="text-sm text-slate-500">Loading…</p>
-                ) : listQuery.isError ? (
-                    <p className="text-sm text-rose-600 dark:text-rose-400">Failed to load signatures list.</p>
+                ) : historyQuery.isError ? (
+                    <p className="text-sm text-rose-600 dark:text-rose-400">Failed to load sync history.</p>
+                ) : (historyQuery.data?.data || []).length === 0 ? (
+                    <p className="text-sm text-slate-500">No syncs recorded yet. Run a sync or wait for the automatic 6-hour cycle.</p>
                 ) : (
-                    <div className="space-y-2">
-                        {(listQuery.data?.data || []).map((row) => (
-                            <div key={`${row.version}-${row.sha256}`} className="rounded-lg border border-slate-200 dark:border-slate-700 px-3 py-2">
-                                <div className="text-xs text-slate-500">v{row.version} · {row.source || 'unknown source'}</div>
-                                <div className="font-mono text-xs break-all">{row.sha256}</div>
-                                {(row.family || row.name) && <div className="text-xs mt-1">{row.family || row.name}</div>}
-                            </div>
-                        ))}
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-sm">
+                            <thead>
+                                <tr className="text-left text-xs uppercase text-slate-500 border-b border-slate-200 dark:border-slate-700">
+                                    <th className="pb-2 pr-6 font-semibold">Version</th>
+                                    <th className="pb-2 pr-6 font-semibold">Hashes added</th>
+                                    <th className="pb-2 font-semibold">Date &amp; time</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                                {(historyQuery.data?.data || []).map((row) => (
+                                    <tr key={row.id}>
+                                        <td className="py-2 pr-6">
+                                            <span className="inline-flex items-center px-2 py-0.5 rounded bg-emerald-100 dark:bg-emerald-900/30 text-emerald-800 dark:text-emerald-300 font-mono text-xs font-semibold">
+                                                v{row.generation}
+                                            </span>
+                                        </td>
+                                        <td className="py-2 pr-6 font-mono">{row.hashes_inserted.toLocaleString()}</td>
+                                        <td className="py-2 text-slate-500 dark:text-slate-400">{formatDateTime(row.synced_at)}</td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
                     </div>
                 )}
             </div>

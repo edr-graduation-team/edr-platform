@@ -166,6 +166,13 @@ func (c *ETWCollector) handleImageLoad(pid uint32, imagePath string) {
 		procName = "unknown"
 	}
 
+	// Self-exclusion: ignore image loads inside the agent itself or any
+	// helper process it spawned. Without this gate, the agent generates a
+	// burst of DLL-load events on every PowerShell helper invocation.
+	if isSelfOrChildProcess(strings.ToLower(procName), getCmdLine(pid)) {
+		return
+	}
+
 	// Lightweight Authenticode check.
 	isSigned := isFileSigned(imagePath)
 

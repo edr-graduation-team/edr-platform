@@ -114,6 +114,19 @@ func (h *Handlers) UpdateRolePermissions(c echo.Context) error {
 		return errorResponse(c, http.StatusBadRequest, "INVALID_REQUEST", "Invalid request body")
 	}
 
+	// Protect the admin role: its permissions are immutable.
+	// The admin bypass in RequirePermission grants full access regardless of DB entries,
+	// so modifying admin permissions would be misleading and potentially dangerous.
+	roles, err := h.roleRepo.ListRoles(c.Request().Context())
+	if err == nil {
+		for _, r := range roles {
+			if r.ID == roleID && r.Name == "admin" {
+				return errorResponse(c, http.StatusForbidden, "ADMIN_PROTECTED",
+					"Cannot modify the permissions of the built-in admin role")
+			}
+		}
+	}
+
 	if err := h.roleRepo.UpdateRolePermissions(c.Request().Context(), roleID, req.PermissionIDs); err != nil {
 		h.logger.WithError(err).Error("Failed to update role permissions")
 		return errorResponse(c, http.StatusInternalServerError, "INTERNAL_ERROR", "Failed to update role permissions")

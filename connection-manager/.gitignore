@@ -12,6 +12,9 @@ dist/
 # Test binary
 *.test
 
+/docs/
+*.md
+
 # Output of go coverage
 *.out
 coverage.html
@@ -38,6 +41,7 @@ Thumbs.db
 certs/ca.key
 certs/server.key
 certs/jwt_*.pem
+certs/*.crt
 
 # Vendor (if using)
 vendor/
@@ -53,10 +57,6 @@ __debug_bin
 # Temporary files
 tmp/
 temp/
-
-# Documentation / Markdown
-*.md
-!README.md
 
 # Protobuf files explicitly tracked
 !*.proto

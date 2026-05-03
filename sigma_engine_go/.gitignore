@@ -5,7 +5,10 @@
 *.so
 *.dylib
 sigma-engine
-
+sigma-engine-live
+sigma-engine-kafka
+/docs/
+*.md
 # Test binary
 *.test
 
@@ -32,4 +35,3 @@ Thumbs.db
 # Build artifacts
 dist/
 build/
-

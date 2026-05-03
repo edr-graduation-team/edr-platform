@@ -831,6 +831,14 @@ func (h *Handlers) UpdateUser(c echo.Context) error {
 		return errorResponse(c, http.StatusNotFound, "NOT_FOUND", "User not found")
 	}
 
+	// Protect admin accounts: role, status cannot be changed for admin users.
+	// This ensures the admin account can never be demoted, locked, or deactivated
+	// through the API — even by another admin.
+	if user.Role == "admin" && (req.Role != "" || req.Status != "") {
+		return errorResponse(c, http.StatusForbidden, "ADMIN_PROTECTED",
+			"Cannot change the role or status of an admin account")
+	}
+
 	// Apply updates
 	if req.Email != "" {
 		user.Email = req.Email
@@ -886,6 +894,17 @@ func (h *Handlers) DeleteUser(c echo.Context) error {
 	currentUser := getCurrentUser(c)
 	if currentUser != nil && currentUser.UserID == idStr {
 		return errorResponse(c, http.StatusBadRequest, "SELF_DELETE", "Cannot delete your own account")
+	}
+
+	// Protect admin accounts: admin users cannot be deleted.
+	// Fetch the target user to verify their role before deletion.
+	targetUser, err := h.userRepo.GetByID(c.Request().Context(), targetUserID)
+	if err != nil {
+		return errorResponse(c, http.StatusNotFound, "NOT_FOUND", "User not found")
+	}
+	if targetUser.Role == "admin" {
+		return errorResponse(c, http.StatusForbidden, "ADMIN_PROTECTED",
+			"Cannot delete an admin account")
 	}
 
 	if err := h.userRepo.Delete(c.Request().Context(), targetUserID); err != nil {

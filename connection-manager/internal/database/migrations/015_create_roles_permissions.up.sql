@@ -91,7 +91,9 @@ INSERT INTO permissions (resource, action, description) VALUES
     ('audit',     'read',    'View audit log entries'),
     -- Enrollment Tokens
     ('tokens',    'read',    'View enrollment tokens'),
-    ('tokens',    'write',   'Generate and revoke enrollment tokens')
+    ('tokens',    'write',   'Generate and revoke enrollment tokens'),
+    -- Agents (build & package management — admin only)
+    ('agents',    'write',   'Build agent installers and create agent packages')
 ON CONFLICT (resource, action) DO NOTHING;
 
 -- ═════════════════════════════════════════════════════════════════════════════
@@ -126,6 +128,7 @@ WHERE (r.name, p.resource, p.action) IN (
     ('admin', 'audit',     'read'),
     ('admin', 'tokens',    'read'),
     ('admin', 'tokens',    'write'),
+    ('admin', 'agents',    'write'),
 
     -- ── Security: triage + isolate + audit, no settings/user mgmt ──
     ('security', 'alerts',    'read'),

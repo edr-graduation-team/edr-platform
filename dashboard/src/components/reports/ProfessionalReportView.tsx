@@ -394,13 +394,13 @@ function ReportSection({
                     <Icon className="w-4 h-4" style={{ color }} />
                     <span className="font-semibold text-slate-900 dark:text-white">{title}</span>
                 </div>
-                {isExpanded ? <ChevronUp className="w-4 h-4 text-slate-500" /> : <ChevronDown className="w-4 h-4 text-slate-500" />}
-            </button>
-            {isExpanded && (
-                <div className="p-4">
-                    {children}
+                <div className="print:hidden">
+                    {isExpanded ? <ChevronUp className="w-4 h-4 text-slate-500" /> : <ChevronDown className="w-4 h-4 text-slate-500" />}
                 </div>
-            )}
+            </button>
+            <div className={`p-4 ${isExpanded ? 'block' : 'hidden print:block'}`}>
+                {children}
+            </div>
         </div>
     );
 }

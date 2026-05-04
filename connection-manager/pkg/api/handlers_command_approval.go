@@ -11,7 +11,6 @@
 package api
 
 import (
-	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -21,14 +20,6 @@ import (
 
 	"github.com/edr-platform/connection-manager/internal/service"
 )
-
-// errGateBlocked is a sentinel returned by consumeApprovalIfRequired after
-// it has already written an HTTP error response (via c.JSON). The calling
-// handler MUST propagate this error to Echo so no further response body is
-// appended. Echo's DefaultHTTPErrorHandler checks c.Response().Committed
-// and skips writing when the response is already on the wire, so the
-// client sees only the JSON we wrote.
-var errGateBlocked = errors.New("approval gate: request blocked (response already written)")
 
 // ApprovalServiceProvider is implemented by Handlers (see middleware.go).
 // We keep the name on the receiver here just so the wiring in main.go
@@ -201,23 +192,36 @@ func (h *Handlers) VerifyCommandApproval(c echo.Context) error {
 //     skipped (backwards compatible). This is intentional so deployments
 //     without SMTP can still operate exactly as before.
 //
-// On gate failure the function writes the response itself and returns a
-// non-nil error so the caller can early-return.
-func (h *Handlers) consumeApprovalIfRequired(c echo.Context, fallbackToken string) error {
+// IMPORTANT — return convention:
+//
+//	When the gate blocks a request it writes the HTTP error response itself
+//	(c.JSON) and returns nil. Returning nil is deliberate: Echo v4's Timeout
+//	middleware buffers all writes, and when a handler returns a non-nil error
+//	the buffer is DISCARDED — meaning the 403 never reaches the client.
+//	Because we return nil, the Timeout middleware flushes the 403 correctly.
+//
+//	The caller MUST check c.Response().Committed after this call to decide
+//	whether to continue:
+//
+//	    h.consumeApprovalIfRequired(c, token)
+//	    if c.Response().Committed {
+//	        return nil // gate wrote the response — stop processing
+//	    }
+func (h *Handlers) consumeApprovalIfRequired(c echo.Context, fallbackToken string) {
 	svc := h.commandApprovalService()
 	if svc == nil || !svc.Available() {
-		return nil // feature off → no gate
+		return // feature off → no gate
 	}
 
 	user := getCurrentUser(c)
 	if user == nil {
 		errorResponse(c, http.StatusUnauthorized, "AUTH_REQUIRED", "Authentication required")
-		return errGateBlocked
+		return
 	}
 	uid, err := uuid.Parse(user.UserID)
 	if err != nil {
 		errorResponse(c, http.StatusUnauthorized, "AUTH_REQUIRED", "Invalid user id in token")
-		return errGateBlocked
+		return
 	}
 
 	token := strings.TrimSpace(c.Request().Header.Get("X-Approval-Token"))
@@ -227,7 +231,7 @@ func (h *Handlers) consumeApprovalIfRequired(c echo.Context, fallbackToken strin
 	if token == "" {
 		errorResponse(c, http.StatusForbidden, "APPROVAL_REQUIRED",
 			"This command requires an out-of-band approval. Request a code from /commands/approval and resubmit with X-Approval-Token.")
-		return errGateBlocked
+		return
 	}
 
 	if cErr := svc.ConsumeToken(c.Request().Context(), uid, token); cErr != nil {
@@ -237,8 +241,6 @@ func (h *Handlers) consumeApprovalIfRequired(c echo.Context, fallbackToken strin
 		}).WithError(cErr).Warn("Approval token rejected")
 		errorResponse(c, http.StatusForbidden, "APPROVAL_INVALID",
 			"Approval token is missing, expired, or already consumed. Request a new approval.")
-		return errGateBlocked
+		return
 	}
-
-	return nil
 }

@@ -241,6 +241,7 @@ func main() {
 	ctx := context.Background()
 	var agentSvc service.AgentService
 	var authSvc service.AuthService
+	var commandApprovalSvc service.CommandApprovalService
 	var enrollmentTokenRepo repository.EnrollmentTokenRepository
 	var agentRepo repository.AgentRepository     // hoisted for sweeper access
 	var commandRepo repository.CommandRepository // hoisted for C2 injection
@@ -340,9 +341,24 @@ func main() {
 				logger.WithField("from", emailSvc.From()).
 					Info("MFA (email OTP) enabled")
 			}
+
+			// ── Out-of-band manual-command approval (EC2_EMAIL_VERIFY) ───
+			// Builds the approval service iff the second-channel mailbox
+			// is configured. When unset we leave commandApprovalSvc nil
+			// and the API gate becomes a no-op (backwards compatible).
+			verifyAddr := strings.TrimSpace(os.Getenv("EC2_EMAIL_VERIFY"))
+			if verifyAddr != "" {
+				commandApprovalSvc = service.NewCommandApprovalService(redisClient, emailSvc, verifyAddr, logger)
+				logger.WithField("verify_to", verifyAddr).
+					Info("Manual-command approval (email OTP) enabled — every dashboard-issued command will require an out-of-band code")
+			} else {
+				logger.Warn("EC2_EMAIL_VERIFY not set — manual-command approval gate is DISABLED. " +
+					"Set EC2_EMAIL_VERIFY=<approver@your-domain> to require an OTP for every dashboard-issued command.")
+			}
 		} else {
 			logger.Warn("SMTP disabled — MFA email delivery unavailable. " +
 				"Users with mfa_enabled=true will be refused login until SMTP is configured.")
+			logger.Warn("SMTP disabled — manual-command approval is DISABLED for the same reason.")
 		}
 
 		logger.Info("Database connected - agent registration enabled")
@@ -471,6 +487,10 @@ func main() {
 	// Wire fallback store stats into REST API reliability endpoint.
 	// Safe even if nil (endpoint returns enabled=false + reason).
 	apiHandlers.SetFallbackStore(fallbackStore)
+	// Wire the optional out-of-band approval service. nil is fine — when
+	// it is nil the gate becomes a no-op so deployments without SMTP /
+	// EC2_EMAIL_VERIFY behave exactly as before.
+	apiHandlers.SetCommandApprovalService(commandApprovalSvc)
 
 	// Wire the gRPC server's AgentRegistry into REST API handlers for C2 command routing.
 	// Without this, POST /agents/:id/commands returns 503 (registry == nil).

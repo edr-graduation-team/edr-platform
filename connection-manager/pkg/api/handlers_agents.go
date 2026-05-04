@@ -492,8 +492,14 @@ func (h *Handlers) ExecuteAgentCommand(c echo.Context) error {
 	// bypass this entirely because they do not pass through HTTP. When the
 	// approval service is not configured the gate is a no-op so behaviour
 	// is unchanged for environments without SMTP.
-	if gateErr := h.consumeApprovalIfRequired(c, req.ApprovalToken); gateErr != nil {
-		return gateErr
+	//
+	// NOTE: consumeApprovalIfRequired writes the HTTP error response itself
+	// and returns void. We check c.Response().Committed to know if the gate
+	// blocked the request — this avoids returning a non-nil error which
+	// would cause Echo's Timeout middleware to discard the buffered response.
+	h.consumeApprovalIfRequired(c, req.ApprovalToken)
+	if c.Response().Committed {
+		return nil // gate wrote the 403 — stop here
 	}
 
 	// Reject unknown types here (API allowlist). Agent still enforces its own rules

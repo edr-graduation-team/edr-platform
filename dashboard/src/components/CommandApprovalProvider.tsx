@@ -53,7 +53,9 @@ export function CommandApprovalProvider({ children }: { children: React.ReactNod
     // ── Register / unregister with the axios interceptor ─────────────────
     useEffect(() => {
         setApprovalTokenResolver(async (ctx: ApprovalContext): Promise<string> => {
+            console.debug('[CommandApprovalProvider] resolver called, ctx=', ctx);
             return new Promise<string>((resolve, reject) => {
+                console.debug('[CommandApprovalProvider] opening modal');
                 setState({
                     open: true,
                     ctx,
@@ -100,6 +102,7 @@ export function CommandApprovalProvider({ children }: { children: React.ReactNod
             // If the server says approval is disabled (503 APPROVAL_DISABLED),
             // silently proceed by resolving with an empty token — the backend
             // gate will be a no-op.
+            console.debug('[CommandApprovalProvider] issue error', err?.response?.status, err?.response?.data);
             if (err?.response?.status === 503 &&
                 err?.response?.data?.error_code === 'APPROVAL_DISABLED') {
                 state.resolve?.('__disabled__');

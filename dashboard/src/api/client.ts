@@ -60,6 +60,132 @@ export const connectionApi = createApiClient(config.connectionManagerUrl);
 export const api = sigmaApi;
 
 // ============================================================================
+// Command-approval (out-of-band OTP) — module-level glue
+// ============================================================================
+//
+// When the server is configured with EC2_EMAIL_VERIFY, every manual command
+// (POST /agents/:id/commands) returns 403 with error_code=APPROVAL_REQUIRED
+// until the dashboard supplies a single-use token. We solve that here at
+// the axios layer so individual call sites do NOT have to know about the
+// flow. The CommandApprovalProvider mounts at the App root and registers
+// a resolver via setApprovalTokenResolver(); when the interceptor sees
+// APPROVAL_REQUIRED / APPROVAL_INVALID it calls the resolver to obtain a
+// fresh token, then replays the original request once with the
+// X-Approval-Token header.
+
+/** Context carried into the resolver so the modal can describe what's being approved. */
+export interface ApprovalContext {
+    agentId?: string;
+    commandType?: string;
+    summary?: string;
+    /** Set to true on a retry after APPROVAL_INVALID so the modal can say "code rejected, try again". */
+    invalidPrevious?: boolean;
+}
+
+/** A resolver returns a fresh approval_token (already verified server-side) or rejects on cancel. */
+export type ApprovalTokenResolver = (ctx: ApprovalContext) => Promise<string>;
+
+let approvalTokenResolver: ApprovalTokenResolver | null = null;
+
+/** Called by CommandApprovalProvider on mount. Pass null on unmount. */
+export function setApprovalTokenResolver(fn: ApprovalTokenResolver | null) {
+    approvalTokenResolver = fn;
+}
+
+/** Low-level API used by the provider's modal. Keeps the network shape in one place. */
+export const commandApprovalApi = {
+    issue: async (payload: { agent_id?: string; command_type?: string; summary?: string }) => {
+        const r = await connectionApi.post<{ approval_id: string; masked_email: string; expires_at: string }>(
+            '/api/v1/commands/approval',
+            payload,
+            // Skip the approval interceptor on this call — it's how we
+            // GET the token, it can't itself require one.
+            { headers: { 'X-Skip-Approval-Interceptor': '1' } } as any,
+        );
+        return r.data;
+    },
+    verify: async (payload: { approval_id: string; code: string }) => {
+        const r = await connectionApi.post<{ approval_token: string; expires_at: string }>(
+            '/api/v1/commands/approval/verify',
+            payload,
+            { headers: { 'X-Skip-Approval-Interceptor': '1' } } as any,
+        );
+        return r.data;
+    },
+};
+
+// Codes the server uses to ask for an approval token.
+const APPROVAL_NEEDED_CODES = new Set(['APPROVAL_REQUIRED', 'APPROVAL_INVALID', 'APPROVAL_EXPIRED']);
+
+// Pull a short summary out of the original POST body if we can. Best-effort —
+// it's only used to decorate the email and the modal copy, never for security.
+function summariseRequest(cfg: any): ApprovalContext {
+    const out: ApprovalContext = {};
+    try {
+        // /api/v1/agents/:id/commands → extract :id
+        const url: string = cfg?.url || '';
+        const m = url.match(/\/agents\/([0-9a-fA-F-]{8,})\/commands?\b/);
+        if (m) out.agentId = m[1];
+        const data = typeof cfg?.data === 'string' ? JSON.parse(cfg.data) : cfg?.data;
+        if (data && typeof data === 'object') {
+            if (typeof data.command_type === 'string') out.commandType = data.command_type;
+        }
+        if (out.commandType) {
+            out.summary = out.agentId
+                ? `${out.commandType} on agent ${out.agentId.slice(0, 8)}`
+                : out.commandType;
+        }
+    } catch {
+        // best-effort — fall through
+    }
+    return out;
+}
+
+// Install the response interceptor on connectionApi (NOT sigmaApi — Sigma
+// engine doesn't issue commands).
+connectionApi.interceptors.response.use(
+    (r) => r,
+    async (error) => {
+        const resp = error?.response;
+        const cfg = error?.config || {};
+        if (!resp || resp.status !== 403) {
+            return Promise.reject(error);
+        }
+        const code: string | undefined = resp.data?.error_code;
+        if (!code || !APPROVAL_NEEDED_CODES.has(code)) {
+            return Promise.reject(error);
+        }
+        // Avoid infinite loops: only one transparent retry per request.
+        if (cfg.__approvalRetried) {
+            return Promise.reject(error);
+        }
+        if (cfg.headers && cfg.headers['X-Skip-Approval-Interceptor']) {
+            return Promise.reject(error);
+        }
+        if (!approvalTokenResolver) {
+            // Provider not mounted — surface the original error.
+            return Promise.reject(error);
+        }
+
+        let token: string;
+        try {
+            token = await approvalTokenResolver({
+                ...summariseRequest(cfg),
+                invalidPrevious: code === 'APPROVAL_INVALID',
+            });
+        } catch (cancelled) {
+            // Operator dismissed the modal. Re-reject with the original error
+            // so the caller's onError fires once (and only once).
+            return Promise.reject(error);
+        }
+
+        cfg.__approvalRetried = true;
+        cfg.headers = { ...(cfg.headers || {}), 'X-Approval-Token': token };
+        return connectionApi.request(cfg);
+    },
+);
+
+// ============================================================================
 // API Types
 // ============================================================================
 

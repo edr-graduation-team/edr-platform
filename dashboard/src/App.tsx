@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Shield } from 'lucide-react';
 import { Suspense, lazy } from 'react';
 import { ToastProvider } from './components';
+import { CommandApprovalProvider } from './components/CommandApprovalProvider';
 import { authApi } from './api/client';
 import { PlatformAppShell } from './layout/PlatformAppShell';
 
@@ -401,9 +402,11 @@ export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <ToastProvider>
-        <BrowserRouter>
-          <AppRoutes />
-        </BrowserRouter>
+        <CommandApprovalProvider>
+          <BrowserRouter>
+            <AppRoutes />
+          </BrowserRouter>
+        </CommandApprovalProvider>
       </ToastProvider>
     </QueryClientProvider>
   );

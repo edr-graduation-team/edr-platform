@@ -148,6 +148,14 @@ func (s *Server) RegisterRoutes(handlers *Handlers) {
 	commands.GET("/stats", handlers.GetCommandStats, handlers.RequirePermission("responses", "read"))
 	commands.GET("/:id", handlers.GetCommand, handlers.RequirePermission("responses", "read"))
 
+	// ── Out-of-band approval (OTP) for manual commands ───────────────────
+	// Both endpoints require the caller to be authenticated AND to hold the
+	// "responses:execute" permission — there's no point getting an approval
+	// you couldn't redeem anyway. The actual single-use gate is consumed
+	// inside ExecuteAgentCommand itself.
+	commands.POST("/approval", handlers.IssueCommandApproval, handlers.RequirePermission("responses", "execute"))
+	commands.POST("/approval/verify", handlers.VerifyCommandApproval, handlers.RequirePermission("responses", "execute"))
+
 	// ── Alert endpoints ──────────────────────────────────────────────────
 	alerts := protected.Group("/alerts")
 	alerts.GET("", handlers.ListAlerts, handlers.RequirePermission("alerts", "read"))

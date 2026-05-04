@@ -485,6 +485,17 @@ func (h *Handlers) ExecuteAgentCommand(c echo.Context) error {
 	req.CommandType = normalizeCommandType(req.CommandType)
 	h.logger.Infof("[C2] Request bound: agent=%s type=%s timeout=%d", agentID, req.CommandType, req.Timeout)
 
+	// ── Out-of-band approval gate ────────────────────────────────────────
+	// Every manual command issued through this HTTP endpoint must carry a
+	// single-use approval token (OTP-derived, sent to EC2_EMAIL_VERIFY).
+	// Internal automated paths (Sigma → response engine → AgentRegistry)
+	// bypass this entirely because they do not pass through HTTP. When the
+	// approval service is not configured the gate is a no-op so behaviour
+	// is unchanged for environments without SMTP.
+	if gateErr := h.consumeApprovalIfRequired(c, req.ApprovalToken); gateErr != nil {
+		return gateErr
+	}
+
 	// Reject unknown types here (API allowlist). Agent still enforces its own rules
 	// (e.g. run_cmd executable whitelist) after delivery.
 	if mapCommandType(req.CommandType) == edrv1.CommandType_COMMAND_TYPE_UNSPECIFIED {

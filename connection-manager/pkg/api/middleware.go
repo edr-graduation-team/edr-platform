@@ -24,32 +24,33 @@ type Handlers struct {
 	jwtManager          *security.JWTManager
 	redis               *cache.RedisClient
 	rateLimiter         *cache.RateLimiter
-	agentSvc            service.AgentService                 // optional: nil when DB unavailable
-	authSvc             service.AuthService                  // optional: nil when DB unavailable
-	caCertPath          string                               // path to CA certificate for zero-touch provisioning
-	enrollmentTokenRepo repository.EnrollmentTokenRepository // optional: nil when DB unavailable
-	registry            *handlers.AgentRegistry              // real-time agent command routing
-	commandRepo         repository.CommandRepository         // C2 command persistence
-	quarantineRepo      repository.QuarantineRepository      // optional quarantine inventory
-	auditRepo           repository.AuditLogRepository        // audit log querying
-	alertRepo           repository.AlertRepository           // alert querying and stats
-	eventRepo           repository.EventRepository           // event search/list (durable store)
-	forensicRepo        repository.ForensicRepository        // forensic collections/events (collect_logs)
-	agentPackageRepo    repository.AgentPackageRepository    // built agent packages for patch/upgrade
+	agentSvc            service.AgentService                   // optional: nil when DB unavailable
+	authSvc             service.AuthService                    // optional: nil when DB unavailable
+	caCertPath          string                                 // path to CA certificate for zero-touch provisioning
+	enrollmentTokenRepo repository.EnrollmentTokenRepository   // optional: nil when DB unavailable
+	registry            *handlers.AgentRegistry                // real-time agent command routing
+	commandRepo         repository.CommandRepository           // C2 command persistence
+	quarantineRepo      repository.QuarantineRepository        // optional quarantine inventory
+	auditRepo           repository.AuditLogRepository          // audit log querying
+	alertRepo           repository.AlertRepository             // alert querying and stats
+	eventRepo           repository.EventRepository             // event search/list (durable store)
+	forensicRepo        repository.ForensicRepository          // forensic collections/events (collect_logs)
+	agentPackageRepo    repository.AgentPackageRepository      // built agent packages for patch/upgrade
 	agentPatchRepo      repository.AgentPatchProfileRepository // per-agent patch profile (UI prefill)
-	userRepo            repository.UserRepository            // user CRUD
-	roleRepo            repository.RoleRepository            // RBAC role/permission management
-	contextPolicyRepo   repository.ContextPolicyRepository   // context-aware policy controls
-	grpcAddress         string                               // C2 gRPC address (host:port) injected into isolate params
-	fallbackStore       *handlers.EventFallbackStore         // DB fallback store reliability stats
-	incidentRepo        repository.IncidentRepository        // post-isolation playbook + triage tracking
+	userRepo            repository.UserRepository              // user CRUD
+	roleRepo            repository.RoleRepository              // RBAC role/permission management
+	contextPolicyRepo   repository.ContextPolicyRepository     // context-aware policy controls
+	grpcAddress         string                                 // C2 gRPC address (host:port) injected into isolate params
+	fallbackStore       *handlers.EventFallbackStore           // DB fallback store reliability stats
+	incidentRepo        repository.IncidentRepository          // post-isolation playbook + triage tracking
 	vulnRepo            repository.VulnerabilityRepository     // CVE / software vulnerability findings per agent
 	kevSync             *service.KEVSyncService                // CISA KEV synchronization service
 	vulnScannerIngest   *service.VulnScannerIngestService      // Trivy/Grype report parser
 	siemRepo            repository.SiemConnectorRepository     // SIEM / webhook export destinations
-	AutomationHandlers   *AutomationHandlers                 // automation handlers for intelligent response
+	AutomationHandlers  *AutomationHandlers                    // automation handlers for intelligent response
 	malwareHashRepo     repository.MalwareHashRepository       // server-managed malicious hash feed
-	signatureSyncSvc    *service.SignatureSyncService           // background MalwareBazaar sync
+	signatureSyncSvc    *service.SignatureSyncService          // background MalwareBazaar sync
+	commandApprovalSvc  service.CommandApprovalService         // optional: out-of-band OTP gate for manual commands
 }
 
 // NewHandlers creates a new handlers instance.
@@ -73,7 +74,7 @@ func NewHandlers(
 		authSvc:             authSvc,
 		caCertPath:          caCertPath,
 		enrollmentTokenRepo: enrollmentTokenRepo,
-		AutomationHandlers:   automationHandlers,
+		AutomationHandlers:  automationHandlers,
 	}
 }
 

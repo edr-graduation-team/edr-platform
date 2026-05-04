@@ -215,6 +215,13 @@ type CommandRequest struct {
 	Timeout     int               `json:"timeout" validate:"min=0,max=3600"`
 	// Compatibility with external test plans and older clients.
 	TimeoutSeconds int `json:"timeout_seconds" validate:"min=0,max=3600"`
+
+	// ApprovalToken is the single-use, OTP-derived token returned by
+	// POST /commands/approval/verify. Required when EC2_EMAIL_VERIFY is
+	// configured and the server has the approval gate enabled. Clients
+	// should normally send it via the X-Approval-Token header instead;
+	// this field is just a convenience for tools that can't set headers.
+	ApprovalToken string `json:"approval_token,omitempty"`
 }
 
 // CommandResponse for command execution.

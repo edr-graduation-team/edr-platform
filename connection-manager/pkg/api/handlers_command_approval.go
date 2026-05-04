@@ -11,6 +11,7 @@
 package api
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -20,6 +21,14 @@ import (
 
 	"github.com/edr-platform/connection-manager/internal/service"
 )
+
+// errGateBlocked is a sentinel returned by consumeApprovalIfRequired after
+// it has already written an HTTP error response (via c.JSON). The calling
+// handler MUST propagate this error to Echo so no further response body is
+// appended. Echo's DefaultHTTPErrorHandler checks c.Response().Committed
+// and skips writing when the response is already on the wire, so the
+// client sees only the JSON we wrote.
+var errGateBlocked = errors.New("approval gate: request blocked (response already written)")
 
 // ApprovalServiceProvider is implemented by Handlers (see middleware.go).
 // We keep the name on the receiver here just so the wiring in main.go
@@ -202,11 +211,13 @@ func (h *Handlers) consumeApprovalIfRequired(c echo.Context, fallbackToken strin
 
 	user := getCurrentUser(c)
 	if user == nil {
-		return errorResponse(c, http.StatusUnauthorized, "AUTH_REQUIRED", "Authentication required")
+		errorResponse(c, http.StatusUnauthorized, "AUTH_REQUIRED", "Authentication required")
+		return errGateBlocked
 	}
 	uid, err := uuid.Parse(user.UserID)
 	if err != nil {
-		return errorResponse(c, http.StatusUnauthorized, "AUTH_REQUIRED", "Invalid user id in token")
+		errorResponse(c, http.StatusUnauthorized, "AUTH_REQUIRED", "Invalid user id in token")
+		return errGateBlocked
 	}
 
 	token := strings.TrimSpace(c.Request().Header.Get("X-Approval-Token"))
@@ -214,8 +225,9 @@ func (h *Handlers) consumeApprovalIfRequired(c echo.Context, fallbackToken strin
 		token = strings.TrimSpace(fallbackToken)
 	}
 	if token == "" {
-		return errorResponse(c, http.StatusForbidden, "APPROVAL_REQUIRED",
+		errorResponse(c, http.StatusForbidden, "APPROVAL_REQUIRED",
 			"This command requires an out-of-band approval. Request a code from /commands/approval and resubmit with X-Approval-Token.")
+		return errGateBlocked
 	}
 
 	if cErr := svc.ConsumeToken(c.Request().Context(), uid, token); cErr != nil {
@@ -223,8 +235,9 @@ func (h *Handlers) consumeApprovalIfRequired(c echo.Context, fallbackToken strin
 			"user_id": uid,
 			"path":    c.Request().URL.Path,
 		}).WithError(cErr).Warn("Approval token rejected")
-		return errorResponse(c, http.StatusForbidden, "APPROVAL_INVALID",
+		errorResponse(c, http.StatusForbidden, "APPROVAL_INVALID",
 			"Approval token is missing, expired, or already consumed. Request a new approval.")
+		return errGateBlocked
 	}
 
 	return nil

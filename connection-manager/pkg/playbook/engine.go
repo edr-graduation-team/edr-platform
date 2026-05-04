@@ -165,6 +165,13 @@ func (e *Engine) runPlaybook(agentID uuid.UUID, playbookName string) {
 
 	successCount, failCount := 0, 0
 
+	// cumulativeOffset tracks the sum of all preceding step timeouts.
+	// Each command's ExpiresAt must account for the time the agent needs
+	// to finish ALL prior steps before it even starts this one.
+	// Without this, step N expires while steps 1..N-1 are still running
+	// on the agent, causing spurious "command expired" failures.
+	var cumulativeOffset time.Duration
+
 	for _, step := range pb.Steps {
 		select {
 		case <-ctx.Done():
@@ -202,6 +209,10 @@ func (e *Engine) runPlaybook(agentID uuid.UUID, playbookName string) {
 				params[k] = v
 			}
 
+			// Expiry = cumulative wait for prior steps + this step's own timeout + 60s grace.
+			// The 60s grace covers network latency, gRPC queuing, and agent dispatch overhead.
+			effectiveExpiry := cumulativeOffset + stepTimeout + 60*time.Second
+
 			cmdID := uuid.New()
 			dbCmd := &models.Command{
 				ID:          cmdID,
@@ -217,7 +228,7 @@ func (e *Engine) runPlaybook(agentID uuid.UUID, playbookName string) {
 				Priority:       5,
 				Status:         models.CommandStatusSent,
 				IssuedAt:       time.Now(),
-				ExpiresAt:      time.Now().Add(stepTimeout + 30*time.Second),
+				ExpiresAt:      time.Now().Add(effectiveExpiry),
 				TimeoutSeconds: int(stepTimeout.Seconds()),
 				Metadata: map[string]any{
 					"playbook":  playbookName,
@@ -241,7 +252,7 @@ func (e *Engine) runPlaybook(agentID uuid.UUID, playbookName string) {
 				Type:       protoCommandType(s.CommandType),
 				Parameters: params,
 				Priority:   5,
-				ExpiresAt:  timestamppb.New(time.Now().Add(stepTimeout)),
+				ExpiresAt:  timestamppb.New(time.Now().Add(effectiveExpiry)),
 			}
 
 			if sendErr := e.registry.Send(agentID.String(), protoCmd); sendErr != nil {
@@ -251,7 +262,11 @@ func (e *Engine) runPlaybook(agentID uuid.UUID, playbookName string) {
 				return
 			}
 			successCount++
-			e.logger.Infof("[Playbook] Dispatched %s (cmd %s)", s.ID, cmdID)
+			e.logger.Infof("[Playbook] Dispatched %s (cmd %s, expires_in=%v)", s.ID, cmdID, effectiveExpiry)
+
+			// Advance cumulative offset so the next step's expiry accounts for this step.
+			cumulativeOffset += stepTimeout
+
 			time.Sleep(200 * time.Millisecond)
 		}(step)
 	}

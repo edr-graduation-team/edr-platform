@@ -3,7 +3,9 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/tls"
+	"encoding/base64"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -38,13 +40,57 @@ import (
 	"github.com/edr-platform/connection-manager/pkg/server"
 )
 
-// seedDefaultAdmin creates a default admin account if one does not already exist.
-// Uses INSERT ... ON CONFLICT DO NOTHING so that existing admin credentials
-// (including password changes made by operators) are NEVER overwritten on reboot.
+// generateRandomPassword returns a URL-safe 24-byte (=32-char base64) random
+// string suitable for a one-shot bootstrap admin password. We use crypto/rand
+// so the seed is unpredictable even with full filesystem access.
+func generateRandomPassword() (string, error) {
+	b := make([]byte, 24)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(b), nil
+}
+
+// seedDefaultAdmin creates a bootstrap admin account on the very first boot
+// of an empty users table. Behaviour:
+//
+//   - Username, email and password are read from the environment:
+//     INITIAL_ADMIN_USERNAME (default "admin"),
+//     INITIAL_ADMIN_EMAIL    (default "admin@edr.local"),
+//     INITIAL_ADMIN_PASSWORD (if empty, a random one is generated).
+//
+//   - INSERT … ON CONFLICT DO NOTHING means existing admin credentials
+//     (and any password changes made by operators) are NEVER overwritten
+//     on reboot.
+//
+//   - The plaintext password is logged ONCE — only on the boot where the
+//     row was actually inserted. Operators are expected to capture it from
+//     stdout/stderr and rotate it via the dashboard.
 func seedDefaultAdmin(ctx context.Context, dbPool *database.PostgresPool, logger *logrus.Logger) {
 	pool := dbPool.Pool()
 
-	hashedPassword, err := bcrypt.GenerateFromPassword([]byte("admin"), bcrypt.DefaultCost)
+	username := strings.TrimSpace(os.Getenv("INITIAL_ADMIN_USERNAME"))
+	if username == "" {
+		username = "admin"
+	}
+	email := strings.TrimSpace(os.Getenv("INITIAL_ADMIN_EMAIL"))
+	if email == "" {
+		email = "admin@edr.local"
+	}
+
+	password := os.Getenv("INITIAL_ADMIN_PASSWORD")
+	generated := false
+	if password == "" {
+		gen, err := generateRandomPassword()
+		if err != nil {
+			logger.Errorf("Failed to generate seed password: %v", err)
+			return
+		}
+		password = gen
+		generated = true
+	}
+
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
 		logger.Errorf("Failed to hash seed password: %v", err)
 		return
@@ -57,8 +103,8 @@ func seedDefaultAdmin(ctx context.Context, dbPool *database.PostgresPool, logger
 		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 		 ON CONFLICT (username) DO NOTHING`,
 		adminID,
-		"admin",
-		"admin@edr.local",
+		username,
+		email,
 		string(hashedPassword),
 		"Administrator",
 		models.UserRoleAdmin,
@@ -70,7 +116,17 @@ func seedDefaultAdmin(ctx context.Context, dbPool *database.PostgresPool, logger
 		return
 	}
 	if tag.RowsAffected() > 0 {
-		logger.Info("🔑 Default admin account created (username: admin, password: admin) — CHANGE THIS PASSWORD!")
+		if generated {
+			// Print the only copy of the password the operator will ever
+			// see. Use a hard-to-miss banner so it's not lost in the noise.
+			logger.Warn("================================================================")
+			logger.Warnf("🔑 BOOTSTRAP ADMIN CREATED — username: %q", username)
+			logger.Warnf("🔑 BOOTSTRAP ADMIN PASSWORD (shown ONCE): %s", password)
+			logger.Warn("🔑 Capture it now and change it from the dashboard ASAP.")
+			logger.Warn("================================================================")
+		} else {
+			logger.Infof("🔑 Bootstrap admin %q created from INITIAL_ADMIN_PASSWORD env var.", username)
+		}
 	} else {
 		logger.Debug("Admin account already exists — skipping seed")
 	}
@@ -260,6 +316,34 @@ func main() {
 		// Create user repository and auth service for dashboard login
 		userRepo := repository.NewPostgresUserRepository(pool)
 		authSvc = service.NewAuthService(userRepo, auditRepo, jwtManager, redisClient, logger)
+
+		// ── MFA wiring ───────────────────────────────────────────────────
+		// Build the email sender from config, then the MFA service, then
+		// attach the MFA service to the auth service. Each piece is
+		// optional: if SMTP is disabled we simply don't wire MFA, and
+		// AuthService falls back to refusing login for any user whose
+		// mfa_enabled=true (secure default).
+		emailSvc := service.NewEmailService(service.SMTPSettings{
+			Host:     cfg.SMTP.Host,
+			Port:     cfg.SMTP.Port,
+			Username: cfg.SMTP.Username,
+			Password: cfg.SMTP.Password,
+			From:     cfg.SMTP.From,
+			UseTLS:   cfg.SMTP.UseTLS,
+			StartTLS: cfg.SMTP.StartTLS,
+			Enabled:  cfg.SMTP.Enabled,
+		}, logger)
+		if emailSvc.Enabled() {
+			mfaSvc := service.NewMFAService(redisClient, emailSvc, logger)
+			if withMFA, ok := authSvc.(service.AuthServiceWithMFA); ok {
+				withMFA.SetMFAService(mfaSvc)
+				logger.WithField("from", emailSvc.From()).
+					Info("MFA (email OTP) enabled")
+			}
+		} else {
+			logger.Warn("SMTP disabled — MFA email delivery unavailable. " +
+				"Users with mfa_enabled=true will be refused login until SMTP is configured.")
+		}
 
 		logger.Info("Database connected - agent registration enabled")
 

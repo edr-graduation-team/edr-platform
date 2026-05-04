@@ -4,7 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
     Search, Plus, Edit3, Trash2, Lock, Unlock, RefreshCw,
     X, AlertCircle, Check, UserPlus, ChevronDown, UserCircle, Shield, KeyRound, ChevronLeft, ChevronRight,
-    Users,
+    Users, ShieldCheck, ShieldOff,
 } from 'lucide-react';
 import { usersApi, authApi, type User } from '../../api/client';
 import { ROLE_COLORS, STATUS_STYLES } from './types';
@@ -55,7 +55,14 @@ export default function AccessManagement() {
     const [showAddModal, setShowAddModal] = useState(false);
     const [editUser, setEditUser] = useState<User | null>(null);
     const [saving, setSaving] = useState(false);
-    const [form, setForm] = useState({ username: '', email: '', password: '', full_name: '', role: 'analyst' });
+    const [form, setForm] = useState({
+        username: '',
+        email: '',
+        password: '',
+        full_name: '',
+        role: 'analyst',
+        mfa_enabled: false,
+    });
 
     useEffect(() => {
         document.title = 'Users · Access · System';
@@ -117,7 +124,7 @@ export default function AccessManagement() {
         try {
             await usersApi.create(form);
             setShowAddModal(false);
-            setForm({ username: '', email: '', password: '', full_name: '', role: 'analyst' });
+            setForm({ username: '', email: '', password: '', full_name: '', role: 'analyst', mfa_enabled: false });
             setFeedback('User created successfully');
             await invalidateUsers();
         } catch (err: unknown) {
@@ -138,6 +145,7 @@ export default function AccessManagement() {
                 full_name: editUser.full_name,
                 role: editUser.role,
                 status: editUser.status,
+                mfa_enabled: editUser.mfa_enabled ?? false,
             });
             setEditUser(null);
             setFeedback('User updated');
@@ -173,6 +181,21 @@ export default function AccessManagement() {
         } catch (err: unknown) {
             const ax = err as { response?: { data?: { message?: string } } };
             setError(ax?.response?.data?.message || 'Failed');
+        }
+    };
+
+    // Inline MFA toggle from the row. Optimistic UX: we just call the API
+    // and then refetch — if it fails, the error banner tells the admin why.
+    const handleToggleMFA = async (user: User) => {
+        const next = !(user.mfa_enabled ?? false);
+        setError('');
+        try {
+            await usersApi.update(user.id, { mfa_enabled: next });
+            setFeedback(`MFA ${next ? 'enabled' : 'disabled'} for ${user.username}`);
+            await invalidateUsers();
+        } catch (err: unknown) {
+            const ax = err as { response?: { data?: { message?: string } } };
+            setError(ax?.response?.data?.message || 'Failed to update MFA');
         }
     };
 
@@ -342,12 +365,12 @@ export default function AccessManagement() {
                     <table className="w-full text-sm min-w-[720px]">
                         <thead>
                             <tr className="border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/50">
-                                {['User', 'Role', 'Status', 'Last login', 'Created', 'Actions'].map((h, i) => (
+                                {['User', 'Role', 'Status', 'MFA', 'Last login', 'Created', 'Actions'].map((h, i) => (
                                     <th
                                         key={h}
                                         className={`px-4 sm:px-5 py-3 text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider ${
                                             h === 'Created' ? 'hidden lg:table-cell' : ''
-                                        } ${i === 5 ? 'text-right' : 'text-left'}`}
+                                        } ${i === 6 ? 'text-right' : 'text-left'}`}
                                     >
                                         {h}
                                     </th>
@@ -357,14 +380,14 @@ export default function AccessManagement() {
                         <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
                             {loading ? (
                                 <tr>
-                                    <td colSpan={6} className="text-center py-16 text-slate-500 dark:text-slate-400">
+                                    <td colSpan={7} className="text-center py-16 text-slate-500 dark:text-slate-400">
                                         <RefreshCw size={18} className="inline animate-spin mr-2 align-middle" />
                                         Loading users…
                                     </td>
                                 </tr>
                             ) : users.length === 0 ? (
                                 <tr>
-                                    <td colSpan={6} className="text-center py-16 text-slate-500 dark:text-slate-400">
+                                    <td colSpan={7} className="text-center py-16 text-slate-500 dark:text-slate-400">
                                         No users match these filters.
                                     </td>
                                 </tr>
@@ -394,6 +417,19 @@ export default function AccessManagement() {
                                         <td className="px-4 sm:px-5 py-3.5">
                                             <StatusBadge status={user.status} />
                                         </td>
+                                        <td className="px-4 sm:px-5 py-3.5">
+                                            {user.mfa_enabled ? (
+                                                <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-semibold uppercase tracking-wide border bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-500/10 dark:text-emerald-300 dark:border-emerald-500/30">
+                                                    <ShieldCheck size={11} />
+                                                    On
+                                                </span>
+                                            ) : (
+                                                <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-medium uppercase tracking-wide border bg-slate-100 text-slate-500 border-slate-200 dark:bg-slate-700/40 dark:text-slate-400 dark:border-slate-600">
+                                                    <ShieldOff size={11} />
+                                                    Off
+                                                </span>
+                                            )}
+                                        </td>
                                         <td className="px-4 sm:px-5 py-3.5 text-slate-600 dark:text-slate-300 text-[13px] whitespace-nowrap">
                                             {loginStr ? loginStr : <span className="italic text-slate-400">Never</span>}
                                         </td>
@@ -410,6 +446,14 @@ export default function AccessManagement() {
                                                         title="Edit"
                                                     >
                                                         <Edit3 size={15} />
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => handleToggleMFA(user)}
+                                                        className="p-2 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-500/10 dark:hover:text-emerald-400 rounded-lg transition-all"
+                                                        title={user.mfa_enabled ? 'Disable MFA' : 'Enable MFA'}
+                                                    >
+                                                        {user.mfa_enabled ? <ShieldOff size={15} /> : <ShieldCheck size={15} />}
                                                     </button>
                                                     <button
                                                         type="button"
@@ -533,6 +577,23 @@ export default function AccessManagement() {
                                     <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
                                 </div>
                             </div>
+                            <label className="flex items-start gap-3 p-3 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50/60 dark:bg-slate-900/40 cursor-pointer">
+                                <input
+                                    type="checkbox"
+                                    checked={form.mfa_enabled}
+                                    onChange={(e) => setForm((p) => ({ ...p, mfa_enabled: e.target.checked }))}
+                                    className="mt-0.5 w-4 h-4 rounded border-slate-400 text-cyan-600 focus:ring-cyan-500"
+                                />
+                                <span className="text-sm">
+                                    <span className="flex items-center gap-1.5 font-semibold text-slate-800 dark:text-slate-100">
+                                        <ShieldCheck size={14} className="text-emerald-500" />
+                                        Require email MFA at sign-in
+                                    </span>
+                                    <span className="block mt-1 text-[12px] text-slate-500 dark:text-slate-400">
+                                        A 6-digit code will be emailed to the user each time they log in.
+                                    </span>
+                                </span>
+                            </label>
                         </div>
                         <div className="flex justify-end gap-2 px-6 py-4 border-t border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/50 rounded-b-xl">
                             <button type="button" onClick={() => setShowAddModal(false)} className="px-4 py-2 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors">
@@ -632,6 +693,26 @@ export default function AccessManagement() {
                                     <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
                                 </div>
                             </div>
+                            <label className="flex items-start gap-3 p-3 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50/60 dark:bg-slate-900/40 cursor-pointer">
+                                <input
+                                    type="checkbox"
+                                    checked={editUser.mfa_enabled ?? false}
+                                    onChange={(e) =>
+                                        setEditUser((p) => (p ? { ...p, mfa_enabled: e.target.checked } : null))
+                                    }
+                                    className="mt-0.5 w-4 h-4 rounded border-slate-400 text-cyan-600 focus:ring-cyan-500"
+                                />
+                                <span className="text-sm">
+                                    <span className="flex items-center gap-1.5 font-semibold text-slate-800 dark:text-slate-100">
+                                        <ShieldCheck size={14} className="text-emerald-500" />
+                                        Require email MFA at sign-in
+                                    </span>
+                                    <span className="block mt-1 text-[12px] text-slate-500 dark:text-slate-400">
+                                        Codes are delivered to <code className="font-mono text-[11px]">{editUser.email || '— no email —'}</code>.
+                                        Toggling off will not sign out existing sessions.
+                                    </span>
+                                </span>
+                            </label>
                         </div>
                         <div className="flex justify-end gap-2 px-6 py-4 border-t border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/50 rounded-b-xl">
                             <button type="button" onClick={() => setEditUser(null)} className="px-4 py-2 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors">

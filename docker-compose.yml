@@ -29,8 +29,21 @@ services:
     environment:
       # Optional for remote agents: PUBLIC_API_BASE_URL=http://YOUR_LAN_IP:30082 (or https://edr.example.com)
       LOG_LEVEL: debug
-      DATABASE_URL: "postgres://edr:edr@postgres:5432/edr?sslmode=disable"
+      DATABASE_URL: "postgres://${POSTGRES_USER:?POSTGRES_USER missing in .env}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD missing in .env}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB missing in .env}?sslmode=disable"
+      DATABASE_PASSWORD: "${POSTGRES_PASSWORD}"
       REDIS_ADDR: "redis:6379"
+      REDIS_PASSWORD: "${REDIS_PASSWORD-}"
+      INITIAL_ADMIN_USERNAME: "${INITIAL_ADMIN_USERNAME:-admin}"
+      INITIAL_ADMIN_EMAIL: "${INITIAL_ADMIN_EMAIL:-admin@example.com}"
+      INITIAL_ADMIN_PASSWORD: "${INITIAL_ADMIN_PASSWORD-}"
+      SMTP_ENABLED: "${SMTP_ENABLED:-false}"
+      SMTP_HOST: "${SMTP_HOST-}"
+      SMTP_PORT: "${SMTP_PORT-}"
+      SMTP_USERNAME: "${SMTP_USERNAME-}"
+      SMTP_PASSWORD: "${SMTP_PASSWORD-}"
+      SMTP_FROM: "${SMTP_FROM-}"
+      SMTP_USE_TLS: "${SMTP_USE_TLS:-true}"
+      SMTP_START_TLS: "${SMTP_START_TLS:-false}"
       KAFKA_BROKERS: "kafka:9092"        # INTERNAL listener (containers)
       GRPC_PORT: "50051"
       HTTP_PORT: "8082"
@@ -72,7 +85,8 @@ services:
       KAFKA_CONSUMER_TOPIC: "events-raw"
       KAFKA_PRODUCER_TOPIC: "alerts"
       # --- Database ---
-      DATABASE_URL: "postgresql://edr:edr@postgres:5432/edr?sslmode=disable"
+      DATABASE_URL: "postgresql://${POSTGRES_USER:?POSTGRES_USER missing in .env}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD missing in .env}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB missing in .env}?sslmode=disable"
+      JWT_SECRET: "${JWT_SECRET:?JWT_SECRET missing in .env}"
       # --- Redis (lineage cache + burst tracker) ---
       REDIS_ADDR: "redis:6379"
       # --- API ---
@@ -157,9 +171,9 @@ services:
   postgres:
     image: postgres:16-alpine
     environment:
-      POSTGRES_USER: edr
-      POSTGRES_PASSWORD: edr
-      POSTGRES_DB: edr
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER missing in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD missing in .env}
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB missing in .env}
     ports:
       - "${POSTGRES_PORT:-31432}:5432"
     volumes:
@@ -167,7 +181,7 @@ services:
       - ./connection-manager/internal/database/migrations:/docker-entrypoint-initdb.d/01-connection-manager:ro
       - ./sigma_engine_go/internal/infrastructure/database/migrations:/docker-entrypoint-initdb.d/02-sigma-engine:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U edr -d edr"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
       timeout: 5s
       retries: 5

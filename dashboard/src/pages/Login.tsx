@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { LogIn, AlertCircle } from 'lucide-react';
-import { authApi } from '../api/client';
+import { LogIn, AlertCircle, ShieldCheck, ArrowLeft, Mail } from 'lucide-react';
+import { authApi, type MFAChallenge } from '../api/client';
 import ProtocolLogo from '../components/ProtocolLogo';
 
 export default function Login() {
@@ -11,20 +11,69 @@ export default function Login() {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
 
+    // When the backend asks for MFA we stash the challenge here and
+    // switch the card into "enter the code" mode. password/username are
+    // discarded from memory so they aren't held for any longer than needed.
+    const [challenge, setChallenge] = useState<MFAChallenge | null>(null);
+    const [code, setCode] = useState('');
+    const codeInputRef = useRef<HTMLInputElement | null>(null);
+
+    useEffect(() => {
+        if (challenge && codeInputRef.current) {
+            codeInputRef.current.focus();
+        }
+    }, [challenge]);
+
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         setError('');
         setLoading(true);
 
         try {
-            // Use the real auth API — sends to Connection Manager with correct field names
-            await authApi.login(username, password);
+            const result = await authApi.login(username, password);
+            if (result.mfa_required && result.mfa_challenge) {
+                // Don't navigate yet — show the OTP step.
+                setChallenge(result.mfa_challenge);
+                setPassword('');
+                setCode('');
+                return;
+            }
             navigate('/');
         } catch (err: any) {
             setError(err.response?.data?.message || 'Invalid username or password');
         } finally {
             setLoading(false);
         }
+    };
+
+    const handleVerify = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!challenge) return;
+        setError('');
+        setLoading(true);
+        try {
+            await authApi.verifyMfa(challenge.id, code.trim());
+            navigate('/');
+        } catch (err: any) {
+            const apiError = err.response?.data;
+            // If the challenge is gone (expired or locked), force the user
+            // back to the password step — there's no code they can enter
+            // that will work against that challenge_id anymore.
+            const code = apiError?.error?.code ?? apiError?.code;
+            if (code === 'MFA_EXPIRED' || code === 'MFA_LOCKED') {
+                setChallenge(null);
+                setCode('');
+            }
+            setError(apiError?.message || 'MFA verification failed');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const backToPassword = () => {
+        setChallenge(null);
+        setCode('');
+        setError('');
     };
 
     return (
@@ -52,7 +101,7 @@ export default function Login() {
                 {/* Login Form */}
                 <div className="bg-slate-900/60 backdrop-blur-md border border-slate-700/50 rounded-2xl shadow-2xl shadow-cyan-900/20 p-8">
                     <h2 className="text-xl font-semibold text-white mb-6 text-center">
-                        Authenticate Session
+                        {challenge ? 'Two-Factor Verification' : 'Authenticate Session'}
                     </h2>
 
                     {error && (
@@ -62,6 +111,64 @@ export default function Login() {
                         </div>
                     )}
 
+                    {challenge ? (
+                        <form onSubmit={handleVerify} className="space-y-5">
+                            <div className="flex items-start gap-3 p-4 bg-cyan-500/5 border border-cyan-500/20 rounded-lg">
+                                <ShieldCheck className="w-5 h-5 text-cyan-400 shrink-0 mt-0.5" />
+                                <div className="text-sm text-slate-300">
+                                    <p className="font-semibold text-slate-200">Check your inbox</p>
+                                    <p className="mt-1 text-slate-400">
+                                        We sent a 6-digit verification code to{' '}
+                                        <span className="inline-flex items-center gap-1 text-cyan-300 font-mono">
+                                            <Mail className="w-3.5 h-3.5" />
+                                            {challenge.masked_email}
+                                        </span>
+                                        . The code expires in a few minutes.
+                                    </p>
+                                </div>
+                            </div>
+                            <div>
+                                <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
+                                    Verification code
+                                </label>
+                                <input
+                                    ref={codeInputRef}
+                                    type="text"
+                                    inputMode="numeric"
+                                    autoComplete="one-time-code"
+                                    pattern="[0-9]*"
+                                    maxLength={6}
+                                    value={code}
+                                    onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))}
+                                    className="w-full bg-slate-800/50 border border-slate-700/50 rounded-lg px-4 py-3 text-white text-center text-2xl tracking-[0.6em] font-mono placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-cyan-500/50 focus:border-cyan-500 transition-all"
+                                    placeholder="●●●●●●"
+                                    required
+                                />
+                            </div>
+                            <button
+                                type="submit"
+                                disabled={loading || code.length < 4}
+                                className="w-full bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-500 hover:to-cyan-500 text-white font-bold py-3.5 px-4 rounded-lg flex items-center justify-center gap-2 hover:scale-[1.02] active:scale-[0.98] transition-all duration-200 shadow-[0_0_20px_rgba(6,182,212,0.3)] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
+                            >
+                                {loading ? (
+                                    <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                                ) : (
+                                    <>
+                                        <ShieldCheck className="w-5 h-5" />
+                                        Verify &amp; Continue
+                                    </>
+                                )}
+                            </button>
+                            <button
+                                type="button"
+                                onClick={backToPassword}
+                                className="w-full flex items-center justify-center gap-2 text-sm text-slate-400 hover:text-slate-200 transition-colors"
+                            >
+                                <ArrowLeft className="w-4 h-4" />
+                                Use a different account
+                            </button>
+                        </form>
+                    ) : (
                     <form onSubmit={handleSubmit} className="space-y-5">
                         <div>
                             <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
@@ -118,6 +225,7 @@ export default function Login() {
                             )}
                         </button>
                     </form>
+                    )}
                 </div>
 
                 {/* Footer */}

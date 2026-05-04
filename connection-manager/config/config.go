@@ -25,6 +25,22 @@ type Config struct {
 	RateLimit  RateLimitConfig  `mapstructure:"rate_limit"`
 	Logging    LoggingConfig    `mapstructure:"logging"`
 	Monitoring MonitoringConfig `mapstructure:"monitoring"`
+	SMTP       SMTPConfig       `mapstructure:"smtp"`
+}
+
+// SMTPConfig holds outbound email (transactional) settings, currently used
+// for MFA verification codes. Credentials are intended to come from env vars
+// (SMTP_HOST / SMTP_PORT / SMTP_USERNAME / SMTP_PASSWORD / SMTP_FROM) so the
+// YAML never ships with a real password.
+type SMTPConfig struct {
+	Host     string `mapstructure:"host"`
+	Port     int    `mapstructure:"port"`
+	Username string `mapstructure:"username"`
+	Password string `mapstructure:"password"`
+	From     string `mapstructure:"from"`
+	UseTLS   bool   `mapstructure:"use_tls"`   // implicit TLS on the socket (port 465)
+	StartTLS bool   `mapstructure:"start_tls"` // explicit STARTTLS upgrade (port 587)
+	Enabled  bool   `mapstructure:"enabled"`
 }
 
 // ServerConfig holds gRPC and HTTP server settings.
@@ -289,6 +305,14 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("kafka.timeout", 30*time.Second)
 	v.SetDefault("kafka.enabled", true)
 
+	// SMTP defaults — credentials MUST come from env vars in production.
+	v.SetDefault("smtp.host", "smtp.hostinger.com")
+	v.SetDefault("smtp.port", 465)
+	v.SetDefault("smtp.use_tls", true)
+	v.SetDefault("smtp.start_tls", false)
+	v.SetDefault("smtp.from", "")
+	v.SetDefault("smtp.enabled", false)
+
 	// API defaults (Phase 2)
 	v.SetDefault("api.port", 8080)
 	v.SetDefault("api.cors_allow_origins", []string{"*"})
@@ -331,4 +355,14 @@ func bindEnvVars(v *viper.Viper) {
 	// JWT
 	v.BindEnv("jwt.private_key_path", "JWT_PRIVATE_KEY_PATH")
 	v.BindEnv("jwt.public_key_path", "JWT_PUBLIC_KEY_PATH")
+
+	// SMTP (transactional email — used by MFA email OTP)
+	v.BindEnv("smtp.host", "SMTP_HOST")
+	v.BindEnv("smtp.port", "SMTP_PORT")
+	v.BindEnv("smtp.username", "SMTP_USERNAME")
+	v.BindEnv("smtp.password", "SMTP_PASSWORD")
+	v.BindEnv("smtp.from", "SMTP_FROM")
+	v.BindEnv("smtp.use_tls", "SMTP_USE_TLS")
+	v.BindEnv("smtp.start_tls", "SMTP_START_TLS")
+	v.BindEnv("smtp.enabled", "SMTP_ENABLED")
 }

@@ -99,6 +99,7 @@ func (s *Server) RegisterRoutes(handlers *Handlers) {
 	// Auth endpoints (no auth required for login)
 	auth := v1.Group("/auth")
 	auth.POST("/login", handlers.Login)
+	auth.POST("/login/mfa", handlers.VerifyMFA)
 	auth.POST("/refresh", handlers.RefreshToken)
 	auth.POST("/logout", handlers.Logout, handlers.AuthMiddleware)
 	auth.GET("/me", handlers.GetCurrentUser, handlers.AuthMiddleware)

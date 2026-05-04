@@ -702,15 +702,16 @@ func (h *Handlers) ListUsers(c echo.Context) error {
 	data := make([]UserResponse, 0, len(users))
 	for _, u := range users {
 		resp := UserResponse{
-			ID:        u.ID,
-			Username:  u.Username,
-			Email:     u.Email,
-			FullName:  u.FullName,
-			Role:      u.Role,
-			Status:    u.Status,
-			LastLogin: u.LastLogin,
-			CreatedAt: u.CreatedAt,
-			UpdatedAt: u.UpdatedAt,
+			ID:         u.ID,
+			Username:   u.Username,
+			Email:      u.Email,
+			FullName:   u.FullName,
+			Role:       u.Role,
+			Status:     u.Status,
+			MFAEnabled: u.MFAEnabled,
+			LastLogin:  u.LastLogin,
+			CreatedAt:  u.CreatedAt,
+			UpdatedAt:  u.UpdatedAt,
 		}
 		data = append(data, resp)
 	}
@@ -744,11 +745,12 @@ func (h *Handlers) CreateUser(c echo.Context) error {
 	}
 
 	user, err := h.authSvc.CreateUser(c.Request().Context(), &service.CreateUserRequest{
-		Username: req.Username,
-		Email:    req.Email,
-		Password: req.Password,
-		FullName: req.FullName,
-		Role:     req.Role,
+		Username:   req.Username,
+		Email:      req.Email,
+		Password:   req.Password,
+		FullName:   req.FullName,
+		Role:       req.Role,
+		MFAEnabled: req.MFAEnabled,
 	})
 	if err != nil {
 		h.logger.WithError(err).WithField("username", req.Username).Warn("Failed to create user")
@@ -761,14 +763,15 @@ func (h *Handlers) CreateUser(c echo.Context) error {
 
 	return c.JSON(http.StatusCreated, map[string]interface{}{
 		"data": UserResponse{
-			ID:        user.ID,
-			Username:  user.Username,
-			Email:     user.Email,
-			FullName:  user.FullName,
-			Role:      user.Role,
-			Status:    user.Status,
-			CreatedAt: user.CreatedAt,
-			UpdatedAt: user.UpdatedAt,
+			ID:         user.ID,
+			Username:   user.Username,
+			Email:      user.Email,
+			FullName:   user.FullName,
+			Role:       user.Role,
+			Status:     user.Status,
+			MFAEnabled: user.MFAEnabled,
+			CreatedAt:  user.CreatedAt,
+			UpdatedAt:  user.UpdatedAt,
 		},
 		"meta": responseMeta(c),
 	})
@@ -792,15 +795,16 @@ func (h *Handlers) GetUser(c echo.Context) error {
 	}
 
 	resp := UserResponse{
-		ID:        user.ID,
-		Username:  user.Username,
-		Email:     user.Email,
-		FullName:  user.FullName,
-		Role:      user.Role,
-		Status:    user.Status,
-		LastLogin: user.LastLogin,
-		CreatedAt: user.CreatedAt,
-		UpdatedAt: user.UpdatedAt,
+		ID:         user.ID,
+		Username:   user.Username,
+		Email:      user.Email,
+		FullName:   user.FullName,
+		Role:       user.Role,
+		Status:     user.Status,
+		MFAEnabled: user.MFAEnabled,
+		LastLogin:  user.LastLogin,
+		CreatedAt:  user.CreatedAt,
+		UpdatedAt:  user.UpdatedAt,
 	}
 
 	return c.JSON(http.StatusOK, map[string]interface{}{
@@ -852,6 +856,14 @@ func (h *Handlers) UpdateUser(c echo.Context) error {
 	if req.Status != "" {
 		user.Status = req.Status
 	}
+	if req.MFAEnabled != nil {
+		user.MFAEnabled = *req.MFAEnabled
+		// When MFA is being turned off, also wipe any stored secret so a
+		// re-enable later doesn't accidentally reuse an old TOTP seed.
+		if !*req.MFAEnabled {
+			user.MFASecret = nil
+		}
+	}
 
 	if err := h.userRepo.Update(c.Request().Context(), user); err != nil {
 		h.logger.WithError(err).Error("Failed to update user")
@@ -862,14 +874,15 @@ func (h *Handlers) UpdateUser(c echo.Context) error {
 	h.fireAudit(c, models.AuditActionUserUpdated, "user", targetUserID, "", false, "")
 
 	resp := UserResponse{
-		ID:        user.ID,
-		Username:  user.Username,
-		Email:     user.Email,
-		FullName:  user.FullName,
-		Role:      user.Role,
-		Status:    user.Status,
-		CreatedAt: user.CreatedAt,
-		UpdatedAt: user.UpdatedAt,
+		ID:         user.ID,
+		Username:   user.Username,
+		Email:      user.Email,
+		FullName:   user.FullName,
+		Role:       user.Role,
+		Status:     user.Status,
+		MFAEnabled: user.MFAEnabled,
+		CreatedAt:  user.CreatedAt,
+		UpdatedAt:  user.UpdatedAt,
 	}
 
 	return c.JSON(http.StatusOK, map[string]interface{}{

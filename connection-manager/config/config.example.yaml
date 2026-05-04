@@ -21,7 +21,9 @@ database:
   host: "localhost"
   port: 5432
   user: "edr"
-  password: "${DATABASE_PASSWORD}"  # Override via env var
+  # NEVER hardcode the password here. Provide it via the
+  # DATABASE_PASSWORD environment variable (bound by Viper).
+  password: ""
   name: "edr"
   ssl_mode: "require"
   max_open_conns: 25
@@ -31,7 +33,9 @@ database:
 
 redis:
   addr: "redis:6379"
-  password: "${REDIS_PASSWORD}"  # Override via env var
+  # NEVER hardcode the password here. Provide it via the
+  # REDIS_PASSWORD environment variable.
+  password: ""
   db: 0
   pool_size: 10
   pool_timeout: 30s

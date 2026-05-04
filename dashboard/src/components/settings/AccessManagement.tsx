@@ -553,7 +553,7 @@ export default function AccessManagement() {
                                     <label className={labelClass}>{f.label}</label>
                                     <input
                                         type={f.type}
-                                        value={(form as Record<string, string>)[f.key]}
+                                        value={(form as unknown as Record<string, string>)[f.key]}
                                         onChange={(e) => setForm((p) => ({ ...p, [f.key]: e.target.value }))}
                                         className={inputClass}
                                         placeholder={f.placeholder}

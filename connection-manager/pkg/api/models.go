@@ -59,12 +59,38 @@ type LoginRequest struct {
 }
 
 // LoginResponse after successful login.
+//
+// Two shapes:
+//
+//  1. Full login — AccessToken/RefreshToken/User populated, MFARequired=false.
+//  2. MFA challenge — AccessToken empty, MFARequired=true, MFAChallenge
+//     describes where the code was sent and which challenge_id to POST back
+//     to /auth/login/mfa.
 type LoginResponse struct {
-	AccessToken  string       `json:"access_token"`
-	RefreshToken string       `json:"refresh_token"`
-	ExpiresIn    int64        `json:"expires_in"`
-	TokenType    string       `json:"token_type"`
+	AccessToken  string       `json:"access_token,omitempty"`
+	RefreshToken string       `json:"refresh_token,omitempty"`
+	ExpiresIn    int64        `json:"expires_in,omitempty"`
+	TokenType    string       `json:"token_type,omitempty"`
 	User         UserResponse `json:"user"`
+
+	// MFA step-up (when the account has mfa_enabled=true).
+	MFARequired  bool                 `json:"mfa_required,omitempty"`
+	MFAChallenge *MFAChallengeSummary `json:"mfa_challenge,omitempty"`
+}
+
+// MFAChallengeSummary is the client-facing description of a pending OTP
+// challenge. The code itself is never sent over the API — only where it
+// was delivered.
+type MFAChallengeSummary struct {
+	ID          string    `json:"id"`
+	MaskedEmail string    `json:"masked_email"`
+	ExpiresAt   time.Time `json:"expires_at"`
+}
+
+// MFAVerifyRequest is the body of POST /auth/login/mfa.
+type MFAVerifyRequest struct {
+	ChallengeID string `json:"challenge_id" validate:"required"`
+	Code        string `json:"code" validate:"required,min=4,max=10"`
 }
 
 // RefreshTokenRequest for token refresh.
@@ -317,32 +343,39 @@ type AlertStatsResponse struct {
 
 // UserResponse for user data.
 type UserResponse struct {
-	ID        uuid.UUID  `json:"id"`
-	Username  string     `json:"username"`
-	Email     string     `json:"email"`
-	FullName  string     `json:"full_name"`
-	Role      string     `json:"role"`
-	Status    string     `json:"status"`
-	LastLogin *time.Time `json:"last_login,omitempty"`
-	CreatedAt time.Time  `json:"created_at"`
-	UpdatedAt time.Time  `json:"updated_at"`
+	ID         uuid.UUID  `json:"id"`
+	Username   string     `json:"username"`
+	Email      string     `json:"email"`
+	FullName   string     `json:"full_name"`
+	Role       string     `json:"role"`
+	Status     string     `json:"status"`
+	MFAEnabled bool       `json:"mfa_enabled"`
+	LastLogin  *time.Time `json:"last_login,omitempty"`
+	CreatedAt  time.Time  `json:"created_at"`
+	UpdatedAt  time.Time  `json:"updated_at"`
 }
 
 // UserCreateRequest for creating user.
 type UserCreateRequest struct {
-	Username string `json:"username" validate:"required,min=3,max=50"`
-	Email    string `json:"email" validate:"required,email"`
-	Password string `json:"password" validate:"required,min=12"`
-	FullName string `json:"full_name" validate:"required"`
-	Role     string `json:"role" validate:"required,oneof=admin security analyst operations viewer"`
+	Username   string `json:"username" validate:"required,min=3,max=50"`
+	Email      string `json:"email" validate:"required,email"`
+	Password   string `json:"password" validate:"required,min=12"`
+	FullName   string `json:"full_name" validate:"required"`
+	Role       string `json:"role" validate:"required,oneof=admin security analyst operations viewer"`
+	MFAEnabled bool   `json:"mfa_enabled"`
 }
 
 // UserUpdateRequest for updating user.
+//
+// MFAEnabled is a pointer so the handler can distinguish "omit"
+// from "false" — otherwise turning MFA off would look identical to not
+// touching the flag at all.
 type UserUpdateRequest struct {
-	Email    string `json:"email" validate:"omitempty,email"`
-	FullName string `json:"full_name"`
-	Role     string `json:"role" validate:"omitempty,oneof=admin security analyst operations viewer"`
-	Status   string `json:"status" validate:"omitempty,oneof=active inactive locked"`
+	Email      string `json:"email" validate:"omitempty,email"`
+	FullName   string `json:"full_name"`
+	Role       string `json:"role" validate:"omitempty,oneof=admin security analyst operations viewer"`
+	Status     string `json:"status" validate:"omitempty,oneof=active inactive locked"`
+	MFAEnabled *bool  `json:"mfa_enabled,omitempty"`
 }
 
 // PasswordChangeRequest for changing password.
@@ -501,12 +534,12 @@ type IncidentResponse struct {
 
 // IncidentData is the aggregated post-isolation incident for a single agent.
 type IncidentData struct {
-	AgentID     string             `json:"agent_id"`
-	IsIsolated  bool               `json:"is_isolated"`
-	Run         *PlaybookRunDTO    `json:"run,omitempty"`
-	Steps       []PlaybookStepDTO  `json:"steps"`
-	Snapshots   []TriageSnapshotDTO `json:"snapshots"`
-	Iocs        []IocEnrichmentDTO  `json:"iocs"`
+	AgentID    string              `json:"agent_id"`
+	IsIsolated bool                `json:"is_isolated"`
+	Run        *PlaybookRunDTO     `json:"run,omitempty"`
+	Steps      []PlaybookStepDTO   `json:"steps"`
+	Snapshots  []TriageSnapshotDTO `json:"snapshots"`
+	Iocs       []IocEnrichmentDTO  `json:"iocs"`
 }
 
 // PlaybookRunDTO is the API representation of a playbook run.
@@ -542,13 +575,13 @@ type TriageSnapshotDTO struct {
 
 // IocEnrichmentDTO is the API representation of an IOC enrichment record.
 type IocEnrichmentDTO struct {
-	ID        int64      `json:"id"`
-	IocType   string     `json:"ioc_type"`
-	IocValue  string     `json:"ioc_value"`
-	Provider  string     `json:"provider"`
-	Verdict   string     `json:"verdict"`
-	Score     int        `json:"score"`
-	FetchedAt time.Time  `json:"fetched_at"`
+	ID        int64     `json:"id"`
+	IocType   string    `json:"ioc_type"`
+	IocValue  string    `json:"ioc_value"`
+	Provider  string    `json:"provider"`
+	Verdict   string    `json:"verdict"`
+	Score     int       `json:"score"`
+	FetchedAt time.Time `json:"fetched_at"`
 }
 
 // CollectMemoryRequest triggers a manual memory dump.

@@ -2,6 +2,7 @@
 package api
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -9,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 
+	"github.com/edr-platform/connection-manager/internal/service"
 	"github.com/edr-platform/connection-manager/pkg/models"
 )
 
@@ -45,6 +47,27 @@ func (h *Handlers) Login(c echo.Context) error {
 		return errorResponse(c, http.StatusUnauthorized, "INVALID_CREDENTIALS", "Invalid username or password")
 	}
 
+	// ── MFA challenge branch ─────────────────────────────────────────────
+	// AuthService returned a challenge rather than tokens. We intentionally
+	// do NOT emit a login-success audit event here — the user is not yet
+	// authenticated; the success event fires after VerifyMFA.
+	if loginResp.MFAChallenge != nil {
+		return c.JSON(http.StatusOK, LoginResponse{
+			MFARequired: true,
+			MFAChallenge: &MFAChallengeSummary{
+				ID:          loginResp.MFAChallenge.ID,
+				MaskedEmail: loginResp.MFAChallenge.MaskedEmail,
+				ExpiresAt:   loginResp.MFAChallenge.ExpiresAt,
+			},
+			User: UserResponse{
+				ID:         loginResp.User.ID,
+				Username:   loginResp.User.Username,
+				FullName:   loginResp.User.FullName,
+				MFAEnabled: true,
+			},
+		})
+	}
+
 	// Audit: login success
 	if h.auditRepo != nil {
 		audit := models.NewAuditLog(loginResp.User.ID, loginResp.User.Username, models.AuditActionLoginSuccess, "user", loginResp.User.ID).
@@ -58,12 +81,72 @@ func (h *Handlers) Login(c echo.Context) error {
 		ExpiresIn:    int64(time.Until(loginResp.AccessExp).Seconds()),
 		TokenType:    "Bearer",
 		User: UserResponse{
-			ID:       loginResp.User.ID,
-			Username: loginResp.User.Username,
-			Email:    loginResp.User.Email,
-			FullName: loginResp.User.FullName,
-			Role:     loginResp.User.Role,
-			Status:   loginResp.User.Status,
+			ID:         loginResp.User.ID,
+			Username:   loginResp.User.Username,
+			Email:      loginResp.User.Email,
+			FullName:   loginResp.User.FullName,
+			Role:       loginResp.User.Role,
+			Status:     loginResp.User.Status,
+			MFAEnabled: loginResp.User.MFAEnabled,
+		},
+	})
+}
+
+// VerifyMFA completes a login started by Login() when the user has MFA
+// enabled. Accepts {challenge_id, code}; on success returns the same shape
+// as a successful Login (tokens + user).
+func (h *Handlers) VerifyMFA(c echo.Context) error {
+	if h.authSvc == nil {
+		return errorResponse(c, http.StatusServiceUnavailable, "AUTH_UNAVAILABLE", "Authentication service is not configured")
+	}
+
+	var req MFAVerifyRequest
+	if err := c.Bind(&req); err != nil {
+		return errorResponse(c, http.StatusBadRequest, "INVALID_REQUEST", "Invalid request body")
+	}
+	if req.ChallengeID == "" || req.Code == "" {
+		return errorResponse(c, http.StatusBadRequest, "INVALID_REQUEST", "challenge_id and code are required")
+	}
+
+	ip, ua := auditContext(c)
+
+	loginResp, err := h.authSvc.VerifyMFA(c.Request().Context(), req.ChallengeID, req.Code)
+	if err != nil {
+		h.logger.WithError(err).Warn("MFA verification failed")
+		switch {
+		case errors.Is(err, service.ErrMFAChallengeNotFound):
+			return errorResponse(c, http.StatusUnauthorized, "MFA_EXPIRED", "Verification code expired — please log in again")
+		case errors.Is(err, service.ErrMFAAttemptsExceeded):
+			return errorResponse(c, http.StatusUnauthorized, "MFA_LOCKED", "Too many incorrect attempts — please log in again")
+		case errors.Is(err, service.ErrMFACodeInvalid):
+			return errorResponse(c, http.StatusUnauthorized, "MFA_INVALID", "Invalid verification code")
+		case errors.Is(err, service.ErrMFAUnavailable):
+			return errorResponse(c, http.StatusServiceUnavailable, "MFA_UNAVAILABLE", "MFA service unavailable")
+		}
+		return errorResponse(c, http.StatusUnauthorized, "MFA_FAILED", "MFA verification failed")
+	}
+
+	// Audit: login success (deferred from Login so it reflects the real moment
+	// the user became authenticated).
+	if h.auditRepo != nil {
+		audit := models.NewAuditLog(loginResp.User.ID, loginResp.User.Username, models.AuditActionLoginSuccess, "user", loginResp.User.ID).
+			WithContext(ip, ua)
+		go h.auditRepo.Create(c.Request().Context(), audit) //nolint:errcheck
+	}
+
+	return c.JSON(http.StatusOK, LoginResponse{
+		AccessToken:  loginResp.AccessToken,
+		RefreshToken: loginResp.RefreshToken,
+		ExpiresIn:    int64(time.Until(loginResp.AccessExp).Seconds()),
+		TokenType:    "Bearer",
+		User: UserResponse{
+			ID:         loginResp.User.ID,
+			Username:   loginResp.User.Username,
+			Email:      loginResp.User.Email,
+			FullName:   loginResp.User.FullName,
+			Role:       loginResp.User.Role,
+			Status:     loginResp.User.Status,
+			MFAEnabled: loginResp.User.MFAEnabled,
 		},
 	})
 }
@@ -148,15 +231,16 @@ func (h *Handlers) GetCurrentUser(c echo.Context) error {
 			if err == nil && dbUser != nil {
 				return c.JSON(http.StatusOK, map[string]interface{}{
 					"data": UserResponse{
-						ID:        dbUser.ID,
-						Username:  dbUser.Username,
-						Email:     dbUser.Email,
-						FullName:  dbUser.FullName,
-						Role:      dbUser.Role,
-						Status:    dbUser.Status,
-						LastLogin: dbUser.LastLogin,
-						CreatedAt: dbUser.CreatedAt,
-						UpdatedAt: dbUser.UpdatedAt,
+						ID:         dbUser.ID,
+						Username:   dbUser.Username,
+						Email:      dbUser.Email,
+						FullName:   dbUser.FullName,
+						Role:       dbUser.Role,
+						Status:     dbUser.Status,
+						MFAEnabled: dbUser.MFAEnabled,
+						LastLogin:  dbUser.LastLogin,
+						CreatedAt:  dbUser.CreatedAt,
+						UpdatedAt:  dbUser.UpdatedAt,
 					},
 					"meta": ResponseMeta{
 						RequestID: c.Response().Header().Get(echo.HeaderXRequestID),

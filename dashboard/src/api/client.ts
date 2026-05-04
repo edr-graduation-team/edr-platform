@@ -408,9 +408,29 @@ export interface User {
     full_name?: string;
     role: 'admin' | 'security' | 'analyst' | 'operations' | 'viewer';
     status: 'active' | 'inactive' | 'locked';
+    /** Whether the account requires email OTP on every login. */
+    mfa_enabled?: boolean;
     last_login?: string;
     created_at?: string;
     updated_at?: string;
+}
+
+/** Describes a pending MFA challenge issued by POST /auth/login. */
+export interface MFAChallenge {
+    id: string;
+    masked_email: string;
+    expires_at: string;
+}
+
+/** Full shape returned by POST /auth/login — either tokens OR a challenge. */
+export interface LoginResult {
+    access_token?: string;
+    refresh_token?: string;
+    expires_in?: number;
+    token_type?: string;
+    user: User;
+    mfa_required?: boolean;
+    mfa_challenge?: MFAChallenge;
 }
 
 /** `GET /api/v1/users` list envelope. */
@@ -1512,15 +1532,32 @@ export function createAlertStream(
 // ============================================================================
 
 export const authApi = {
-    login: async (username: string, password: string) => {
-        const response = await connectionApi.post<{
-            access_token: string;
-            refresh_token?: string;
-            expires_in: number;
-            token_type: string;
-            user: User;
-        }>('/api/v1/auth/login', { username, password });
+    /**
+     * Step 1 of login. When the account has MFA enabled the response will
+     * carry `mfa_required: true` and `mfa_challenge`, and NO token will be
+     * stored — the caller must then call `verifyMfa()` to finish signing in.
+     */
+    login: async (username: string, password: string): Promise<LoginResult> => {
+        const response = await connectionApi.post<LoginResult>(
+            '/api/v1/auth/login',
+            { username, password },
+        );
+        if (response.data.access_token) {
+            localStorage.setItem('auth_token', response.data.access_token);
+            localStorage.setItem('user', JSON.stringify(response.data.user));
+        }
+        return response.data;
+    },
 
+    /**
+     * Step 2 of login: consume the MFA challenge. On success the token pair
+     * is persisted and the user is fully signed in.
+     */
+    verifyMfa: async (challengeId: string, code: string): Promise<LoginResult> => {
+        const response = await connectionApi.post<LoginResult>(
+            '/api/v1/auth/login/mfa',
+            { challenge_id: challengeId, code },
+        );
         if (response.data.access_token) {
             localStorage.setItem('auth_token', response.data.access_token);
             localStorage.setItem('user', JSON.stringify(response.data.user));
@@ -1699,6 +1736,7 @@ export const usersApi = {
         password: string;
         full_name: string;
         role: string;
+        mfa_enabled?: boolean;
     }) => {
         const response = await connectionApi.post<{ data: User }>('/api/v1/users', data);
         return response.data.data;
@@ -1708,6 +1746,7 @@ export const usersApi = {
         full_name?: string;
         role?: string;
         status?: string;
+        mfa_enabled?: boolean;
     }) => {
         const response = await connectionApi.patch<{ data: User }>(`/api/v1/users/${id}`, data);
         return response.data.data;

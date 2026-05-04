@@ -152,7 +152,6 @@ connectionApi.interceptors.response.use(
             return Promise.reject(error);
         }
         const code: string | undefined = resp.data?.error_code;
-        console.debug('[ApprovalInterceptor] 403 received, error_code=', code, 'resolver=', !!approvalTokenResolver, 'retried=', cfg.__approvalRetried);
         if (!code || !APPROVAL_NEEDED_CODES.has(code)) {
             return Promise.reject(error);
         }
@@ -164,7 +163,6 @@ connectionApi.interceptors.response.use(
             return Promise.reject(error);
         }
         if (!approvalTokenResolver) {
-            console.warn('[ApprovalInterceptor] APPROVAL_REQUIRED but no resolver registered — is CommandApprovalProvider mounted?');
             // Provider not mounted — surface the original error.
             return Promise.reject(error);
         }

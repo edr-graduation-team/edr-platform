@@ -283,7 +283,7 @@ export const PlatformAppShell = memo(function PlatformAppShell({ children }: { c
         if (typeof window !== 'undefined') {
             const saved = localStorage.getItem('darkMode');
             if (saved !== null) return saved === 'true';
-            return window.matchMedia('(prefers-color-scheme: dark)').matches;
+            return false;
         }
         return false;
     });

@@ -15,6 +15,8 @@ import { NavLink, Link, useLocation } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
     ChevronDown,
+    ChevronLeft,
+    ChevronRight,
     LogOut,
     Menu,
     Moon,
@@ -293,6 +295,29 @@ export const PlatformAppShell = memo(function PlatformAppShell({ children }: { c
     const location = useLocation();
     const pathname = location.pathname;
     const [openId, setOpenId] = useState<string | null>(null);
+
+    const navRef = useRef<HTMLElement>(null);
+    const [canScrollLeft, setCanScrollLeft] = useState(false);
+    const [canScrollRight, setCanScrollRight] = useState(false);
+
+    const checkScroll = useCallback(() => {
+        if (navRef.current) {
+            const { scrollLeft, scrollWidth, clientWidth } = navRef.current;
+            setCanScrollLeft(scrollLeft > 0);
+            setCanScrollRight(Math.ceil(scrollLeft + clientWidth) < scrollWidth);
+        }
+    }, []);
+
+    useLayoutEffect(() => {
+        checkScroll();
+        window.addEventListener('resize', checkScroll);
+        const t = setTimeout(checkScroll, 100);
+        return () => {
+            window.removeEventListener('resize', checkScroll);
+            clearTimeout(t);
+        };
+    }, [checkScroll, pathname]);
+
     // Dashboards tabs are rendered directly (no “More” menu).
 
     const [darkMode, setDarkMode] = useState(() => {
@@ -419,7 +444,21 @@ export const PlatformAppShell = memo(function PlatformAppShell({ children }: { c
 
                     <div className="hidden lg:block w-px h-4 bg-[var(--xc-nav-border)] mx-1 shrink-0" />
 
-                    <nav className="hidden lg:flex items-center gap-0.5 flex-1 min-w-0 overflow-x-auto [&::-webkit-scrollbar]:hidden">
+                    <div className="hidden lg:flex flex-1 min-w-0 overflow-hidden items-center">
+                        {canScrollLeft && (
+                            <button
+                                onClick={() => navRef.current?.scrollBy({ left: -300, behavior: 'smooth' })}
+                                className="flex items-center justify-center text-[var(--xc-nav-text)] hover:text-white bg-white/5 border border-[var(--xc-nav-border)] rounded-md shadow-sm transition-colors shrink-0 mr-1 h-8 w-8"
+                            >
+                                <ChevronLeft className="w-4 h-4" />
+                            </button>
+                        )}
+
+                        <nav 
+                            ref={navRef}
+                            onScroll={checkScroll}
+                            className="flex items-center gap-0.5 flex-1 min-w-0 overflow-x-auto [&::-webkit-scrollbar]:hidden scroll-smooth"
+                        >
                         <NavDropdown id="dashboards" label="Dashboards" active={dashboardsTopActive} openId={openId} setOpenId={setOpenId}>
                             {[...DASHBOARD_MAIN_TABS, ...DASHBOARD_MORE_TABS].map((t) => (
                                 <DropdownLink key={t.to} to={t.to} onNavigate={() => setOpenId(null)}>
@@ -561,7 +600,17 @@ export const PlatformAppShell = memo(function PlatformAppShell({ children }: { c
                                 </DropdownLink>
                             ))}
                         </NavDropdown>
-                    </nav>
+                        </nav>
+
+                        {canScrollRight && (
+                            <button
+                                onClick={() => navRef.current?.scrollBy({ left: 300, behavior: 'smooth' })}
+                                className="flex items-center justify-center text-[var(--xc-nav-text)] hover:text-white bg-white/5 border border-[var(--xc-nav-border)] rounded-md shadow-sm transition-colors shrink-0 ml-1 h-8 w-8"
+                            >
+                                <ChevronRight className="w-4 h-4" />
+                            </button>
+                        )}
+                    </div>
 
                     <div className="flex items-center gap-1 sm:gap-2 ml-auto shrink-0">
                         <EngineHealthChip />

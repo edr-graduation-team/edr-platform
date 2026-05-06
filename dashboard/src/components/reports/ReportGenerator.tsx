@@ -101,7 +101,7 @@ export function ReportGenerator() {
         const commands = commandsRes.status === 'fulfilled' ? (commandsRes.value.data || []) : [];
         const vulnFindings = vulnRes.status === 'fulfilled' ? (vulnRes.value.data || []) : [];
         const agentStats = agentStatsRes.status === 'fulfilled' ? agentStatsRes.value : null;
-        const cmdStats = cmdStatsRes.status === 'fulfilled' ? cmdStatsRes.value : null;
+        const _cmdStats = cmdStatsRes.status === 'fulfilled' ? cmdStatsRes.value : null; void _cmdStats;
         const auditLogs = auditRes.status === 'fulfilled' ? (auditRes.value.data || []) : [];
 
         // Create agent map

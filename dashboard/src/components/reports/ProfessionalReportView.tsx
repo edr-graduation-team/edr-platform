@@ -6,7 +6,7 @@
 import { useState } from 'react';
 import { 
     FileText, Download, BarChart3, TrendingUp, 
-    AlertTriangle, CheckCircle, Server, Shield, Activity,
+    AlertTriangle, CheckCircle, Shield, Activity,
     ChevronDown, ChevronUp, Bug, ClipboardList, Terminal
 } from 'lucide-react';
 import {

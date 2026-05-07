@@ -28,6 +28,8 @@ const ActionCenter = lazy(() => import('./pages/ActionCenter'));
 const AgentDeployment = lazy(() => import('./pages/AgentDeployment'));
 const SystemLayout = lazy(() => import('./pages/SystemLayout'));
 const ReportPreviewPage = lazy(() => import('./pages/ReportPreviewPage'));
+// TEMPORARY: developer-only stats trace page. Remove once investigation is complete.
+const DebugStats = lazy(() => import('./pages/DebugStats'));
 
 const DashboardsLayout = lazy(() => import('./pages/parity/DashboardsLayout'));
 const DashboardEndpointPage = lazy(() => import('./pages/parity/dashboardPages').then((m) => ({ default: m.DashboardEndpointPage })));
@@ -383,6 +385,13 @@ function AppRoutes() {
               </ProtectedRoute>
             } />
             <Route path="/management/agent-profiles" element={<Navigate to="/management/devices" replace />} />
+
+            {/* TEMPORARY DEBUG: stats computation trace (admin/security only) */}
+            <Route path="/debug/stats" element={
+              <ProtectedRoute roles={['admin', 'security']}>
+                <DebugStats />
+              </ProtectedRoute>
+            } />
             <Route path="/management/context-policies" element={
               <ProtectedRoute>
                 {/* This is an admin-ish control surface; kept under Management per requirements. */}

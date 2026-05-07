@@ -211,6 +211,12 @@ func (s *Server) RegisterRoutes(handlers *Handlers) {
 	// "backend unreachable" UI states when role permission catalogs drift.
 	protected.GET("/reliability", handlers.GetReliabilityHealth)
 
+	// ── TEMPORARY: dashboard stats trace (developer-only) ────────────────
+	// Returns step-by-step computation of every dashboard KPI.
+	// Admin-only. Remove this route (and handlers_debug.go) after the
+	// internal investigation is finished.
+	protected.GET("/debug/stats-trace", handlers.DebugStatsTrace, handlers.RequirePermission("settings", "read"))
+
 	// ── Context-aware policy controls ──────────────────────────────────────
 	contextPolicies := protected.Group("/context-policies")
 	contextPolicies.GET("", handlers.ListContextPolicies, handlers.RequirePermission("settings", "read"))

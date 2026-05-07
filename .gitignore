@@ -1,88 +1,88 @@
-# =============================================================================
-# EDR Platform — root .gitignore
-#
-# RULE OF THUMB: anything that can carry a password / API key / private key
-# MUST live under one of the patterns below. If you need to share a config,
-# commit a `*.example` template with all secret values blanked out.
-# =============================================================================
+# # =============================================================================
+# # EDR Platform — root .gitignore
+# #
+# # RULE OF THUMB: anything that can carry a password / API key / private key
+# # MUST live under one of the patterns below. If you need to share a config,
+# # commit a `*.example` template with all secret values blanked out.
+# # =============================================================================
 
-# ── Secrets / credentials ────────────────────────────────────────────────────
-# Real env files (committed siblings end with .example).
-.env
-.env.*
-!.env.example
-!**/.env.example
+# # ── Secrets / credentials ────────────────────────────────────────────────────
+# # Real env files (committed siblings end with .example).
+# .env
+# .env.*
+# !.env.example
+# !**/.env.example
 
-# Real local configs that may carry dev passwords. Templates are tracked.
-connection-manager/config/config.yaml
-sigma_engine_go/config/config.yaml
+# # Real local configs that may carry dev passwords. Templates are tracked.
+# connection-manager/config/config.yaml
+# sigma_engine_go/config/config.yaml
 
-# TLS material / private keys / PKCS bundles — never commit any of these.
-*.pem
-*.key
-*.crt
-*.cer
-*.csr
-*.p12
-*.pfx
-*.jks
-# Project-specific cert dirs (CA, server cert, jwt_private.pem, etc.).
-connection-manager/certs/
-sigma_engine_go/certs/
+# # TLS material / private keys / PKCS bundles — never commit any of these.
+# *.pem
+# *.key
+# *.crt
+# *.cer
+# *.csr
+# *.p12
+# *.pfx
+# *.jks
+# # Project-specific cert dirs (CA, server cert, jwt_private.pem, etc.).
+# connection-manager/certs/
+# sigma_engine_go/certs/
 
-# ── Build artefacts ──────────────────────────────────────────────────────────
-*.exe
-*.exe~
-*.dll
-*.so
-*.dylib
-*.test
-*.out
-*.prof
-/connection-manager/bin/
-/sigma_engine_go/sigma-engine
-/sigma_engine_go/sigma-engine-live
-/sigma_engine_go/sigma-engine-kafka
-/win_edrAgent/bin/
+# # ── Build artefacts ──────────────────────────────────────────────────────────
+# *.exe
+# *.exe~
+# *.dll
+# *.so
+# *.dylib
+# *.test
+# *.out
+# *.prof
+# /connection-manager/bin/
+# /sigma_engine_go/sigma-engine
+# /sigma_engine_go/sigma-engine-live
+# /sigma_engine_go/sigma-engine-kafka
+# /win_edrAgent/bin/
 
-# Go workspace files (machine-local).
-go.work
-go.work.sum
+# # Go workspace files (machine-local).
+# go.work
+# go.work.sum
 
-# Node / Vite.
-node_modules/
-dashboard/node_modules/
-dashboard/dist/
+# # Node / Vite.
+# node_modules/
+# dashboard/node_modules/
+# dashboard/dist/
 
-# .NET (Application Control project).
-bin/
-obj/
-.vs/
+# # .NET (Application Control project).
+# bin/
+# obj/
+# .vs/
 
-# Python tooling.
-venv/
-__pycache__/
-*.pyc
+# # Python tooling.
+# venv/
+# __pycache__/
+# *.pyc
 
-# ── Logs & local test reports ────────────────────────────────────────────────
-*.log
-*.md
-agent.log
-agent_after_update.log
-api-test-results/
-report/
-report_images/
-test-dashboard-apis.ps1
+# # ── Logs & local test reports ────────────────────────────────────────────────
+# *.log
+# *.md
+# agent.log
+# agent_after_update.log
+# api-test-results/
+# report/
+# report_images/
+# test-dashboard-apis.ps1
 
-# ── OS / IDE ─────────────────────────────────────────────────────────────────
-.idea/
-.vscode/
-*.swp
-*.swo
-*~
-.DS_Store
-Thumbs.db
+# # ── OS / IDE ─────────────────────────────────────────────────────────────────
+# .idea/
+# .vscode/
+# *.swp
+# *.swo
+# *~
+# .DS_Store
+# Thumbs.db
 
-# ── Misc temp ────────────────────────────────────────────────────────────────
-tmp/
-temp/
+# # ── Misc temp ────────────────────────────────────────────────────────────────
+# tmp/
+# temp/

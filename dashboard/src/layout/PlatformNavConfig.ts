@@ -3,6 +3,7 @@
 export type ContextTab = { to: string; label: string; end?: boolean };
 
 export const SOC_PATHS = [
+    '/soc/overview',
     '/stats',
     '/alerts',
     '/events',
@@ -46,6 +47,7 @@ export const SECURITY_MODULE_TABS: ContextTab[] = [
 ];
 
 export const SOC_CONTEXT_TABS: ContextTab[] = [
+    { to: '/soc/overview', label: 'SOC Tracker' },
     { to: '/stats', label: 'Statistics' },
     { to: '/alerts', label: 'Alerts (Triage)' },
     { to: '/events', label: 'Telemetry Search' },

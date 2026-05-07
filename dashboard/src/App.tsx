@@ -39,6 +39,7 @@ const DashboardEndpointCompliancePage = lazy(() => import('./pages/parity/dashbo
 const DashboardVerdictCloudPage = lazy(() => import('./pages/parity/dashboardPages').then((m) => ({ default: m.DashboardVerdictCloudPage })));
 const DashboardReportsPage = lazy(() => import('./pages/parity/dashboardPages').then((m) => ({ default: m.DashboardReportsPage })));
 const SocCorrelationPage = lazy(() => import('./pages/SocCorrelation'));
+const SocTrackerPage = lazy(() => import('./pages/SocTracker'));
 
 const SecurityEndpointZeroTrustPage = lazy(() => import('./pages/parity/paritySectionPages').then((m) => ({ default: m.SecurityEndpointZeroTrustPage })));
 const SecuritySiemPage = lazy(() => import('./pages/parity/paritySectionPages').then((m) => ({ default: m.SecuritySiemPage })));
@@ -347,6 +348,12 @@ function AppRoutes() {
             <Route path="/itsm/integrations" element={<Navigate to="/itsm/playbooks" replace />} />
 
             {/* SOC extensions */}
+            <Route path="/soc" element={<Navigate to="/soc/overview" replace />} />
+            <Route path="/soc/overview" element={
+              <ProtectedRoute roles={['admin', 'security', 'analyst', 'operations', 'viewer']}>
+                <SocTrackerPage />
+              </ProtectedRoute>
+            } />
             <Route path="/soc/correlation" element={
               <ProtectedRoute roles={['admin', 'security', 'analyst', 'operations', 'viewer']}>
                 <SocCorrelationPage />

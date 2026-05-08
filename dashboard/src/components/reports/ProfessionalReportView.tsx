@@ -68,6 +68,8 @@ export function ProfessionalReportView({
     const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set([
         'summary', 'kpis', 'trends', 'severity', 'mitre', 'alerts', 'vulns', 'commands', 'auditLog', 'devices', 'endpointRisk', 'os'
     ]));
+    const [showAllRows, setShowAllRows] = useState<Record<string, boolean>>({});
+    const toggleRows = (key: string) => setShowAllRows(prev => ({ ...prev, [key]: !prev[key] }));
     const config = REPORT_TEMPLATES[template];
 
     const toggleSection = (sectionId: string) => {
@@ -404,7 +406,7 @@ export function ProfessionalReportView({
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
-                                    {data.tables.alerts.slice(0, 5).map((alert, idx) => (
+                                    {data.tables.alerts.slice(0, showAllRows['alerts'] ? undefined : 5).map((alert, idx) => (
                                         <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
                                             <td className="px-4 py-2 text-slate-600 dark:text-slate-400">
                                                 {new Date(alert.timestamp).toLocaleString()}
@@ -419,9 +421,9 @@ export function ProfessionalReportView({
                                 </tbody>
                             </table>
                             {data.tables.alerts.length > 5 && (
-                                <p className="text-center text-xs text-slate-500 py-2">
-                                    + {data.tables.alerts.length - 5} more in full report
-                                </p>
+                                <button onClick={() => toggleRows('alerts')} className="w-full text-center text-xs text-violet-600 dark:text-violet-400 hover:text-violet-700 dark:hover:text-violet-300 py-2 font-medium transition-colors print:hidden">
+                                    {showAllRows['alerts'] ? "Show less" : `+ ${data.tables.alerts.length - 5} more in full report`}
+                                </button>
                             )}
                         </div>
                     </ReportSection>
@@ -448,7 +450,7 @@ export function ProfessionalReportView({
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
-                                    {data.tables.devices.slice(0, 10).map((d: any, idx: number) => (
+                                    {data.tables.devices.slice(0, showAllRows['devices'] ? undefined : 10).map((d: any, idx: number) => (
                                         <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
                                             <td className="px-4 py-2 font-medium">{d.hostname || d.id?.slice?.(0, 8)}</td>
                                             <td className="px-4 py-2 text-slate-600 dark:text-slate-300">{String(d.status || 'unknown')}</td>
@@ -460,7 +462,9 @@ export function ProfessionalReportView({
                                 </tbody>
                             </table>
                             {data.tables.devices.length > 10 && (
-                                <p className="text-center text-xs text-slate-500 py-2">+ {data.tables.devices.length - 10} more in full report</p>
+                                <button onClick={() => toggleRows('devices')} className="w-full text-center text-xs text-violet-600 dark:text-violet-400 hover:text-violet-700 dark:hover:text-violet-300 py-2 font-medium transition-colors print:hidden">
+                                    {showAllRows['devices'] ? "Show less" : `+ ${data.tables.devices.length - 10} more in full report`}
+                                </button>
                             )}
                         </div>
                     </ReportSection>
@@ -490,7 +494,7 @@ export function ProfessionalReportView({
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
-                                    {data.tables.risks.slice(0, 10).map((r: any, idx: number) => (
+                                    {data.tables.risks.slice(0, showAllRows['risks'] ? undefined : 10).map((r: any, idx: number) => (
                                         <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
                                             <td className="px-4 py-2 font-medium">
                                                 {r.agent_hostname || r.hostname || r.agent_id?.slice?.(0, 8) || '—'}
@@ -507,7 +511,9 @@ export function ProfessionalReportView({
                                 </tbody>
                             </table>
                             {data.tables.risks.length > 10 && (
-                                <p className="text-center text-xs text-slate-500 py-2">+ {data.tables.risks.length - 10} more in full report</p>
+                                <button onClick={() => toggleRows('risks')} className="w-full text-center text-xs text-violet-600 dark:text-violet-400 hover:text-violet-700 dark:hover:text-violet-300 py-2 font-medium transition-colors print:hidden">
+                                    {showAllRows['risks'] ? "Show less" : `+ ${data.tables.risks.length - 10} more in full report`}
+                                </button>
                             )}
                         </div>
                     </ReportSection>
@@ -568,7 +574,7 @@ export function ProfessionalReportView({
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
-                                        {data.tables.vulnerabilities.slice(0, 5).map((v: any, idx: number) => (
+                                        {data.tables.vulnerabilities.slice(0, showAllRows['vulns'] ? undefined : 5).map((v: any, idx: number) => (
                                             <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
                                                 <td className="px-4 py-2 font-mono text-xs">{v.cve}</td>
                                                 <td className="px-4 py-2"><SeverityBadge severity={v.severity} /></td>
@@ -580,7 +586,9 @@ export function ProfessionalReportView({
                                     </tbody>
                                 </table>
                                 {data.tables.vulnerabilities.length > 5 && (
-                                    <p className="text-center text-xs text-slate-500 py-2">+ {data.tables.vulnerabilities.length - 5} more in full report</p>
+                                    <button onClick={() => toggleRows('vulns')} className="w-full text-center text-xs text-violet-600 dark:text-violet-400 hover:text-violet-700 dark:hover:text-violet-300 py-2 font-medium transition-colors print:hidden">
+                                        {showAllRows['vulns'] ? "Show less" : `+ ${data.tables.vulnerabilities.length - 5} more in full report`}
+                                    </button>
                                 )}
                             </div>
                         )}
@@ -637,7 +645,7 @@ export function ProfessionalReportView({
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
-                                    {data.tables.auditLogs.slice(0, 5).map((log: any, idx: number) => (
+                                    {data.tables.auditLogs.slice(0, showAllRows['audit'] ? undefined : 5).map((log: any, idx: number) => (
                                         <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
                                             <td className="px-4 py-2 text-slate-600 dark:text-slate-400 text-xs">
                                                 {new Date(log.timestamp).toLocaleString()}
@@ -655,7 +663,9 @@ export function ProfessionalReportView({
                                 </tbody>
                             </table>
                             {data.tables.auditLogs.length > 5 && (
-                                <p className="text-center text-xs text-slate-500 py-2">+ {data.tables.auditLogs.length - 5} more in full report</p>
+                                <button onClick={() => toggleRows('audit')} className="w-full text-center text-xs text-violet-600 dark:text-violet-400 hover:text-violet-700 dark:hover:text-violet-300 py-2 font-medium transition-colors print:hidden">
+                                    {showAllRows['audit'] ? "Show less" : `+ ${data.tables.auditLogs.length - 5} more in full report`}
+                                </button>
                             )}
                         </div>
                     </ReportSection>

@@ -10,7 +10,8 @@ import { REPORT_TEMPLATES } from './ReportTemplates';
 export async function exportReport(
     data: ReportData,
     format: ReportFormat,
-    template: ReportTemplate
+    template: ReportTemplate,
+    options?: { sourceElement?: HTMLElement | null }
 ): Promise<void> {
     switch (format) {
         case 'pdf':
@@ -23,7 +24,7 @@ export async function exportReport(
             await exportToWord(data, template);
             break;
         case 'html':
-            await exportToHTML(data, template);
+            await exportToHTML(data, template, options?.sourceElement);
             break;
         case 'csv':
             await exportToCSV(data, template);
@@ -151,10 +152,12 @@ async function exportToWord(data: ReportData, template: ReportTemplate): Promise
 }
 
 // Export to HTML
-async function exportToHTML(data: ReportData, template: ReportTemplate): Promise<void> {
+async function exportToHTML(data: ReportData, template: ReportTemplate, sourceElement?: HTMLElement | null): Promise<void> {
     const config = REPORT_TEMPLATES[template];
-    const html = generateHTMLReport(data, template, config.name);
-    
+    const html = sourceElement
+        ? generateHTMLFromRenderedView(sourceElement, config.name)
+        : generateHTMLReport(data, template, config.name);
+
     const blob = new Blob([html], { type: 'text/html' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -164,6 +167,42 @@ async function exportToHTML(data: ReportData, template: ReportTemplate): Promise
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
+}
+
+function generateHTMLFromRenderedView(sourceElement: HTMLElement, title: string): string {
+    const cssBlocks: string[] = [];
+    document.querySelectorAll('style').forEach((s) => {
+        if (s.textContent) cssBlocks.push(s.textContent);
+    });
+
+    const cssLinks = Array.from(document.querySelectorAll<HTMLLinkElement>('link[rel="stylesheet"]'))
+        .map((l) => l.href)
+        .filter(Boolean);
+
+    return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>${title}</title>
+  ${cssLinks.map((href) => `<link rel="stylesheet" href="${href}" />`).join('\n')}
+  <style>
+    ${cssBlocks.join('\n')}
+    /* Ensure downloaded HTML looks like preview canvas */
+    html, body { margin: 0; padding: 0; background: #f1f5f9; }
+    .report-export-root { max-width: 1200px; margin: 0 auto; padding: 24px; }
+    @media print {
+      html, body { background: #fff; }
+      .report-export-root { max-width: none; padding: 0; }
+    }
+  </style>
+</head>
+<body>
+  <div class="report-export-root">
+    ${sourceElement.outerHTML}
+  </div>
+</body>
+</html>`;
 }
 
 // Export to CSV

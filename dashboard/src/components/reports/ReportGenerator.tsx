@@ -37,6 +37,87 @@ const FORMAT_ICONS: Record<string, any> = {
     json: FileCode,
 };
 
+function buildTemplateInclude(template: ReportTemplate) {
+    const base = {
+        sigma_alerts: false,
+        sigma_alert_stats: false,
+        sigma_performance: false,
+        agents: false,
+        agent_stats: false,
+        commands: false,
+        command_stats: false,
+        vulnerability: false,
+        audit_logs: false,
+        endpoint_risk: false,
+    };
+
+    switch (template) {
+        case 'executive':
+            return {
+                ...base,
+                sigma_alert_stats: true,
+                sigma_performance: true,
+                agent_stats: true,
+                endpoint_risk: true,
+                // Needed for timeline + MITRE fallback + better preview richness.
+                sigma_alerts: true,
+                agents: true,
+            };
+        case 'technical':
+            return {
+                ...base,
+                sigma_alerts: true,
+                sigma_alert_stats: true,
+                sigma_performance: true,
+                agents: true,
+                agent_stats: true,
+                commands: true,
+                command_stats: true,
+                vulnerability: true,
+                audit_logs: true,
+                endpoint_risk: true,
+            };
+        case 'compliance':
+            return {
+                ...base,
+                agents: true,
+                agent_stats: true,
+                vulnerability: true,
+                audit_logs: true,
+                endpoint_risk: true,
+            };
+        case 'operations':
+            return {
+                ...base,
+                sigma_alerts: true,
+                sigma_alert_stats: true,
+                sigma_performance: true,
+                agents: true,
+                agent_stats: true,
+                commands: true,
+                command_stats: true,
+                audit_logs: true,
+                endpoint_risk: true,
+            };
+        case 'custom':
+        default:
+            // Keep custom rich by default so users can toggle sections freely.
+            return {
+                ...base,
+                sigma_alerts: true,
+                sigma_alert_stats: true,
+                sigma_performance: true,
+                agents: true,
+                agent_stats: true,
+                commands: true,
+                command_stats: true,
+                vulnerability: true,
+                audit_logs: true,
+                endpoint_risk: true,
+            };
+    }
+}
+
 export function ReportGenerator() {
     // Report configuration
     const [selectedTemplate, setSelectedTemplate] = useState<ReportTemplate>('executive');
@@ -89,20 +170,7 @@ export function ReportGenerator() {
                 vuln: 200,
                 audit_logs: 200,
             },
-            include: {
-                // Explicitly request the core datasets needed by preview rendering,
-                // even for executive/compliance templates.
-                sigma_alerts: true,
-                sigma_alert_stats: true,
-                sigma_performance: true,
-                agents: true,
-                agent_stats: true,
-                commands: true,
-                command_stats: true,
-                vulnerability: true,
-                audit_logs: true,
-                endpoint_risk: true,
-            },
+            include: buildTemplateInclude(selectedTemplate),
         });
 
         const sec = bundle.data || {};
@@ -205,6 +273,12 @@ export function ReportGenerator() {
             .sort((a, b) => b[1] - a[1])
             .slice(0, 10)
             .map(([tactic, count]) => ({ tactic, count }));
+        const topTacticsFallback = sigmaStatsAlertsPayload?.by_tactic
+            ? Object.entries(sigmaStatsAlertsPayload.by_tactic as Record<string, number>)
+                .sort((a, b) => Number(b[1]) - Number(a[1]))
+                .slice(0, 10)
+                .map(([tactic, count]) => ({ tactic, count: Number(count) }))
+            : [];
 
         // OS distribution
         const osCounts = new Map<string, number>();
@@ -285,7 +359,7 @@ export function ReportGenerator() {
             charts: {
                 timeline,
                 severityDistribution,
-                topTactics,
+                topTactics: topTactics.length > 0 ? topTactics : topTacticsFallback,
                 osDistribution,
                 vulnBySeverity,
                 commandsByStatus,

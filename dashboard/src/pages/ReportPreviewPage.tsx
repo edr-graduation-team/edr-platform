@@ -123,7 +123,9 @@ export default function ReportPreviewPage() {
                 if (wasDark) document.documentElement.classList.add('dark');
             } else {
                 const { exportReport } = await import('../components/reports/reportExport');
-                await exportReport(payload.data, format, payload.template);
+                await exportReport(payload.data, format, payload.template, {
+                    sourceElement: reportRef.current,
+                });
             }
         } catch (err: any) {
             console.error('Download failed:', err);

@@ -78,10 +78,31 @@ export function ProfessionalReportView({
         setExpandedSections(newSet);
     };
 
-    // Helper to check if section should be shown
+    // Helper to check if section should be shown:
+    // 1) For custom template: respect explicit user-picked sections.
+    // 2) For fixed templates: only render sections that belong to this template config.
     const shouldShowSection = (sectionId: string) => {
-        if (template !== 'custom') return true; // All sections shown for non-custom templates
-        return customSections?.includes(sectionId) ?? true;
+        if (template === 'custom') {
+            return customSections?.includes(sectionId) ?? true;
+        }
+
+        const aliases: Record<string, string[]> = {
+            // UI section id -> acceptable template section ids
+            endpointRisk: ['endpointRisk', 'risks'],
+            devices: ['devices', 'endpoints'],
+            commands: ['commands', 'commandStats'],
+            auditLog: ['auditLog'],
+            trends: ['trends'],
+            summary: ['summary'],
+            kpis: ['kpis', 'fleetHealth'],
+            mitre: ['mitre'],
+            vulns: ['vulns'],
+            alerts: ['alerts', 'topAlerts'],
+            os: ['os'],
+        };
+
+        const wanted = new Set(aliases[sectionId] || [sectionId]);
+        return config.sections.some((s) => s.enabled && wanted.has(s.id));
     };
 
     if (!data) {
@@ -95,6 +116,12 @@ export function ProfessionalReportView({
     }
 
     const formatInfo = REPORT_FORMATS.find(f => f.id === format);
+    const hasSummaryData =
+        (data.summary.totalAlerts || 0) > 0 ||
+        (data.summary.totalCommands || 0) > 0 ||
+        (data.summary.totalDevices || 0) > 0 ||
+        (data.summary.totalVulnerabilities || 0) > 0;
+    const hasKpiData = hasSummaryData || (data.summary.avgHealthScore || 0) > 0;
 
     return (
         <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden print:border-none print:rounded-none">
@@ -138,7 +165,7 @@ export function ProfessionalReportView({
             {/* Preview Content — scrollable in modal, full-height in standalone page */}
             <div className={`p-6 space-y-6 ${hideActionBar ? '' : 'max-h-[600px] overflow-y-auto'}`}>
                 {/* Executive Summary */}
-                {shouldShowSection('summary') && <ReportSection 
+                {shouldShowSection('summary') && hasSummaryData && <ReportSection 
                         title="Executive Summary"
                         icon={CheckCircle}
                         color={config.colorScheme.success}
@@ -180,7 +207,7 @@ export function ProfessionalReportView({
                 </ReportSection>}
 
                 {/* KPI Cards */}
-                {shouldShowSection('kpis') && <ReportSection
+                {shouldShowSection('kpis') && hasKpiData && <ReportSection
                     title="Key Performance Indicators"
                     icon={Activity}
                     color={config.colorScheme.primary}

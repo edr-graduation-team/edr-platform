@@ -23,7 +23,6 @@ import {
     Legend,
     AreaChart,
     Area,
-    LabelList,
 } from 'recharts';
 import type { ReportData, ReportTemplate, ReportFormat } from './ReportTemplates';
 import { REPORT_TEMPLATES, REPORT_FORMATS } from './ReportTemplates';
@@ -54,6 +53,8 @@ const SEVERITY_COLORS: Record<string, string> = {
     low: '#3b82f6',
     informational: '#06b6d4',
 };
+
+const MITRE_PIE_COLORS = ['#5EC7B7', '#4FA3D1', '#7B52C9', '#D53FA6', '#E11D79', '#F59E0B', '#06B6D4'];
 
 export function ProfessionalReportView({ 
     data, 
@@ -321,18 +322,41 @@ export function ProfessionalReportView({
                         isExpanded={expandedSections.has('mitre')}
                         onToggle={() => toggleSection('mitre')}
                     >
-                        <div className="h-64">
-                            <ResponsiveContainer width="100%" height="100%">
-                                <BarChart data={data.charts.topTactics} layout="vertical">
-                                    <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                                    <XAxis type="number" tick={{ fontSize: 11 }} />
-                                    <YAxis type="category" dataKey="tactic" tick={{ fontSize: 10 }} width={150} />
-                                    <Tooltip contentStyle={{ background: 'rgba(15, 23, 42, 0.95)', border: 'none', borderRadius: '8px', color: 'white' }} />
-                                    <Bar dataKey="count" fill={config.colorScheme.primary} radius={[0, 4, 4, 0]}>
-                                        <LabelList dataKey="count" position="right" fill="#334155" fontSize={11} fontWeight={600} />
-                                    </Bar>
-                                </BarChart>
-                            </ResponsiveContainer>
+                        <div className="rounded-lg border border-slate-200 dark:border-slate-700 p-4 bg-white dark:bg-slate-900">
+                            <div className="text-sm font-semibold text-slate-700 dark:text-slate-200 mb-3">
+                                Top Mitre ATT&ck tactics
+                            </div>
+                            <div className="h-56">
+                                <ResponsiveContainer width="100%" height="100%">
+                                    <PieChart>
+                                        <Pie
+                                            data={data.charts.topTactics.slice(0, 5)}
+                                            dataKey="count"
+                                            nameKey="tactic"
+                                            cx="35%"
+                                            cy="50%"
+                                            innerRadius={0}
+                                            outerRadius={72}
+                                            stroke="none"
+                                        >
+                                            {data.charts.topTactics.slice(0, 5).map((_, index) => (
+                                                <Cell key={`mitre-pie-${index}`} fill={MITRE_PIE_COLORS[index % MITRE_PIE_COLORS.length]} />
+                                            ))}
+                                        </Pie>
+                                        <Tooltip
+                                            formatter={(value: number | string | undefined, name: string | undefined) => [value ?? 0, name ?? '']}
+                                            contentStyle={{ background: 'rgba(15, 23, 42, 0.95)', border: 'none', borderRadius: '8px', color: 'white' }}
+                                        />
+                                        <Legend
+                                            layout="vertical"
+                                            verticalAlign="middle"
+                                            align="right"
+                                            iconType="circle"
+                                            formatter={(value) => <span className="text-xs text-slate-600 dark:text-slate-300">{value}</span>}
+                                        />
+                                    </PieChart>
+                                </ResponsiveContainer>
+                            </div>
                         </div>
                     </ReportSection>
                 )}

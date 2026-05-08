@@ -1,6 +1,6 @@
 /**
  * Report Export Functions
- * Export reports to various formats: PDF, Excel, Word, HTML, CSV, JSON
+ * Export reports to various formats: PDF, Excel, HTML, CSV, JSON
  */
 
 import type { ReportData, ReportTemplate, ReportFormat } from './ReportTemplates';
@@ -19,9 +19,6 @@ export async function exportReport(
             break;
         case 'excel':
             await exportToExcel(data, template);
-            break;
-        case 'word':
-            await exportToWord(data, template);
             break;
         case 'html':
             await exportToHTML(data, template, options?.sourceElement);
@@ -130,25 +127,6 @@ async function exportToExcel(data: ReportData, template: ReportTemplate): Promis
     // Download
     const fileName = `EDR-Report-${template}-${new Date().toISOString().slice(0, 10)}.xlsx`;
     XLSX.writeFile(workbook, fileName);
-}
-
-// Export to Word (DOCX)
-async function exportToWord(data: ReportData, template: ReportTemplate): Promise<void> {
-    const config = REPORT_TEMPLATES[template];
-    
-    // Create HTML that works well when pasted into Word
-    const html = generateHTMLReport(data, template, config.name, true);
-    
-    // Create a blob and download
-    const blob = new Blob([html], { type: 'application/msword' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `EDR-Report-${template}-${new Date().toISOString().slice(0, 10)}.doc`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
 }
 
 // Export to HTML
@@ -319,7 +297,7 @@ async function exportToJSON(data: ReportData, template: ReportTemplate): Promise
 }
 
 // Generate HTML report
-function generateHTMLReport(data: ReportData, template: string, title: string, forWord = false): string {
+function generateHTMLReport(data: ReportData, template: string, title: string): string {
     const severityColors: Record<string, string> = {
         critical: '#ef4444',
         high: '#f97316',
@@ -343,9 +321,7 @@ function generateHTMLReport(data: ReportData, template: string, title: string, f
             padding: 40px;
             background: #fff;
         }
-        ${forWord ? `
-        body { font-family: 'Calibri', sans-serif; }
-        ` : ''}
+
         .header {
             text-align: center;
             border-bottom: 3px solid #0891b2;

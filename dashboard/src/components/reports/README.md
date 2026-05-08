@@ -5,7 +5,7 @@
 The new Professional Reports system replaces the basic JSON/CSV export with a comprehensive report generation platform featuring:
 
 - **5 Report Templates**: Executive, Technical, Compliance, Operations, Custom
-- **6 Export Formats**: PDF, Excel, Word, HTML, CSV, JSON
+- **5 Export Formats**: PDF, Excel, HTML, CSV, JSON
 - **Interactive Charts**: Real-time preview with Recharts visualizations
 - **Professional Styling**: Consistent, branded report design
 
@@ -38,7 +38,6 @@ Configuration for all report types:
 Export engine supporting:
 - PDF (browser print to PDF)
 - Excel (XLSX with SheetJS)
-- Word (HTML-based)
 - HTML (styled document)
 - CSV (structured data)
 - JSON (raw data)
@@ -91,7 +90,6 @@ function ReportsPage() {
 |--------|----------|----------|
 | PDF | Sharing/Printing | Professional layout, charts |
 | Excel | Data Analysis | Multi-sheet, formulas, charts |
-| Word | Editing | Editable document |
 | HTML | Web Publishing | Interactive, styled |
 | CSV | Data Import | Universal compatibility |
 | JSON | API Integration | Structured data |

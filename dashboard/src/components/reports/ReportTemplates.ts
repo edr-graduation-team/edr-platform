@@ -3,7 +3,7 @@
  * Pre-defined report templates with charts, tables, and executive summaries
  */
 
-export type ReportFormat = 'pdf' | 'excel' | 'word' | 'html' | 'csv' | 'json';
+export type ReportFormat = 'pdf' | 'excel' | 'html' | 'csv' | 'json';
 export type ReportTemplate = 'executive' | 'technical' | 'compliance' | 'operations' | 'custom';
 
 export interface ReportTemplateConfig {
@@ -88,7 +88,7 @@ export const REPORT_TEMPLATES: Record<ReportTemplate, ReportTemplateConfig> = {
         name: 'Compliance Report',
         description: 'Security compliance and policy adherence report',
         icon: 'Shield',
-        defaultFormat: 'word',
+        defaultFormat: 'pdf',
         colorScheme: {
             primary: '#059669',
             secondary: '#52525b',
@@ -158,7 +158,6 @@ export const REPORT_TEMPLATES: Record<ReportTemplate, ReportTemplateConfig> = {
 export const REPORT_FORMATS: { id: ReportFormat; name: string; extension: string; mimeType: string; description: string; icon: string }[] = [
     { id: 'pdf', name: 'PDF Document', extension: 'pdf', mimeType: 'application/pdf', description: 'Professional formatted document with charts', icon: 'FileText' },
     { id: 'excel', name: 'Excel Workbook', extension: 'xlsx', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', description: 'Multi-sheet workbook with data and charts', icon: 'Table' },
-    { id: 'word', name: 'Word Document', extension: 'docx', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', description: 'Editable document with embedded charts', icon: 'FileEdit' },
     { id: 'html', name: 'HTML Report', extension: 'html', mimeType: 'text/html', description: 'Interactive web-based report', icon: 'Globe' },
     { id: 'csv', name: 'CSV Data', extension: 'csv', mimeType: 'text/csv', description: 'Raw data for import into other tools', icon: 'Database' },
     { id: 'json', name: 'JSON Data', extension: 'json', mimeType: 'application/json', description: 'Structured data for API integration', icon: 'Code' },

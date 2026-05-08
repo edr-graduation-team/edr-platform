@@ -20,7 +20,7 @@ import { REPORT_TEMPLATES, REPORT_FORMATS, type ReportTemplate, type ReportForma
 const SESSION_KEY = 'edr_report_preview';
 
 /** Formats that support a visual preview page (opens in new tab). */
-const PREVIEWABLE_FORMATS = new Set<ReportFormat>(['pdf', 'word', 'html']);
+const PREVIEWABLE_FORMATS = new Set<ReportFormat>(['pdf', 'html']);
 /** Formats that are data-only — trigger a direct download without preview. */
 const DOWNLOAD_ONLY_FORMATS = new Set<ReportFormat>(['excel', 'csv', 'json']);
 
@@ -31,7 +31,7 @@ const TEMPLATE_ICONS: Record<string, any> = {
 const FORMAT_ICONS: Record<string, any> = {
     pdf: FileText,
     excel: FileSpreadsheet,
-    word: FileText,
+
     html: FileCode,
     csv: FileSpreadsheet,
     json: FileCode,
@@ -389,7 +389,7 @@ export function ReportGenerator() {
             setGeneratedData(data);
 
             if (PREVIEWABLE_FORMATS.has(selectedFormat)) {
-                // PDF / Word / HTML → store payload and open a new browser tab
+                // PDF / HTML → store payload and open a new browser tab
                 const payload = {
                     data,
                     format: selectedFormat,
@@ -712,8 +712,8 @@ export function ReportGenerator() {
                         <FileText className="w-4 h-4" />
                         <span className="text-xs uppercase tracking-wider">Export Formats</span>
                     </div>
-                    <p className="text-2xl font-bold text-slate-900 dark:text-white">6 Formats</p>
-                    <p className="text-xs text-slate-500 mt-1">PDF, Excel, Word, HTML, CSV, JSON</p>
+                    <p className="text-2xl font-bold text-slate-900 dark:text-white">5 Formats</p>
+                    <p className="text-xs text-slate-500 mt-1">PDF, Excel, HTML, CSV, JSON</p>
                 </div>
 
                 <div className="p-4 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800">

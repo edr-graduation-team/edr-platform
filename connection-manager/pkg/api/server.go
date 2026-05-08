@@ -253,6 +253,13 @@ func (s *Server) RegisterRoutes(handlers *Handlers) {
 	audit.GET("/logs", handlers.ListAuditLogs, handlers.RequirePermission("audit", "read"))
 	audit.GET("/logs/:id", handlers.GetAuditLog, handlers.RequirePermission("audit", "read"))
 
+	// ── Reports (single-call bundle for templates) ───────────────────────
+	// Uses existing permissions instead of introducing a new RBAC module.
+	// The report may contain alerts, endpoints, responses, vuln, and audit data,
+	// so we gate it under alerts:read (broadest common denominator for SOC views).
+	reports := protected.Group("/reports")
+	reports.POST("/generate", handlers.GenerateReportBundle, handlers.RequirePermission("alerts", "read"))
+
 	// ── Enrollment token management ──────────────────────────────────────
 	tokens := protected.Group("/enrollment-tokens")
 	tokens.GET("", handlers.ListEnrollmentTokens, handlers.RequirePermission("tokens", "read"))

@@ -711,6 +711,45 @@ export const statsApi = {
 };
 
 // ============================================================================
+// Reports (single-call backend bundle)
+// ============================================================================
+
+export interface ReportBundleSection<T = any> {
+    data?: T;
+    error?: { code: string; message: string };
+}
+
+export interface ReportBundleResponse {
+    input: any;
+    data: Record<string, ReportBundleSection>;
+    meta?: { request_id?: string; timestamp?: string };
+}
+
+// Keep this type local to the API layer (avoid importing from UI components).
+export type ReportTemplate = 'executive' | 'technical' | 'compliance' | 'operations' | 'custom';
+
+export const reportsApi = {
+    generate: async (body: {
+        template: ReportTemplate;
+        scope: 'all_endpoints' | 'specific_endpoint';
+        agent_id?: string;
+        date_from?: string;
+        date_to?: string;
+        limits?: {
+            agents?: number;
+            commands?: number;
+            vuln?: number;
+            audit_logs?: number;
+            sigma_alerts?: number;
+        };
+        include?: Record<string, boolean>;
+    }) => {
+        const response = await connectionApi.post<ReportBundleResponse>('/api/v1/reports/generate', body);
+        return response.data;
+    },
+};
+
+// ============================================================================
 // Connection Manager Agents APIs
 // ============================================================================
 

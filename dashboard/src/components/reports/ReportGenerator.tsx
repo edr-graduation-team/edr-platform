@@ -11,11 +11,8 @@ import {
 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import {
-    alertsApi,
     agentsApi,
-    commandsApi,
-    vulnerabilityApi,
-    auditApi,
+    reportsApi,
 } from '../../api/client';
 import { REPORT_TEMPLATES, REPORT_FORMATS, type ReportTemplate, type ReportFormat, type ReportData } from './ReportTemplates';
 
@@ -78,37 +75,38 @@ export function ReportGenerator() {
         const fromIso = new Date(dateRange.from).toISOString();
         const toIso = new Date(dateRange.to).toISOString();
 
-        // Fetch all required data in parallel
-        const [alertsRes, agentsRes, commandsRes, vulnRes, agentStatsRes, cmdStatsRes, auditRes] = await Promise.allSettled([
-            alertsApi.list({
-                limit: 1000,
-                date_from: fromIso,
-                date_to: toIso,
-                agent_id: reportScope === 'specific' && selectedAgent ? selectedAgent : undefined,
-                sort: 'timestamp',
-                order: 'desc'
-            }),
-            agentsApi.list({ limit: 500 }),
-            commandsApi.list({ 
-                limit: 500,
-                agent_id: reportScope === 'specific' && selectedAgent ? selectedAgent : undefined
-            }),
-            vulnerabilityApi.listFindings({ 
-                limit: 200,
-                agent_id: reportScope === 'specific' && selectedAgent ? selectedAgent : undefined
-            }),
-            agentsApi.stats(),
-            commandsApi.stats(),
-            auditApi.list({ limit: 200 }),
-        ]);
+        // Single-call report bundle from backend (/api/v1/reports/generate)
+        const bundle = await reportsApi.generate({
+            template: selectedTemplate,
+            scope: reportScope === 'specific' ? 'specific_endpoint' : 'all_endpoints',
+            agent_id: reportScope === 'specific' && selectedAgent ? selectedAgent : undefined,
+            date_from: fromIso,
+            date_to: toIso,
+            limits: {
+                sigma_alerts: 1000,
+                agents: 500,
+                commands: 500,
+                vuln: 200,
+                audit_logs: 200,
+            },
+        });
 
-        const alerts = alertsRes.status === 'fulfilled' ? (alertsRes.value.alerts || []) : [];
-        const agents = agentsRes.status === 'fulfilled' ? (agentsRes.value.data || []) : [];
-        const commands = commandsRes.status === 'fulfilled' ? (commandsRes.value.data || []) : [];
-        const vulnFindings = vulnRes.status === 'fulfilled' ? (vulnRes.value.data || []) : [];
-        const agentStats = agentStatsRes.status === 'fulfilled' ? agentStatsRes.value : null;
-        const _cmdStats = cmdStatsRes.status === 'fulfilled' ? cmdStatsRes.value : null; void _cmdStats;
-        const auditLogs = auditRes.status === 'fulfilled' ? (auditRes.value.data || []) : [];
+        const sec = bundle.data || {};
+        const sigmaAlertsPayload: any = sec['sigma_alerts']?.data;
+        const alerts = (sigmaAlertsPayload?.alerts || []) as any[];
+
+        const agents = ((sec['agents']?.data as any[]) || []) as any[];
+
+        const commandsEnvelope: any = sec['commands']?.data;
+        const commands = (commandsEnvelope?.data || commandsEnvelope?.data?.data || []) as any[];
+
+        const vulnEnvelope: any = sec['vuln_findings']?.data;
+        const vulnFindings = (vulnEnvelope?.data || []) as any[];
+
+        const auditEnvelope: any = sec['audit_logs']?.data;
+        const auditLogs = (auditEnvelope?.data || []) as any[];
+
+        const agentStats: any = sec['agent_stats']?.data || null;
 
         // Create agent map and filter for specific reports
         const agentMap = new Map(agents.map((a: { id: string; hostname: string }) => [a.id, a.hostname]));
@@ -145,7 +143,7 @@ export function ReportGenerator() {
         // Calculate timeline (last 7 days)
         const timeline: ReportData['charts']['timeline'] = [];
         for (let i = 6; i >= 0; i--) {
-            const date = new Date();
+            const date = new Date(toIso);
             date.setDate(date.getDate() - i);
             const dateStr = date.toISOString().split('T')[0];
 
@@ -273,7 +271,7 @@ export function ReportGenerator() {
                 auditLogs: auditLogs.slice(0, 100),
             },
         };
-    }, [dateRange, reportScope, selectedAgent]);
+    }, [dateRange, reportScope, selectedAgent, selectedTemplate]);
 
     // Handle generate button
     const handleGenerate = async () => {

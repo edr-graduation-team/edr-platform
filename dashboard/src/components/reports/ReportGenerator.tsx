@@ -107,6 +107,8 @@ export function ReportGenerator() {
         const auditLogs = (auditEnvelope?.data || []) as any[];
 
         const agentStats: any = sec['agent_stats']?.data || null;
+        const endpointRiskEnvelope: any = sec['endpoint_risk']?.data;
+        const endpointRisks = (endpointRiskEnvelope?.data || endpointRiskEnvelope || []) as any[];
 
         // Create agent map and filter for specific reports
         const agentMap = new Map(agents.map((a: { id: string; hostname: string }) => [a.id, a.hostname]));
@@ -266,7 +268,9 @@ export function ReportGenerator() {
                 alerts: enrichedAlerts,
                 commands: commands.slice(0, 100),
                 devices: filteredAgents,
-                risks: [],
+                risks: reportScope === 'specific' && selectedAgent
+                    ? endpointRisks.filter((r: any) => r?.agent_id === selectedAgent)
+                    : endpointRisks,
                 vulnerabilities: vulnFindings.slice(0, 100),
                 auditLogs: auditLogs.slice(0, 100),
             },

@@ -7,7 +7,7 @@ import { useState } from 'react';
 import { 
     FileText, Download, BarChart3, TrendingUp, 
     AlertTriangle, CheckCircle, Shield, Activity,
-    ChevronDown, ChevronUp, Bug, ClipboardList, Terminal
+    ChevronDown, ChevronUp, Bug, ClipboardList, Terminal, Server
 } from 'lucide-react';
 import {
     BarChart,
@@ -64,7 +64,7 @@ export function ProfessionalReportView({
     hideActionBar = false,
 }: ProfessionalReportViewProps) {
     const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set([
-        'summary', 'kpis', 'trends', 'severity', 'mitre', 'alerts', 'vulns', 'commands', 'auditLog'
+        'summary', 'kpis', 'trends', 'severity', 'mitre', 'alerts', 'vulns', 'commands', 'auditLog', 'devices', 'endpointRisk', 'os'
     ]));
     const config = REPORT_TEMPLATES[template];
 
@@ -307,6 +307,29 @@ export function ProfessionalReportView({
                     </ReportSection>
                 )}
 
+                {/* OS Distribution */}
+                {shouldShowSection('os') && data.charts.osDistribution.length > 0 && (
+                    <ReportSection
+                        title="OS Distribution"
+                        icon={Server}
+                        color={config.colorScheme.secondary}
+                        isExpanded={expandedSections.has('os')}
+                        onToggle={() => toggleSection('os')}
+                    >
+                        <div className="h-48">
+                            <ResponsiveContainer width="100%" height="100%">
+                                <BarChart data={data.charts.osDistribution}>
+                                    <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                                    <XAxis dataKey="os" tick={{ fontSize: 11 }} />
+                                    <YAxis tick={{ fontSize: 11 }} />
+                                    <Tooltip contentStyle={{ background: 'rgba(15, 23, 42, 0.95)', border: 'none', borderRadius: '8px', color: 'white' }} />
+                                    <Bar dataKey="count" fill={config.colorScheme.secondary} radius={[4, 4, 0, 0]} />
+                                </BarChart>
+                            </ResponsiveContainer>
+                        </div>
+                    </ReportSection>
+                )}
+
                 {/* Data Tables Preview */}
                 {shouldShowSection('alerts') && data.tables.alerts.length > 0 && (
                     <ReportSection
@@ -345,6 +368,92 @@ export function ProfessionalReportView({
                                 <p className="text-center text-xs text-slate-500 py-2">
                                     + {data.tables.alerts.length - 5} more in full report
                                 </p>
+                            )}
+                        </div>
+                    </ReportSection>
+                )}
+
+                {/* Devices / Endpoints table */}
+                {shouldShowSection('devices') && data.tables.devices.length > 0 && (
+                    <ReportSection
+                        title={`Endpoints (${data.tables.devices.length})`}
+                        icon={Server}
+                        color={config.colorScheme.primary}
+                        isExpanded={expandedSections.has('devices')}
+                        onToggle={() => toggleSection('devices')}
+                    >
+                        <div className="overflow-x-auto">
+                            <table className="min-w-full text-sm">
+                                <thead className="bg-slate-100 dark:bg-slate-800">
+                                    <tr>
+                                        <th className="px-4 py-2 text-left font-semibold">Hostname</th>
+                                        <th className="px-4 py-2 text-left font-semibold">Status</th>
+                                        <th className="px-4 py-2 text-left font-semibold">Health</th>
+                                        <th className="px-4 py-2 text-left font-semibold">OS</th>
+                                        <th className="px-4 py-2 text-left font-semibold">Last seen</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
+                                    {data.tables.devices.slice(0, 10).map((d: any, idx: number) => (
+                                        <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                                            <td className="px-4 py-2 font-medium">{d.hostname || d.id?.slice?.(0, 8)}</td>
+                                            <td className="px-4 py-2 text-slate-600 dark:text-slate-300">{String(d.status || 'unknown')}</td>
+                                            <td className="px-4 py-2 font-semibold">{typeof d.health_score === 'number' ? `${Math.round(d.health_score)}%` : '—'}</td>
+                                            <td className="px-4 py-2 text-slate-600">{d.os_type || '—'}</td>
+                                            <td className="px-4 py-2 text-xs text-slate-500">{d.last_seen ? new Date(d.last_seen).toLocaleString() : '—'}</td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                            {data.tables.devices.length > 10 && (
+                                <p className="text-center text-xs text-slate-500 py-2">+ {data.tables.devices.length - 10} more in full report</p>
+                            )}
+                        </div>
+                    </ReportSection>
+                )}
+
+                {/* Endpoint Risk Posture */}
+                {shouldShowSection('endpointRisk') && data.tables.risks.length > 0 && (
+                    <ReportSection
+                        title={`Endpoint Risk Posture (${data.tables.risks.length})`}
+                        icon={Shield}
+                        color={config.colorScheme.danger}
+                        isExpanded={expandedSections.has('endpointRisk')}
+                        onToggle={() => toggleSection('endpointRisk')}
+                    >
+                        <div className="overflow-x-auto">
+                            <table className="min-w-full text-sm">
+                                <thead className="bg-slate-100 dark:bg-slate-800">
+                                    <tr>
+                                        <th className="px-4 py-2 text-left font-semibold">Endpoint</th>
+                                        <th className="px-4 py-2 text-left font-semibold">Open</th>
+                                        <th className="px-4 py-2 text-left font-semibold">Total</th>
+                                        <th className="px-4 py-2 text-left font-semibold">Peak</th>
+                                        <th className="px-4 py-2 text-left font-semibold">Avg</th>
+                                        <th className="px-4 py-2 text-left font-semibold">Critical</th>
+                                        <th className="px-4 py-2 text-left font-semibold">High</th>
+                                        <th className="px-4 py-2 text-left font-semibold">Last alert</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
+                                    {data.tables.risks.slice(0, 10).map((r: any, idx: number) => (
+                                        <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                                            <td className="px-4 py-2 font-medium">
+                                                {r.agent_hostname || r.hostname || r.agent_id?.slice?.(0, 8) || '—'}
+                                            </td>
+                                            <td className="px-4 py-2 font-semibold">{r.open_count ?? '—'}</td>
+                                            <td className="px-4 py-2">{r.total_alerts ?? '—'}</td>
+                                            <td className="px-4 py-2">{r.peak_risk_score ?? '—'}</td>
+                                            <td className="px-4 py-2">{typeof r.avg_risk_score === 'number' ? r.avg_risk_score.toFixed(1) : (r.avg_risk_score ?? '—')}</td>
+                                            <td className="px-4 py-2">{r.critical_count ?? '—'}</td>
+                                            <td className="px-4 py-2">{r.high_count ?? '—'}</td>
+                                            <td className="px-4 py-2 text-xs text-slate-500">{r.last_alert_at ? new Date(r.last_alert_at).toLocaleString() : '—'}</td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                            {data.tables.risks.length > 10 && (
+                                <p className="text-center text-xs text-slate-500 py-2">+ {data.tables.risks.length - 10} more in full report</p>
                             )}
                         </div>
                     </ReportSection>

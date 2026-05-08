@@ -89,8 +89,14 @@ export function ReportGenerator() {
                 order: 'desc'
             }),
             agentsApi.list({ limit: 500 }),
-            commandsApi.list({ limit: 500 }),
-            vulnerabilityApi.listFindings({ limit: 200 }),
+            commandsApi.list({ 
+                limit: 500,
+                agent_id: reportScope === 'specific' && selectedAgent ? selectedAgent : undefined
+            }),
+            vulnerabilityApi.listFindings({ 
+                limit: 200,
+                agent_id: reportScope === 'specific' && selectedAgent ? selectedAgent : undefined
+            }),
             agentsApi.stats(),
             commandsApi.stats(),
             auditApi.list({ limit: 200 }),
@@ -104,8 +110,11 @@ export function ReportGenerator() {
         const _cmdStats = cmdStatsRes.status === 'fulfilled' ? cmdStatsRes.value : null; void _cmdStats;
         const auditLogs = auditRes.status === 'fulfilled' ? (auditRes.value.data || []) : [];
 
-        // Create agent map
+        // Create agent map and filter for specific reports
         const agentMap = new Map(agents.map((a: { id: string; hostname: string }) => [a.id, a.hostname]));
+        const filteredAgents = reportScope === 'specific' && selectedAgent 
+            ? agents.filter((a: any) => a.id === selectedAgent)
+            : agents;
 
         // Calculate summary
         const criticalCount = alerts.filter((a: { severity: string }) => a.severity === 'critical').length;
@@ -229,7 +238,7 @@ export function ReportGenerator() {
             summary: {
                 totalAlerts: alerts.length,
                 totalCommands: commands.length,
-                totalDevices: agents.length,
+                totalDevices: filteredAgents.length,
                 criticalCount,
                 highCount,
                 mediumCount,
@@ -238,9 +247,9 @@ export function ReportGenerator() {
                 totalVulnerabilities: vulnFindings.length,
                 kevCount,
                 exploitableCount,
-                avgHealthScore: agentStats?.avg_health ?? 0,
-                onlineDevices: agentStats?.online ?? 0,
-                offlineDevices: agentStats?.offline ?? 0,
+                avgHealthScore: reportScope === 'specific' && filteredAgents.length > 0 ? (filteredAgents[0].health_score || 0) : (agentStats?.avg_health ?? 0),
+                onlineDevices: reportScope === 'specific' && filteredAgents.length > 0 ? (filteredAgents[0].status === 'online' ? 1 : 0) : (agentStats?.online ?? 0),
+                offlineDevices: reportScope === 'specific' && filteredAgents.length > 0 ? (filteredAgents[0].status === 'offline' ? 1 : 0) : (agentStats?.offline ?? 0),
                 avgConfidence,
                 commandSuccessRate: cmdSuccessRate,
                 pendingCommands: pendingCmds,
@@ -258,7 +267,7 @@ export function ReportGenerator() {
             tables: {
                 alerts: enrichedAlerts,
                 commands: commands.slice(0, 100),
-                devices: agents,
+                devices: filteredAgents,
                 risks: [],
                 vulnerabilities: vulnFindings.slice(0, 100),
                 auditLogs: auditLogs.slice(0, 100),

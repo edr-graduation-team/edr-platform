@@ -23,6 +23,7 @@ import {
     Legend,
     AreaChart,
     Area,
+    LabelList,
 } from 'recharts';
 import type { ReportData, ReportTemplate, ReportFormat } from './ReportTemplates';
 import { REPORT_TEMPLATES, REPORT_FORMATS } from './ReportTemplates';
@@ -322,12 +323,14 @@ export function ProfessionalReportView({
                     >
                         <div className="h-64">
                             <ResponsiveContainer width="100%" height="100%">
-                                <BarChart data={data.charts.topTactics} layout="horizontal">
+                                <BarChart data={data.charts.topTactics} layout="vertical">
                                     <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
                                     <XAxis type="number" tick={{ fontSize: 11 }} />
                                     <YAxis type="category" dataKey="tactic" tick={{ fontSize: 10 }} width={150} />
                                     <Tooltip contentStyle={{ background: 'rgba(15, 23, 42, 0.95)', border: 'none', borderRadius: '8px', color: 'white' }} />
-                                    <Bar dataKey="count" fill={config.colorScheme.primary} radius={[0, 4, 4, 0]} />
+                                    <Bar dataKey="count" fill={config.colorScheme.primary} radius={[0, 4, 4, 0]}>
+                                        <LabelList dataKey="count" position="right" fill="#334155" fontSize={11} fontWeight={600} />
+                                    </Bar>
                                 </BarChart>
                             </ResponsiveContainer>
                         </div>

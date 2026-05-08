@@ -212,6 +212,12 @@ function generateHTMLFromRenderedView(sourceElement: HTMLElement, title: string)
     .overflow-y-auto {
       overflow-y: visible !important;
     }
+    .export-hidden-row {
+      display: table-row !important;
+    }
+    button.print\\:hidden {
+      display: none !important;
+    }
     @media print {
       html, body { background: #fff; }
       .report-export-root { max-width: none; padding: 0; }

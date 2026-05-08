@@ -406,8 +406,10 @@ export function ProfessionalReportView({
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
-                                    {data.tables.alerts.slice(0, showAllRows['alerts'] ? undefined : 5).map((alert, idx) => (
-                                        <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                                    {data.tables.alerts.map((alert, idx) => {
+                                        const isHidden = !showAllRows['alerts'] && idx >= 5;
+                                        return (
+                                        <tr key={idx} className={`hover:bg-slate-50 dark:hover:bg-slate-800/50 ${isHidden ? 'hidden print:table-row export-hidden-row' : ''}`}>
                                             <td className="px-4 py-2 text-slate-600 dark:text-slate-400">
                                                 {new Date(alert.timestamp).toLocaleString()}
                                             </td>
@@ -417,7 +419,7 @@ export function ProfessionalReportView({
                                             <td className="px-4 py-2 font-medium">{alert.rule_title}</td>
                                             <td className="px-4 py-2 text-slate-600">{alert.agent_hostname || alert.agent_id?.slice(0, 8)}</td>
                                         </tr>
-                                    ))}
+                                    )})}
                                 </tbody>
                             </table>
                             {data.tables.alerts.length > 5 && (
@@ -450,15 +452,17 @@ export function ProfessionalReportView({
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
-                                    {data.tables.devices.slice(0, showAllRows['devices'] ? undefined : 10).map((d: any, idx: number) => (
-                                        <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                                    {data.tables.devices.map((d: any, idx: number) => {
+                                        const isHidden = !showAllRows['devices'] && idx >= 10;
+                                        return (
+                                        <tr key={idx} className={`hover:bg-slate-50 dark:hover:bg-slate-800/50 ${isHidden ? 'hidden print:table-row export-hidden-row' : ''}`}>
                                             <td className="px-4 py-2 font-medium">{d.hostname || d.id?.slice?.(0, 8)}</td>
                                             <td className="px-4 py-2 text-slate-600 dark:text-slate-300">{String(d.status || 'unknown')}</td>
                                             <td className="px-4 py-2 font-semibold">{typeof d.health_score === 'number' ? `${Math.round(d.health_score)}%` : '—'}</td>
                                             <td className="px-4 py-2 text-slate-600">{d.os_type || '—'}</td>
                                             <td className="px-4 py-2 text-xs text-slate-500">{d.last_seen ? new Date(d.last_seen).toLocaleString() : '—'}</td>
                                         </tr>
-                                    ))}
+                                    )})}
                                 </tbody>
                             </table>
                             {data.tables.devices.length > 10 && (
@@ -494,8 +498,10 @@ export function ProfessionalReportView({
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
-                                    {data.tables.risks.slice(0, showAllRows['risks'] ? undefined : 10).map((r: any, idx: number) => (
-                                        <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                                    {data.tables.risks.map((r: any, idx: number) => {
+                                        const isHidden = !showAllRows['risks'] && idx >= 10;
+                                        return (
+                                        <tr key={idx} className={`hover:bg-slate-50 dark:hover:bg-slate-800/50 ${isHidden ? 'hidden print:table-row export-hidden-row' : ''}`}>
                                             <td className="px-4 py-2 font-medium">
                                                 {r.agent_hostname || r.hostname || r.agent_id?.slice?.(0, 8) || '—'}
                                             </td>
@@ -507,7 +513,7 @@ export function ProfessionalReportView({
                                             <td className="px-4 py-2">{r.high_count ?? '—'}</td>
                                             <td className="px-4 py-2 text-xs text-slate-500">{r.last_alert_at ? new Date(r.last_alert_at).toLocaleString() : '—'}</td>
                                         </tr>
-                                    ))}
+                                    )})}
                                 </tbody>
                             </table>
                             {data.tables.risks.length > 10 && (
@@ -574,15 +580,17 @@ export function ProfessionalReportView({
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
-                                        {data.tables.vulnerabilities.slice(0, showAllRows['vulns'] ? undefined : 5).map((v: any, idx: number) => (
-                                            <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                                        {data.tables.vulnerabilities.map((v: any, idx: number) => {
+                                            const isHidden = !showAllRows['vulns'] && idx >= 5;
+                                            return (
+                                            <tr key={idx} className={`hover:bg-slate-50 dark:hover:bg-slate-800/50 ${isHidden ? 'hidden print:table-row export-hidden-row' : ''}`}>
                                                 <td className="px-4 py-2 font-mono text-xs">{v.cve}</td>
                                                 <td className="px-4 py-2"><SeverityBadge severity={v.severity} /></td>
                                                 <td className="px-4 py-2 text-xs">{v.package_name}@{v.installed_version}</td>
                                                 <td className="px-4 py-2 text-slate-600">{v.hostname || v.agent_id?.slice(0, 8)}</td>
                                                 <td className="px-4 py-2">{v.kev_listed ? <span className="text-red-600 font-bold text-xs">KEV</span> : '—'}</td>
                                             </tr>
-                                        ))}
+                                        )})}
                                     </tbody>
                                 </table>
                                 {data.tables.vulnerabilities.length > 5 && (
@@ -645,8 +653,10 @@ export function ProfessionalReportView({
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
-                                    {data.tables.auditLogs.slice(0, showAllRows['audit'] ? undefined : 5).map((log: any, idx: number) => (
-                                        <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                                    {data.tables.auditLogs.map((log: any, idx: number) => {
+                                        const isHidden = !showAllRows['audit'] && idx >= 5;
+                                        return (
+                                        <tr key={idx} className={`hover:bg-slate-50 dark:hover:bg-slate-800/50 ${isHidden ? 'hidden print:table-row export-hidden-row' : ''}`}>
                                             <td className="px-4 py-2 text-slate-600 dark:text-slate-400 text-xs">
                                                 {new Date(log.timestamp).toLocaleString()}
                                             </td>
@@ -659,7 +669,7 @@ export function ProfessionalReportView({
                                                 </span>
                                             </td>
                                         </tr>
-                                    ))}
+                                    )})}
                                 </tbody>
                             </table>
                             {data.tables.auditLogs.length > 5 && (

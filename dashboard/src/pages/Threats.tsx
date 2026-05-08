@@ -427,7 +427,7 @@ export default function Threats() {
                                 ? { bg: 'bg-rose-500/10 dark:bg-rose-500/20', text: 'text-rose-600 dark:text-rose-400', glow: 'bg-rose-500' }
                                 : { bg: 'bg-emerald-500/10 dark:bg-emerald-500/20', text: 'text-emerald-600 dark:text-emerald-400', glow: 'bg-emerald-500' }
                         }
-                        subtitle={threatLevel > 10 ? 'Requires immediate attention' : 'Controlled exposure footprint'}
+                        subtitle={threatLevel > 10 ? 'Higher tactic coverage — review top techniques' : 'Lower tactic coverage in current window'}
                     />
                 </div>
 

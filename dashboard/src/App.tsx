@@ -30,7 +30,6 @@ const SystemLayout = lazy(() => import('./pages/SystemLayout'));
 const ReportPreviewPage = lazy(() => import('./pages/ReportPreviewPage'));
 
 const DashboardsLayout = lazy(() => import('./pages/parity/DashboardsLayout'));
-const DashboardEndpointPage = lazy(() => import('./pages/parity/dashboardPages').then((m) => ({ default: m.DashboardEndpointPage })));
 const DashboardCloudPage = lazy(() => import('./pages/parity/dashboardPages').then((m) => ({ default: m.DashboardCloudPage })));
 const DashboardAuditRedirect = lazy(() => import('./pages/parity/dashboardPages').then((m) => ({ default: m.DashboardAuditRedirect })));
 const DashboardEndpointCompliancePage = lazy(() => import('./pages/parity/dashboardPages').then((m) => ({ default: m.DashboardEndpointCompliancePage })));
@@ -312,15 +311,15 @@ function AppRoutes() {
             }>
               <Route index element={<Navigate to="service" replace />} />
               <Route path="service" element={<SecurityPosture />} />
-              <Route path="endpoint" element={<DashboardEndpointPage />} />
+              <Route path="endpoint" element={<Navigate to="service" replace />} />
               <Route path="cloud" element={<DashboardCloudPage />} />
               <Route path="audit" element={<DashboardAuditRedirect />} />
               <Route path="endpoint-compliance" element={<DashboardEndpointCompliancePage />} />
-              <Route path="ctem-compliance" element={<Navigate to="endpoint" replace />} />
-              <Route path="ctem" element={<Navigate to="endpoint" replace />} />
+              <Route path="ctem-compliance" element={<Navigate to="service" replace />} />
+              <Route path="ctem" element={<Navigate to="service" replace />} />
               <Route path="verdict-cloud" element={<DashboardVerdictCloudPage />} />
               <Route path="reports" element={<DashboardReportsPage />} />
-              <Route path="roi" element={<Navigate to="endpoint" replace />} />
+              <Route path="roi" element={<Navigate to="service" replace />} />
             </Route>
 
             <Route path="/security" element={<Navigate to="/security/endpoint-zero-trust" replace />} />

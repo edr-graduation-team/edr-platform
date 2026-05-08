@@ -301,7 +301,7 @@ export function SecurityEndpointZeroTrustPage() {
                 icon={ShieldCheck}
                 eyebrow="Identity & Access"
                 title="Endpoint Zero Trust"
-                lead={<>Monitor device trust continuously. This dashboard provides real-time visibility into <strong className="text-white">enrollment health, isolation posture, and certificate continuity</strong> to ensure only secure, authenticated endpoints can access corporate resources.</>}
+                lead={<>Surfaces <strong className="text-white">enrollment state, isolation, and certificate fields</strong> from the same agent APIs used elsewhere. Access control for corporate resources still depends on your network and identity stack; this view does not replace those controls.</>}
             />
 
             <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
@@ -1124,7 +1124,7 @@ export function ManagedSecurityOverviewPage() {
                 icon={Shield}
                 eyebrow="MDR Dashboard"
                 title="Operations Overview"
-                lead={<>Executive summary of your <strong className="text-white">Managed Detection and Response (MDR)</strong> operations. Monitor true alert volumes, track active incident queues, and assess endpoint risk levels instantly across your entire managed fleet.</>}
+                lead={<>Aggregates for <strong className="text-white">MDR-style operations</strong>: alert counts, incident-style queues, and endpoint risk excerpts from existing APIs. Figures are as reported by the backend; refresh or open linked workspaces for full detail.</>}
             />
 
             <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">

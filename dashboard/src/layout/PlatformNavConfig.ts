@@ -30,7 +30,6 @@ export function isSystemPath(pathname: string): boolean {
 /** Hub tabs — Cloud / Verdict SaaS views omitted for self-hosted endpoint focus (routes may still exist). */
 export const DASHBOARD_MAIN_TABS: ContextTab[] = [
     { to: '/dashboards/service', label: 'Security Posture' },
-    { to: '/dashboards/endpoint', label: 'Endpoint Summary' },
     { to: '/dashboards/endpoint-compliance', label: 'Endpoint Compliance' },
     { to: '/dashboards/reports', label: 'Reports' },
 ];

@@ -1,6 +1,6 @@
 import { useNavigate, Link } from 'react-router-dom';
 import {
-    AlertTriangle, Activity, Monitor, Shield, Cpu, BarChart3
+    AlertTriangle, Monitor, Shield, Cpu, BarChart3
 } from 'lucide-react';
 import { SkeletonKPICards } from '../components';
 import StatCard from '../components/StatCard';
@@ -37,7 +37,7 @@ export default function Dashboard() {
         return (
             <div className="space-y-6 w-full min-w-0">
                 <div className="rounded-2xl border border-slate-200/80 dark:border-slate-700/60 bg-gradient-to-br from-slate-100 to-slate-50 dark:from-slate-800 dark:to-slate-900 h-36 sm:h-40 animate-pulse" aria-hidden />
-                <SkeletonKPICards count={4} />
+                <SkeletonKPICards count={3} />
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                     <div className="lg:col-span-2 h-96 bg-slate-200 dark:bg-slate-800 rounded-xl animate-pulse" />
                     <div className="lg:col-span-1 h-96 bg-slate-200 dark:bg-slate-800 rounded-xl animate-pulse" />
@@ -61,10 +61,9 @@ export default function Dashboard() {
                         heading: 'What this screen is',
                         children: (
                             <>
-                                Executive snapshot of <strong className="font-semibold text-slate-800 dark:text-slate-200">alert pressure</strong>,{' '}
+                                Snapshot of <strong className="font-semibold text-slate-800 dark:text-slate-200">alerts</strong>,{' '}
                                 <strong className="font-semibold text-slate-800 dark:text-slate-200">fleet connectivity</strong>, and{' '}
-                                <strong className="font-semibold text-slate-800 dark:text-slate-200">detection confidence</strong> — fed by Sigma statistics and connection-manager agent
-                                APIs. Use it for at-a-glance posture before drilling into operational grids.
+                                <strong className="font-semibold text-slate-800 dark:text-slate-200">detection data</strong> from Sigma statistics and connection-manager APIs.
                             </>
                         ),
                     },
@@ -72,8 +71,7 @@ export default function Dashboard() {
                         heading: 'Live behaviour',
                         children: (
                             <>
-                                Recent alerts update via stream when available, with polling fallback. KPI cards and charts refresh on a short interval — suitable for NOC-style
-                                monitoring, not long-form investigation by itself.
+                                Alerts update through stream when available, with polling fallback. KPI cards and charts refresh on a short interval.
                             </>
                         ),
                     },
@@ -84,11 +82,6 @@ export default function Dashboard() {
                                 Full triage: <Link className="text-cyan-600 dark:text-cyan-400 font-semibold hover:underline" to="/alerts">Alerts</Link>
                                 {' · '}
                                 Fleet ops: <Link className="text-cyan-600 dark:text-cyan-400 font-semibold hover:underline" to="/management/devices">Devices</Link>
-                                {' · '}
-                                Alternative summary:{' '}
-                                <Link className="text-cyan-600 dark:text-cyan-400 font-semibold hover:underline" to="/dashboards/endpoint">
-                                    Endpoint Summary
-                                </Link>
                             </>
                         ),
                     },
@@ -96,7 +89,7 @@ export default function Dashboard() {
             />
 
             {/* ── Row 1: KPI Cards ── */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 animate-slide-up-fade">
+            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4 animate-slide-up-fade">
                 <StatCard
                     title="Alerts (24h)"
                     value={alertStats?.last_24h || 0}
@@ -107,12 +100,12 @@ export default function Dashboard() {
                     onClick={() => navigate('/alerts')}
                 />
                 <StatCard
-                    title="Critical Threats"
+                    title="Critical alerts"
                     value={alertStats?.by_severity?.critical || 0}
                     icon={Shield}
                     color="red"
                     sparkline={sparklines.critical}
-                    subtext="Requires immediate triage"
+                    subtext="Open triage queue"
                     onClick={() => navigate('/alerts?severity=critical')}
                 />
                 <StatCard
@@ -122,13 +115,6 @@ export default function Dashboard() {
                     color="emerald"
                     subtext={`Avg health ${Math.round(agentStats?.avg_health || 0)}%`}
                     onClick={() => navigate('/management/devices')}
-                />
-                <StatCard
-                    title="Detection Engine"
-                    value={`${((alertStats?.avg_confidence || 0) * 100).toFixed(1)}%`}
-                    icon={Activity}
-                    color="cyan"
-                    subtext="Average rule confidence"
                 />
             </div>
 

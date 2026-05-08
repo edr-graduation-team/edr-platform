@@ -439,9 +439,9 @@ export function DashboardEndpointPage() {
                 title="Endpoint Summary"
                 lead={
                     <>
-                        A high-level overview of your entire fleet: <strong className="text-white">total registered endpoints</strong>,{' '}
-                        <strong className="text-white">real-time connectivity status</strong>, operating system distribution,{' '}
-                        and the <strong className="text-white">highest-risk devices</strong> requiring immediate attention.
+                        Fleet roll-up: <strong className="text-white">registered endpoints</strong>,{' '}
+                        <strong className="text-white">connectivity from registry and sampled heartbeats</strong>, OS mix,{' '}
+                        and a <strong className="text-white">risk excerpt</strong> for triage (not a full risk board).
                     </>
                 }
             />
@@ -456,7 +456,7 @@ export function DashboardEndpointPage() {
                         <Link className="text-cyan-600 dark:text-cyan-400 font-medium hover:underline" to="/dashboards/service">
                             Security Posture
                         </Link>{' '}
-                        provides an overall security health view including detection rules, alerts, and system reliability.
+                        shows alert statistics, agent connectivity, and related charts from the same backends.
                     </p>
                 </div>
                 <div className="rounded-xl border border-slate-200 dark:border-slate-700/60 bg-white/90 dark:bg-slate-800/80 p-4 shadow-sm">
@@ -711,7 +711,7 @@ export function DashboardEndpointPage() {
 
 /** Cloud SaaS dashboards are out of scope for this deployment — use Endpoint summary. */
 export function DashboardCloudPage() {
-    return <Navigate to="/dashboards/endpoint" replace />;
+    return <Navigate to="/dashboards/service" replace />;
 }
 
 export function DashboardAuditRedirect() {
@@ -1108,7 +1108,7 @@ export function DashboardEndpointCompliancePage() {
 
 /** Commercial verdict cloud — not used; fleet view lives under Endpoint. */
 export function DashboardVerdictCloudPage() {
-    return <Navigate to="/dashboards/endpoint" replace />;
+    return <Navigate to="/dashboards/service" replace />;
 }
 
 export function DashboardRoiPage() {

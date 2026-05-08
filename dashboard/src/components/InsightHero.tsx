@@ -1,5 +1,6 @@
 import type { LucideIcon } from 'lucide-react';
 import type { ReactNode } from 'react';
+import { useState } from 'react';
 
 export type InsightHeroSegment = {
     /** Short label above copy */
@@ -95,7 +96,7 @@ export type InsightHeroProps = {
 };
 
 /**
- * Full-width page hero for operational / reference copy — consistent with Security Posture–style breadth.
+ * Full-width page hero for short operational context and links.
  */
 export default function InsightHero({
     eyebrow,
@@ -112,6 +113,8 @@ export default function InsightHero({
 }: InsightHeroProps) {
     const segCols =
         segments && segments.length >= 4 ? 'md:grid-cols-2 xl:grid-cols-4' : 'md:grid-cols-2 xl:grid-cols-3';
+    const [segmentsOpen, setSegmentsOpen] = useState(false);
+    const hasSegments = !!segments && segments.length > 0;
 
     if (variant === 'dark') {
         return (
@@ -147,10 +150,23 @@ export default function InsightHero({
                                 ) : null}
                             </div>
                         </div>
-                        {actions ? <div className="shrink-0 flex flex-wrap gap-2 xl:justify-end">{actions}</div> : null}
+                        <div className="shrink-0 flex flex-wrap gap-2 xl:justify-end items-center">
+                            {hasSegments ? (
+                                <button
+                                    type="button"
+                                    aria-label={segmentsOpen ? 'Hide help cards' : 'Show help cards'}
+                                    title={segmentsOpen ? 'Hide help cards' : 'Show help cards'}
+                                    onClick={() => setSegmentsOpen((v) => !v)}
+                                    className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-white/20 bg-white/10 text-white font-bold hover:bg-white/20 transition-colors"
+                                >
+                                    ?
+                                </button>
+                            ) : null}
+                            {actions}
+                        </div>
                     </div>
 
-                    {segments && segments.length > 0 ? (
+                    {hasSegments && segmentsOpen ? (
                         <div className={`mt-10 grid grid-cols-1 gap-4 w-full ${segCols}`}>
                             {segments.map((s) => (
                                 <div
@@ -204,10 +220,23 @@ export default function InsightHero({
                         ) : null}
                     </div>
                 </div>
-                {actions ? <div className="shrink-0 flex flex-wrap gap-2 xl:justify-end">{actions}</div> : null}
+                <div className="shrink-0 flex flex-wrap gap-2 xl:justify-end items-center">
+                    {hasSegments ? (
+                        <button
+                            type="button"
+                            aria-label={segmentsOpen ? 'Hide help cards' : 'Show help cards'}
+                            title={segmentsOpen ? 'Hide help cards' : 'Show help cards'}
+                            onClick={() => setSegmentsOpen((v) => !v)}
+                            className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-slate-300 dark:border-slate-600 bg-white/90 dark:bg-slate-900/60 text-slate-700 dark:text-slate-200 font-bold hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                        >
+                            ?
+                        </button>
+                    ) : null}
+                    {actions}
+                </div>
             </div>
 
-            {segments && segments.length > 0 ? (
+            {hasSegments && segmentsOpen ? (
                 <div className={`mt-10 grid grid-cols-1 gap-4 w-full ${segCols}`}>
                     {segments.map((s) => (
                         <div

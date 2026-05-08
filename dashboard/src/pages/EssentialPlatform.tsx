@@ -98,7 +98,7 @@ export default function EssentialPlatform() {
                         lead={
                             <>
                                 <p>
-                                    This dashboard provides a real-time, consolidated view of your active deployment and infrastructure health. Use this snapshot to instantly monitor overall system performance, operational status, and platform reliability before diving into detailed security posture analytics.
+                                    Numbers here come from the same agent and reliability APIs as elsewhere. They refresh on load and when you click Refresh; use them as a quick check before opening dashboards or SOC views.
                                 </p>
                             </>
                         }
@@ -202,18 +202,17 @@ export default function EssentialPlatform() {
                                 Orientation — not a duplicate of SOC dashboards
                             </p>
                             <p className="text-sm text-slate-600 dark:text-slate-300 mt-3 leading-relaxed">
-                                This route is the <strong className="font-medium text-slate-800 dark:text-slate-200">entry narrative</strong>{' '}
-                                for what the product is and where to work next. Operational charts, alert triage, and drill-down analytics live
-                                under <strong className="font-medium">Dashboards</strong> and <strong className="font-medium">SOC</strong> — not
-                                here. The live strip above is only a compact pulse from the same APIs used elsewhere.
+                                This page orients you to components and typical next steps. Charts, alert triage, and deep views are under{' '}
+                                <strong className="font-medium">Dashboards</strong> and <strong className="font-medium">SOC</strong>. The metrics
+                                above are a small subset from the same APIs.
                             </p>
                             <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3 text-sm text-slate-600 dark:text-slate-300">
                                 <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white/60 dark:bg-slate-950/20 p-4">
-                                    <div className="font-semibold text-slate-900 dark:text-white">What problems it solves</div>
+                                    <div className="font-semibold text-slate-900 dark:text-white">Typical uses</div>
                                     <ul className="mt-2 space-y-1 list-disc list-inside marker:text-cyan-600">
-                                        <li>Centralized visibility across endpoints (status, health, alerts).</li>
-                                        <li>Faster investigations with searchable telemetry and payload detail.</li>
-                                        <li>Auditable response actions through the command pipeline.</li>
+                                        <li>See endpoint status, health, and open alerts in one place.</li>
+                                        <li>Search stored telemetry and open event payloads for review.</li>
+                                        <li>Run response actions through the command API with audit trail.</li>
                                     </ul>
                                 </div>
                                 <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white/60 dark:bg-slate-950/20 p-4">
@@ -284,21 +283,20 @@ export default function EssentialPlatform() {
                             <ArrowUpRight className="w-4 h-4 text-slate-400 group-hover:text-cyan-500 shrink-0" />
                         </div>
                         <p className="text-sm text-slate-600 dark:text-slate-300 mt-2">
-                            Operational dashboards — threat pulse, charts, live KPIs (not the overview above).
+                            Alert and fleet KPIs from Sigma and connection-manager (separate from this overview).
                         </p>
                     </Link>
-                    <Link
-                        to="/dashboards/endpoint"
-                        className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-white/70 dark:bg-slate-900/40 backdrop-blur p-5 hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors group"
-                    >
+                    <div className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-white/70 dark:bg-slate-900/40 backdrop-blur p-5 opacity-70 cursor-not-allowed">
                         <div className="flex items-center justify-between gap-2 font-semibold text-slate-900 dark:text-white">
                             <span className="flex items-center gap-2">
                                 <Activity className="w-4 h-4 text-cyan-500" /> Endpoint summary
                             </span>
-                            <ArrowUpRight className="w-4 h-4 text-slate-400 group-hover:text-cyan-500 shrink-0" />
+                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300">
+                                Soon
+                            </span>
                         </div>
                         <p className="text-sm text-slate-600 dark:text-slate-300 mt-2">Fleet health, risk context, top endpoints.</p>
-                    </Link>
+                    </div>
                     <Link
                         to="/events"
                         className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-white/70 dark:bg-slate-900/40 backdrop-blur p-5 hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors group"

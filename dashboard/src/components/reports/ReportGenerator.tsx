@@ -89,13 +89,29 @@ export function ReportGenerator() {
                 vuln: 200,
                 audit_logs: 200,
             },
+            include: {
+                // Explicitly request the core datasets needed by preview rendering,
+                // even for executive/compliance templates.
+                sigma_alerts: true,
+                sigma_alert_stats: true,
+                sigma_performance: true,
+                agents: true,
+                agent_stats: true,
+                commands: true,
+                command_stats: true,
+                vulnerability: true,
+                audit_logs: true,
+                endpoint_risk: true,
+            },
         });
 
         const sec = bundle.data || {};
         const sigmaAlertsPayload: any = sec['sigma_alerts']?.data;
         const alerts = (sigmaAlertsPayload?.alerts || []) as any[];
-
-        const agents = ((sec['agents']?.data as any[]) || []) as any[];
+        const sigmaStatsAlertsPayload: any = sec['sigma_stats_alerts']?.data || {};
+        const agentsFromBundle = ((sec['agents']?.data as any[]) || []) as any[];
+        const agentsFromSelector = (agentsQuery.data || []) as any[];
+        const agents = agentsFromBundle.length > 0 ? agentsFromBundle : agentsFromSelector;
 
         const commandsEnvelope: any = sec['commands']?.data;
         const commands = (commandsEnvelope?.data || commandsEnvelope?.data?.data || []) as any[];
@@ -108,19 +124,30 @@ export function ReportGenerator() {
 
         const agentStats: any = sec['agent_stats']?.data || null;
         const endpointRiskEnvelope: any = sec['endpoint_risk']?.data;
-        const endpointRisks = (endpointRiskEnvelope?.data || endpointRiskEnvelope || []) as any[];
+        const endpointRisksRaw = (endpointRiskEnvelope?.data || endpointRiskEnvelope || []) as any[];
 
         // Create agent map and filter for specific reports
         const agentMap = new Map(agents.map((a: { id: string; hostname: string }) => [a.id, a.hostname]));
+        const endpointRisks = endpointRisksRaw.map((r: any) => ({
+            ...r,
+            agent_hostname: r?.agent_hostname || r?.hostname || (r?.agent_id ? agentMap.get(r.agent_id) : undefined) || r?.agent_id,
+        }));
         const filteredAgents = reportScope === 'specific' && selectedAgent 
             ? agents.filter((a: any) => a.id === selectedAgent)
             : agents;
 
         // Calculate summary
-        const criticalCount = alerts.filter((a: { severity: string }) => a.severity === 'critical').length;
-        const highCount = alerts.filter((a: { severity: string }) => a.severity === 'high').length;
-        const mediumCount = alerts.filter((a: { severity: string }) => a.severity === 'medium').length;
-        const lowCount = alerts.filter((a: { severity: string }) => a.severity === 'low').length;
+        const severityFromAlerts = {
+            critical: alerts.filter((a: { severity: string }) => a.severity === 'critical').length,
+            high: alerts.filter((a: { severity: string }) => a.severity === 'high').length,
+            medium: alerts.filter((a: { severity: string }) => a.severity === 'medium').length,
+            low: alerts.filter((a: { severity: string }) => a.severity === 'low').length,
+        };
+        const severityFromStats = sigmaStatsAlertsPayload?.by_severity || {};
+        const criticalCount = severityFromAlerts.critical || severityFromStats.critical || 0;
+        const highCount = severityFromAlerts.high || severityFromStats.high || 0;
+        const mediumCount = severityFromAlerts.medium || severityFromStats.medium || 0;
+        const lowCount = severityFromAlerts.low || severityFromStats.low || 0;
 
         // Vulnerability stats
         const kevCount = vulnFindings.filter((v: any) => v.kev_listed).length;
@@ -220,7 +247,7 @@ export function ReportGenerator() {
         // Avg confidence
         const avgConfidence = alerts.length > 0
             ? Math.round(alerts.reduce((s: number, a: any) => s + (a.confidence || 0), 0) / alerts.length * 100) / 100
-            : 0;
+            : Math.round((Number(sigmaStatsAlertsPayload?.avg_confidence || 0) * 100) * 100) / 100;
 
         // Enrich alerts with hostnames
         const enrichedAlerts = alerts.slice(0, 100).map((a: { agent_id: string }) => ({
@@ -236,7 +263,7 @@ export function ReportGenerator() {
                 agentId: selectedAgent || undefined,
             },
             summary: {
-                totalAlerts: alerts.length,
+                totalAlerts: alerts.length > 0 ? alerts.length : Number(sigmaStatsAlertsPayload?.total_alerts || 0),
                 totalCommands: commands.length,
                 totalDevices: filteredAgents.length,
                 criticalCount,
@@ -275,7 +302,7 @@ export function ReportGenerator() {
                 auditLogs: auditLogs.slice(0, 100),
             },
         };
-    }, [dateRange, reportScope, selectedAgent, selectedTemplate]);
+    }, [agentsQuery.data, dateRange, reportScope, selectedAgent, selectedTemplate]);
 
     // Handle generate button
     const handleGenerate = async () => {

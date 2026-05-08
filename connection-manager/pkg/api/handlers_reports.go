@@ -156,10 +156,15 @@ func (h *Handlers) GenerateReportBundle(c echo.Context) error {
 		}
 	}
 
-	// Apply template include defaults (custom respects caller flags)
+	// Apply template include defaults.
+	// If caller provided explicit include flags, merge them on top so the
+	// frontend can request extra sections (e.g. sigma_alerts for timeline in
+	// executive preview) without forcing template=custom.
+	requestedInclude := req.Include
 	if req.Template != reportTemplateCustom {
 		req.Include = templateDefaultIncludes(req.Template)
 	}
+	req.Include = mergeIncludeFlags(req.Include, requestedInclude)
 
 	ctx := c.Request().Context()
 
@@ -399,6 +404,42 @@ func templateDefaultIncludes(t reportTemplate) (out struct {
 	default: // custom
 		// caller decides
 	}
+	return out
+}
+
+func mergeIncludeFlags(base, extra struct {
+	SigmaAlerts       bool `json:"sigma_alerts,omitempty"`
+	SigmaAlertStats   bool `json:"sigma_alert_stats,omitempty"`
+	SigmaPerformance  bool `json:"sigma_performance,omitempty"`
+	Agents            bool `json:"agents,omitempty"`
+	AgentStats        bool `json:"agent_stats,omitempty"`
+	Commands          bool `json:"commands,omitempty"`
+	CommandStats      bool `json:"command_stats,omitempty"`
+	Vulnerability     bool `json:"vulnerability,omitempty"`
+	AuditLogs         bool `json:"audit_logs,omitempty"`
+	EndpointRisk      bool `json:"endpoint_risk,omitempty"`
+}) (out struct {
+	SigmaAlerts       bool `json:"sigma_alerts,omitempty"`
+	SigmaAlertStats   bool `json:"sigma_alert_stats,omitempty"`
+	SigmaPerformance  bool `json:"sigma_performance,omitempty"`
+	Agents            bool `json:"agents,omitempty"`
+	AgentStats        bool `json:"agent_stats,omitempty"`
+	Commands          bool `json:"commands,omitempty"`
+	CommandStats      bool `json:"command_stats,omitempty"`
+	Vulnerability     bool `json:"vulnerability,omitempty"`
+	AuditLogs         bool `json:"audit_logs,omitempty"`
+	EndpointRisk      bool `json:"endpoint_risk,omitempty"`
+}) {
+	out.SigmaAlerts = base.SigmaAlerts || extra.SigmaAlerts
+	out.SigmaAlertStats = base.SigmaAlertStats || extra.SigmaAlertStats
+	out.SigmaPerformance = base.SigmaPerformance || extra.SigmaPerformance
+	out.Agents = base.Agents || extra.Agents
+	out.AgentStats = base.AgentStats || extra.AgentStats
+	out.Commands = base.Commands || extra.Commands
+	out.CommandStats = base.CommandStats || extra.CommandStats
+	out.Vulnerability = base.Vulnerability || extra.Vulnerability
+	out.AuditLogs = base.AuditLogs || extra.AuditLogs
+	out.EndpointRisk = base.EndpointRisk || extra.EndpointRisk
 	return out
 }
 

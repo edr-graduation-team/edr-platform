@@ -8,9 +8,12 @@
  * own clean layout suitable for printing / saving as PDF.
  */
 
-import { useEffect, useState, lazy, Suspense } from 'react';
+import { useEffect, useState, lazy, Suspense, useRef } from 'react';
+import { useReactToPrint } from 'react-to-print';
+// @ts-ignore
+import html2pdf from 'html2pdf.js';
 import {
-    ArrowLeft, Download, Loader2, FileText, AlertTriangle,
+    ArrowLeft, Download, Loader2, AlertTriangle,
     Shield, Calendar, Printer,
 } from 'lucide-react';
 import type { ReportData, ReportFormat, ReportTemplate } from '../components/reports/ReportTemplates';
@@ -68,14 +71,11 @@ export default function ReportPreviewPage() {
     const [payload, setPayload] = useState<PreviewPayload | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [isDownloading, setIsDownloading] = useState(false);
+    const reportRef = useRef<HTMLDivElement>(null);
 
-    // Sync dark mode from main window preference
+    // Enforce light mode for the preview page
     useEffect(() => {
-        const stored = localStorage.getItem('theme');
-        const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-        if (stored === 'dark' || (!stored && prefersDark)) {
-            document.documentElement.classList.add('dark');
-        }
+        document.documentElement.classList.remove('dark');
     }, []);
 
     // Read report data from localStorage
@@ -101,8 +101,30 @@ export default function ReportPreviewPage() {
         if (!payload) return;
         setIsDownloading(true);
         try {
-            const { exportReport } = await import('../components/reports/reportExport');
-            await exportReport(payload.data, format, payload.template);
+            if (format === 'pdf' && reportRef.current) {
+                // Force light mode for PDF rendering
+                const wasDark = document.documentElement.classList.contains('dark');
+                if (wasDark) document.documentElement.classList.remove('dark');
+                
+                // Allow browser to repaint
+                await new Promise(resolve => setTimeout(resolve, 50));
+                
+                const opt = {
+                    margin:       [0.4, 0] as [number, number],
+                    filename:     `EDR-Report-${payload.template}-${new Date().toISOString().slice(0, 10)}.pdf`,
+                    image:        { type: 'jpeg' as const, quality: 0.98 },
+                    html2canvas:  { scale: 2, useCORS: true, logging: false },
+                    jsPDF:        { unit: 'in', format: 'letter', orientation: 'portrait' as const }
+                };
+                
+                await html2pdf().set(opt).from(reportRef.current).save();
+                
+                // Restore dark mode
+                if (wasDark) document.documentElement.classList.add('dark');
+            } else {
+                const { exportReport } = await import('../components/reports/reportExport');
+                await exportReport(payload.data, format, payload.template);
+            }
         } catch (err: any) {
             console.error('Download failed:', err);
         } finally {
@@ -110,8 +132,19 @@ export default function ReportPreviewPage() {
         }
     };
 
+    const handlePrintAction = useReactToPrint({
+        contentRef: reportRef,
+        documentTitle: 'EDR-Report',
+        onBeforePrint: () => {
+            return new Promise<void>((resolve) => {
+                document.documentElement.classList.remove('dark');
+                setTimeout(resolve, 50);
+            });
+        }
+    });
+
     const handlePrint = () => {
-        window.print();
+        if (handlePrintAction) handlePrintAction();
     };
 
     const handleGoBack = () => {
@@ -175,29 +208,19 @@ export default function ReportPreviewPage() {
                             <span className="hidden sm:inline">Print</span>
                         </button>
 
-                        {/* Download same format */}
-                        <button
-                            onClick={() => handleDownload(payload.format)}
-                            disabled={isDownloading}
-                            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-gradient-to-r from-violet-600 to-cyan-600 hover:from-violet-700 hover:to-cyan-700 text-white text-sm font-semibold shadow-sm shadow-violet-500/20 disabled:opacity-60 transition-all"
-                        >
-                            {isDownloading ? (
-                                <Loader2 className="w-4 h-4 animate-spin" />
-                            ) : (
-                                <Download className="w-4 h-4" />
-                            )}
-                            Download {formatLabel}
-                        </button>
-
-                        {/* Other format quick-download (PDF if current isn't PDF) */}
+                        {/* Download same format (only if not PDF) */}
                         {payload.format !== 'pdf' && (
                             <button
-                                onClick={() => handleDownload('pdf')}
+                                onClick={() => handleDownload(payload.format)}
                                 disabled={isDownloading}
-                                className="flex items-center gap-2 px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 text-sm font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-60 transition-colors"
+                                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-gradient-to-r from-violet-600 to-cyan-600 hover:from-violet-700 hover:to-cyan-700 text-white text-sm font-semibold shadow-sm shadow-violet-500/20 disabled:opacity-60 transition-all"
                             >
-                                <FileText className="w-4 h-4" />
-                                <span className="hidden sm:inline">Save as PDF</span>
+                                {isDownloading ? (
+                                    <Loader2 className="w-4 h-4 animate-spin" />
+                                ) : (
+                                    <Download className="w-4 h-4" />
+                                )}
+                                Download {formatLabel}
                             </button>
                         )}
                     </div>
@@ -206,18 +229,20 @@ export default function ReportPreviewPage() {
 
             {/* ── Report content ──────────────────────────────────────────── */}
             <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 print:px-0 print:py-0 print:max-w-none">
-                <Suspense fallback={<LoadingSpinner label="Rendering report…" />}>
-                    <ProfessionalReportView
-                        data={payload.data}
-                        template={payload.template}
-                        format={payload.format}
-                        onDownload={handleDownload}
-                        isGenerating={isDownloading}
-                        customSections={payload.template === 'custom' ? payload.customSections : undefined}
-                        /* Hide the internal download bar since we have our own top bar */
-                        hideActionBar
-                    />
-                </Suspense>
+                <div ref={reportRef} className="bg-white dark:bg-transparent print:bg-white pb-8">
+                    <Suspense fallback={<LoadingSpinner label="Rendering report…" />}>
+                        <ProfessionalReportView
+                            data={payload.data}
+                            template={payload.template}
+                            format={payload.format}
+                            onDownload={handleDownload}
+                            isGenerating={isDownloading}
+                            customSections={payload.template === 'custom' ? payload.customSections : undefined}
+                            /* Hide the internal download bar since we have our own top bar */
+                            hideActionBar
+                        />
+                    </Suspense>
+                </div>
             </div>
         </div>
     );

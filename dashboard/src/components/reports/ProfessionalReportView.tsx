@@ -63,7 +63,9 @@ export function ProfessionalReportView({
     customSections,
     hideActionBar = false,
 }: ProfessionalReportViewProps) {
-    const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set(['summary', 'kpis']));
+    const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set([
+        'summary', 'kpis', 'trends', 'severity', 'mitre', 'alerts', 'vulns', 'commands', 'auditLog'
+    ]));
     const config = REPORT_TEMPLATES[template];
 
     const toggleSection = (sectionId: string) => {

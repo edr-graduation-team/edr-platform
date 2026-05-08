@@ -577,17 +577,7 @@ export function ReportGenerator() {
                             </button>
                         )}
 
-                        {/* For previewable formats, offer a direct download too after first preview */}
-                        {generatedData && PREVIEWABLE_FORMATS.has(selectedFormat) && (
-                            <button
-                                onClick={() => handleDownload(selectedFormat)}
-                                disabled={isGenerating}
-                                className="flex items-center gap-2 px-5 py-3 rounded-xl bg-slate-800 dark:bg-slate-700 hover:bg-slate-900 dark:hover:bg-slate-600 text-white font-semibold disabled:opacity-50 transition-all"
-                            >
-                                <Download className="w-4 h-4" />
-                                Download {selectedFormat.toUpperCase()}
-                            </button>
-                        )}
+
                     </div>
                 </div>
             </div>

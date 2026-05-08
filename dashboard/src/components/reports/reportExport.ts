@@ -189,8 +189,29 @@ function generateHTMLFromRenderedView(sourceElement: HTMLElement, title: string)
   <style>
     ${cssBlocks.join('\n')}
     /* Ensure downloaded HTML looks like preview canvas */
-    html, body { margin: 0; padding: 0; background: #f1f5f9; }
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: #f1f5f9;
+      height: auto !important;
+      min-height: 100% !important;
+      overflow: auto !important;
+    }
+    body[unresolved] {
+      overflow: auto !important;
+      position: static !important;
+    }
     .report-export-root { max-width: 1200px; margin: 0 auto; padding: 24px; }
+    .h-screen, .min-h-screen {
+      height: auto !important;
+      min-height: 0 !important;
+    }
+    .overflow-hidden {
+      overflow: visible !important;
+    }
+    .overflow-y-auto {
+      overflow-y: visible !important;
+    }
     @media print {
       html, body { background: #fff; }
       .report-export-root { max-width: none; padding: 0; }

@@ -269,11 +269,11 @@ export function ReportGenerator() {
                 tacticCounts.set(t, (tacticCounts.get(t) || 0) + 1);
             });
         });
-        const topTactics = Array.from(tacticCounts.entries())
+        const topTacticsFromAlerts = Array.from(tacticCounts.entries())
             .sort((a, b) => b[1] - a[1])
             .slice(0, 10)
             .map(([tactic, count]) => ({ tactic, count }));
-        const topTacticsFallback = sigmaStatsAlertsPayload?.by_tactic
+        const topTacticsFromStats = sigmaStatsAlertsPayload?.by_tactic
             ? Object.entries(sigmaStatsAlertsPayload.by_tactic as Record<string, number>)
                 .sort((a, b) => Number(b[1]) - Number(a[1]))
                 .slice(0, 10)
@@ -359,7 +359,9 @@ export function ReportGenerator() {
             charts: {
                 timeline,
                 severityDistribution,
-                topTactics: topTactics.length > 0 ? topTactics : topTacticsFallback,
+                // Prefer backend aggregated tactic stats when available; they are
+                // more complete/accurate than parsing a limited alerts page.
+                topTactics: topTacticsFromStats.length > 0 ? topTacticsFromStats : topTacticsFromAlerts,
                 osDistribution,
                 vulnBySeverity,
                 commandsByStatus,

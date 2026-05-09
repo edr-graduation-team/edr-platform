@@ -511,45 +511,56 @@ func getCurrentUserID(c echo.Context) uuid.UUID {
 	return uuid.New() // Fallback - should be properly implemented
 }
 
-// IngestAlertRequest is the payload sent by sigma-engine after saving an alert
+// IngestAlertRequest is the payload sent by sigma-engine after saving an alert.
+// Contains all fields needed by ProcessAlert — no DB lookup required.
 type IngestAlertRequest struct {
-	AlertID string `json:"alert_id" validate:"required"`
+	AlertID    string  `json:"alert_id"`
+	RuleName   string  `json:"rule_name"`
+	Severity   string  `json:"severity"`
+	AgentID    string  `json:"agent_id"`
+	Confidence float64 `json:"confidence"`
 }
 
 // IngestAndProcessAlert is an internal endpoint called by sigma-engine
-// after it persists a new alert. It fetches the full alert from DB and
-// runs the automation engine (auto-execute + suggestions).
+// after it persists a new alert. Builds a minimal models.Alert from the
+// payload and runs the automation engine without a DB round-trip.
+// (sigma-engine uses sigma_alerts table; connection-manager uses alerts table —
+// they are separate, so a DB fetch would return nothing.)
 func (h *AutomationHandlers) IngestAndProcessAlert(c echo.Context) error {
 	var req IngestAlertRequest
 	if err := c.Bind(&req); err != nil {
 		return errorResponse(c, http.StatusBadRequest, "INVALID_REQUEST", "Invalid request body")
 	}
-
-	alertID, err := uuid.Parse(req.AlertID)
-	if err != nil {
-		return errorResponse(c, http.StatusBadRequest, "INVALID_ID", "Invalid alert ID")
+	if req.RuleName == "" || req.Severity == "" {
+		return errorResponse(c, http.StatusBadRequest, "MISSING_FIELDS", "rule_name and severity are required")
 	}
 
-	// Use request context only for the synchronous DB fetch
-	alert, err := h.automationService.GetAlertByID(c.Request().Context(), alertID)
-	if err != nil {
-		return errorResponse(c, http.StatusNotFound, "NOT_FOUND", "Alert not found")
+	agentID, _ := uuid.Parse(req.AgentID)
+
+	// Build a minimal models.Alert — enough for ProcessAlert to evaluate rules
+	alert := &models.Alert{
+		ID:         uuid.New(),
+		RuleName:   req.RuleName,
+		Severity:   models.AlertSeverity(req.Severity),
+		AgentID:    agentID,
+		Confidence: req.Confidence,
+		Status:     models.AlertStatusOpen,
 	}
 
-	// IMPORTANT: Use context.Background() — NOT c.Request().Context().
-	// The request context is cancelled when the HTTP 202 response is sent,
-	// which would kill ProcessAlert mid-execution before automation completes.
+	// Use context.Background() — the request context is cancelled when
+	// the HTTP 202 response is sent, which would kill ProcessAlert.
 	go func(a *models.Alert) {
 		bgCtx := context.Background()
 		if err := h.automationService.ProcessAlert(bgCtx, a); err != nil {
-			h.logger.WithError(err).Errorf("[automation] ProcessAlert failed for alert %s", a.ID)
+			h.logger.WithError(err).Errorf("[automation] ProcessAlert failed for rule %s", a.RuleName)
 		} else {
-			h.logger.Infof("[automation] ProcessAlert completed for alert %s (rule: %s)", a.ID, a.RuleName)
+			h.logger.Infof("[automation] ProcessAlert completed — rule: %s severity: %s", a.RuleName, a.Severity)
 		}
 	}(alert)
 
 	return c.JSON(http.StatusAccepted, map[string]interface{}{
-		"message":  "Alert queued for automation processing",
-		"alert_id": alertID,
+		"message":   "Alert queued for automation processing",
+		"rule_name": req.RuleName,
+		"severity":  req.Severity,
 	})
 }

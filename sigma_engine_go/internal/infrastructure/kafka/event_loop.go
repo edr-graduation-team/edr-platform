@@ -260,9 +260,9 @@ func (el *EventLoop) SetAutomationURL(url string) {
 	el.automationHTTP = &http.Client{Timeout: 3 * time.Second}
 }
 
-// notifyAutomation posts the alert_id to connection-manager so it can
+// notifyAutomation posts alert data to connection-manager so it can
 // run automation rules. Non-blocking: called in a goroutine.
-func (el *EventLoop) notifyAutomation(alertID string) {
+func (el *EventLoop) notifyAutomation(alert *domain.Alert) {
 	url := el.automationURL
 	if url == "" {
 		url = os.Getenv("CM_INTERNAL_URL")
@@ -270,19 +270,33 @@ func (el *EventLoop) notifyAutomation(alertID string) {
 			return
 		}
 	}
+	// Extract agent_id from EventData if present
+	agentID := ""
+	if alert.EventData != nil {
+		if v, ok := alert.EventData["agent_id"]; ok {
+			agentID, _ = v.(string)
+		}
+	}
 	// Lazily create http.Client if SetAutomationURL was never called
 	client := el.automationHTTP
 	if client == nil {
 		client = &http.Client{Timeout: 3 * time.Second}
 	}
-	body, _ := json.Marshal(map[string]string{"alert_id": alertID})
+	payload := map[string]interface{}{
+		"alert_id":   alert.ID,
+		"rule_name":  alert.RuleTitle,
+		"severity":   strings.ToLower(alert.Severity.String()),
+		"agent_id":   agentID,
+		"confidence": alert.Confidence,
+	}
+	body, _ := json.Marshal(payload)
 	resp, err := client.Post(url, "application/json", bytes.NewReader(body))
 	if err != nil {
-		logger.Warnf("[automation] notify failed for alert %s: %v", alertID, err)
+		logger.Warnf("[automation] notify failed for alert %s: %v", alert.ID, err)
 		return
 	}
 	resp.Body.Close()
-	logger.Debugf("[automation] notified CM for alert %s → HTTP %d", alertID, resp.StatusCode)
+	logger.Debugf("[automation] notified CM for alert %s (rule: %s) → HTTP %d", alert.ID, alert.RuleTitle, resp.StatusCode)
 }
 
 // SetLineageCache injects a LineageCache implementation for process context
@@ -565,7 +579,7 @@ func (el *EventLoop) alertPublisher(ctx context.Context) {
 			} else {
 				// Notify connection-manager to run automation rules (fire-and-forget)
 				if el.automationHTTP != nil || os.Getenv("CM_INTERNAL_URL") != "" {
-					go el.notifyAutomation(alert.ID)
+					go el.notifyAutomation(alert)
 				}
 			}
 		}

@@ -108,11 +108,10 @@ func (s *CommandService) ExecutePlaybookCommand(ctx context.Context, executionID
 	// Push the command to the agent's live gRPC stream immediately
 	if s.registry != nil {
 		protoCmd := &edrv1.Command{
-			CommandId:      command.ID.String(),
-			Type:           string(command.CommandType),
-			ParametersJson: mustMarshalJSON(command.Parameters),
-			TimeoutSeconds: int32(command.TimeoutSeconds),
-			Priority:       int32(command.Priority),
+			CommandId:  command.ID.String(),
+			Type:       mapCommandType(string(command.CommandType)),
+			Parameters: flattenParams(command.Parameters),
+			Priority:   int32(command.Priority),
 		}
 		if err := s.registry.Send(agentID.String(), protoCmd); err != nil {
 			s.logger.WithError(err).Warnf("[playbook] Agent %s not online — command %s will be delivered on reconnect", agentID, command.ID)
@@ -140,7 +139,53 @@ func mustMarshalJSON(v interface{}) string {
 	return string(b)
 }
 
-// WaitForCommandResult waits for command execution result
+// mapCommandType converts a DB command type string to the proto CommandType enum.
+// Unknown types fall back to COMMAND_TYPE_UNSPECIFIED (0) — the agent will ignore them.
+func mapCommandType(t string) edrv1.CommandType {
+	switch t {
+	case "isolate_network":
+		return edrv1.CommandType_COMMAND_TYPE_ISOLATE
+	case "restore_network":
+		return edrv1.CommandType_COMMAND_TYPE_UNISOLATE
+	case "terminate_process", "kill_process":
+		return edrv1.CommandType_COMMAND_TYPE_TERMINATE_PROCESS
+	case "collect_forensics", "collect_logs":
+		return edrv1.CommandType_COMMAND_TYPE_COLLECT_FORENSICS
+	case "quarantine_file":
+		return edrv1.CommandType_COMMAND_TYPE_QUARANTINE_FILE
+	case "run_cmd", "custom":
+		return edrv1.CommandType_COMMAND_TYPE_RUN_CMD
+	case "restart_agent":
+		return edrv1.CommandType_COMMAND_TYPE_RESTART_SERVICE
+	case "block_ip":
+		return edrv1.CommandType_COMMAND_TYPE_BLOCK_IP
+	case "block_domain":
+		return edrv1.CommandType_COMMAND_TYPE_BLOCK_DOMAIN
+	case "update_signatures":
+		return edrv1.CommandType_COMMAND_TYPE_UPDATE_SIGNATURES
+	default:
+		return edrv1.CommandType_COMMAND_TYPE_UNSPECIFIED
+	}
+}
+
+// flattenParams converts map[string]interface{} to map[string]string for proto transport.
+func flattenParams(params map[string]interface{}) map[string]string {
+	if params == nil {
+		return nil
+	}
+	out := make(map[string]string, len(params))
+	for k, v := range params {
+		switch val := v.(type) {
+		case string:
+			out[k] = val
+		default:
+			b, _ := json.Marshal(v)
+			out[k] = string(b)
+		}
+	}
+	return out
+}
+
 func (s *CommandService) WaitForCommandResult(ctx context.Context, commandID uuid.UUID, timeout time.Duration) *CommandResult {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()

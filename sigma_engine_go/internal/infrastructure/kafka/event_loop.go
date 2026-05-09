@@ -2,9 +2,12 @@
 package kafka
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -193,6 +196,13 @@ type EventLoop struct {
 
 	lineageCacheErrors atomic.Uint64 // monotonic counter for cache write failures
 
+	// automationURL is the internal endpoint of connection-manager to call
+	// after each alert is persisted, triggering automation rules.
+	// E.g. "http://connection-manager:8080/api/v1/internal/process-alert"
+	// If empty, automation notification is skipped.
+	automationURL string
+	automationHTTP *http.Client
+
 	alertChan chan *domain.Alert
 	doneChan  chan struct{}
 
@@ -240,6 +250,39 @@ func NewEventLoop(
 // Call this before Start().
 func (el *EventLoop) SetAlertWriter(writer *database.AlertWriter) {
 	el.alertWriter = writer
+}
+
+// SetAutomationURL configures the connection-manager internal endpoint
+// that will be called (fire-and-forget) after each alert is persisted.
+// If not set, it reads CM_INTERNAL_URL env var automatically.
+func (el *EventLoop) SetAutomationURL(url string) {
+	el.automationURL = url
+	el.automationHTTP = &http.Client{Timeout: 3 * time.Second}
+}
+
+// notifyAutomation posts the alert_id to connection-manager so it can
+// run automation rules. Non-blocking: called in a goroutine.
+func (el *EventLoop) notifyAutomation(alertID string) {
+	url := el.automationURL
+	if url == "" {
+		url = os.Getenv("CM_INTERNAL_URL")
+		if url == "" {
+			return
+		}
+	}
+	// Lazily create http.Client if SetAutomationURL was never called
+	client := el.automationHTTP
+	if client == nil {
+		client = &http.Client{Timeout: 3 * time.Second}
+	}
+	body, _ := json.Marshal(map[string]string{"alert_id": alertID})
+	resp, err := client.Post(url, "application/json", bytes.NewReader(body))
+	if err != nil {
+		logger.Warnf("[automation] notify failed for alert %s: %v", alertID, err)
+		return
+	}
+	resp.Body.Close()
+	logger.Debugf("[automation] notified CM for alert %s → HTTP %d", alertID, resp.StatusCode)
 }
 
 // SetLineageCache injects a LineageCache implementation for process context
@@ -519,6 +562,11 @@ func (el *EventLoop) alertPublisher(ctx context.Context) {
 				logger.Warnf("Failed to queue alert for DB write: %v", err)
 				atomic.AddUint64(&el.metrics.AlertDBQueueFailures, 1)
 				metricsPkg.DefaultMetrics.RecordError("alert_db_queue_failed")
+			} else {
+				// Notify connection-manager to run automation rules (fire-and-forget)
+				if el.automationHTTP != nil || os.Getenv("CM_INTERNAL_URL") != "" {
+					go el.notifyAutomation(alert.ID.String())
+				}
 			}
 		}
 

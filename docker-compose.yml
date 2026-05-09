@@ -97,6 +97,8 @@ services:
       # --- API ---
       API_PORT: "8080"
       JWT_PUBLIC_KEY_PATH: "/app/certs/jwt_public.pem"
+      # --- Automation: notify connection-manager after each alert is saved ---
+      CM_INTERNAL_URL: "http://connection-manager:8082/api/v1/internal/process-alert"
     volumes:
       - ./sigma_engine_go/sigma_rules:/app/sigma_rules:ro
       - ./connection-manager/certs:/app/certs:ro

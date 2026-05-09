@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -508,4 +509,47 @@ func getCurrentUserID(c echo.Context) uuid.UUID {
 		return userID
 	}
 	return uuid.New() // Fallback - should be properly implemented
+}
+
+// IngestAlertRequest is the payload sent by sigma-engine after saving an alert
+type IngestAlertRequest struct {
+	AlertID string `json:"alert_id" validate:"required"`
+}
+
+// IngestAndProcessAlert is an internal endpoint called by sigma-engine
+// after it persists a new alert. It fetches the full alert from DB and
+// runs the automation engine (auto-execute + suggestions).
+func (h *AutomationHandlers) IngestAndProcessAlert(c echo.Context) error {
+	var req IngestAlertRequest
+	if err := c.Bind(&req); err != nil {
+		return errorResponse(c, http.StatusBadRequest, "INVALID_REQUEST", "Invalid request body")
+	}
+
+	alertID, err := uuid.Parse(req.AlertID)
+	if err != nil {
+		return errorResponse(c, http.StatusBadRequest, "INVALID_ID", "Invalid alert ID")
+	}
+
+	// Use request context only for the synchronous DB fetch
+	alert, err := h.automationService.GetAlertByID(c.Request().Context(), alertID)
+	if err != nil {
+		return errorResponse(c, http.StatusNotFound, "NOT_FOUND", "Alert not found")
+	}
+
+	// IMPORTANT: Use context.Background() — NOT c.Request().Context().
+	// The request context is cancelled when the HTTP 202 response is sent,
+	// which would kill ProcessAlert mid-execution before automation completes.
+	go func(a *models.Alert) {
+		bgCtx := context.Background()
+		if err := h.automationService.ProcessAlert(bgCtx, a); err != nil {
+			h.logger.WithError(err).Errorf("[automation] ProcessAlert failed for alert %s", a.ID)
+		} else {
+			h.logger.Infof("[automation] ProcessAlert completed for alert %s (rule: %s)", a.ID, a.RuleName)
+		}
+	}(alert)
+
+	return c.JSON(http.StatusAccepted, map[string]interface{}{
+		"message":  "Alert queued for automation processing",
+		"alert_id": alertID,
+	})
 }

@@ -304,6 +304,12 @@ func (s *Server) RegisterRoutes(handlers *Handlers) {
 		// Metrics and Optimizations
 		automation.GET("/metrics", handlers.AutomationHandlers.GetAutomationMetrics, handlers.RequirePermission("responses", "read"))
 		automation.POST("/optimize", handlers.AutomationHandlers.GetAutomationOptimizations, handlers.RequirePermission("responses", "execute"))
+	
+	
+		// ── Internal endpoint: called by sigma-engine after alert is saved ─
+		// No auth required — internal service-to-service call only.
+		// Triggers automation engine (auto-execute rules + playbook suggestions).
+		v1.POST("/internal/process-alert", handlers.AutomationHandlers.IngestAndProcessAlert)
 	}
 }
 

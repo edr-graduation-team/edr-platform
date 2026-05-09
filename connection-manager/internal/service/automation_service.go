@@ -175,10 +175,12 @@ func (s *AutomationService) evaluateAdvancedConditions(conditions map[string]int
 func (s *AutomationService) generateIntelligentSuggestions(alert *models.Alert) []models.PlaybookSuggestion {
 	var suggestions []models.PlaybookSuggestion
 
+	ruleName := strings.ToLower(alert.RuleName)
+
 	// Severity-based suggestions
 	if alert.Severity == "critical" {
 		suggestions = append(suggestions, models.PlaybookSuggestion{
-			PlaybookID: uuid.MustParse("malware_immediate_containment"),
+			PlaybookID: uuid.Nil, // placeholder — real ID resolved at execution time
 			Confidence: 0.95,
 			Reason:     "Critical severity alert requires immediate containment",
 			MITREMatch: []string{"T1055", "T1059"},
@@ -186,10 +188,9 @@ func (s *AutomationService) generateIntelligentSuggestions(alert *models.Alert) 
 	}
 
 	// Rule name-based suggestions
-	ruleName := strings.ToLower(alert.RuleName)
 	if strings.Contains(ruleName, "malware") || strings.Contains(ruleName, "trojan") {
 		suggestions = append(suggestions, models.PlaybookSuggestion{
-			PlaybookID: uuid.MustParse("advanced_malware_analysis"),
+			PlaybookID: uuid.Nil,
 			Confidence: 0.85,
 			Reason:     "Malware-related behavior detected",
 			MITREMatch: []string{"T1055", "T1543"},
@@ -197,9 +198,9 @@ func (s *AutomationService) generateIntelligentSuggestions(alert *models.Alert) 
 	}
 
 	// Risk score-based suggestions
-	if alert.RiskScore > 8.0 {
+	if alert.RiskScore > 8 {
 		suggestions = append(suggestions, models.PlaybookSuggestion{
-			PlaybookID: uuid.MustParse("comprehensive_system_scan"),
+			PlaybookID: uuid.Nil,
 			Confidence: 0.90,
 			Reason:     "High-risk agent detected",
 			MITREMatch: []string{"T1082", "T1018"},
@@ -209,7 +210,7 @@ func (s *AutomationService) generateIntelligentSuggestions(alert *models.Alert) 
 	// Ransomware-specific suggestions
 	if strings.Contains(ruleName, "ransomware") || strings.Contains(ruleName, "encryption") {
 		suggestions = append(suggestions, models.PlaybookSuggestion{
-			PlaybookID: uuid.MustParse("ransomware_attack_response"),
+			PlaybookID: uuid.Nil,
 			Confidence: 0.98,
 			Reason:     "Ransomware activity detected",
 			MITREMatch: []string{"T1486", "T1059"},

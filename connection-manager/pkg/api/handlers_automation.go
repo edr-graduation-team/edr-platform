@@ -537,9 +537,19 @@ func (h *AutomationHandlers) IngestAndProcessAlert(c echo.Context) error {
 
 	agentID, _ := uuid.Parse(req.AgentID)
 
-	// Build a minimal models.Alert — enough for ProcessAlert to evaluate rules
+	// Parse the real sigma_alert ID — this is the row in sigma_alerts we must update
+	sigmaAlertID, err := uuid.Parse(req.AlertID)
+	if err != nil || sigmaAlertID == uuid.Nil {
+		// Fallback: use a new UUID (markAlertAutoResponse will be a no-op but won't crash)
+		sigmaAlertID = uuid.Nil
+		h.logger.Warn("[automation] IngestAndProcessAlert: missing or invalid alert_id — auto-response badge will not appear on Alerts page")
+	}
+
+	// Build a minimal models.Alert — enough for ProcessAlert to evaluate rules.
+	// IMPORTANT: alert.ID MUST equal the sigma_alerts.id so markAlertAutoResponse
+	// can update the correct row after the playbook runs.
 	alert := &models.Alert{
-		ID:         uuid.New(),
+		ID:         sigmaAlertID,
 		RuleName:   req.RuleName,
 		Severity:   models.AlertSeverity(req.Severity),
 		AgentID:    agentID,

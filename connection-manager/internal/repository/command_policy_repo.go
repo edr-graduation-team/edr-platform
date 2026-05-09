@@ -213,10 +213,11 @@ func (r *PostgresCommandRepository) ListByAgent(
 		return nil, 0, err
 	}
 
-	// Fetch commands
+	// Fetch commands — metadata is required for the AUTO RESPONSE badge on the dashboard
 	query := `
 		SELECT id, agent_id, command_type, parameters, priority, status,
-			result, error_message, issued_at, completed_at, issued_by
+			result, error_message, issued_at, completed_at, issued_by,
+			COALESCE(metadata, '{}'::jsonb)
 		FROM commands
 		WHERE agent_id = $1
 		ORDER BY issued_at DESC
@@ -234,7 +235,7 @@ func (r *PostgresCommandRepository) ListByAgent(
 		if err := rows.Scan(
 			&cmd.ID, &cmd.AgentID, &cmd.CommandType, &cmd.Parameters,
 			&cmd.Priority, &cmd.Status, &cmd.Result, &cmd.ErrorMessage,
-			&cmd.IssuedAt, &cmd.CompletedAt, &cmd.IssuedBy,
+			&cmd.IssuedAt, &cmd.CompletedAt, &cmd.IssuedBy, &cmd.Metadata,
 		); err != nil {
 			return nil, 0, err
 		}
@@ -328,15 +329,14 @@ func (r *PostgresCommandRepository) ListAll(ctx context.Context, filter CommandL
 	// COALESCE priority for issued_by_user:
 	//   1. u.username  → set when issued_by FK points to a real users row
 	//   2. metadata->>'issued_by_username' → always set by ExecuteAgentCommand
-	//                                         (stored even when issued_by FK is NULL
-	//                                          to avoid FK constraint issues)
 	//   3. ''          → final fallback (command was created by a system process)
 	dataQuery := fmt.Sprintf(`
 		SELECT c.id, c.agent_id, COALESCE(a.hostname, ''), c.command_type,
 			COALESCE(c.parameters, '{}'::jsonb), c.priority, c.status,
 			COALESCE(c.result, '{}'::jsonb), COALESCE(c.error_message, ''), c.exit_code,
 			c.timeout_seconds, c.issued_at, c.sent_at, c.completed_at, c.expires_at,
-			c.issued_by, COALESCE(u.username, c.metadata->>'issued_by_username', '')
+			c.issued_by, COALESCE(u.username, c.metadata->>'issued_by_username', ''),
+			COALESCE(c.metadata, '{}'::jsonb)
 		FROM commands c
 		LEFT JOIN agents a ON a.id = c.agent_id
 		LEFT JOIN users u ON u.id = c.issued_by
@@ -361,7 +361,7 @@ func (r *PostgresCommandRepository) ListAll(ctx context.Context, filter CommandL
 			&item.Parameters, &item.Priority, &item.Status,
 			&item.Result, &item.ErrorMessage, &item.ExitCode,
 			&item.TimeoutSeconds, &item.IssuedAt, &item.SentAt, &item.CompletedAt, &item.ExpiresAt,
-			&item.IssuedBy, &item.IssuedByUser,
+			&item.IssuedBy, &item.IssuedByUser, &item.Metadata,
 		)
 		if err != nil {
 			return nil, 0, fmt.Errorf("failed to scan command: %w", err)

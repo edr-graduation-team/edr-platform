@@ -376,11 +376,18 @@ func enrichPlaybookCommandParams(cmd *models.PlaybookCommand, alertID uuid.UUID)
 		}
 
 	case "run_cmd":
-		// Ensure there's always a command to run.
-		if _, ok := cmd.Parameters["command"]; !ok {
-			if _, ok := cmd.Parameters["cmd"]; !ok {
-				cmd.Parameters["command"] = `echo "EDR auto-response executed"`
-			}
+		// Agent reads params["cmd"] (not "command").
+		// Provide a safe forensic default when neither key is present.
+		_, hasCmd := cmd.Parameters["cmd"]
+		_, hasCommand := cmd.Parameters["command"]
+		if !hasCmd && !hasCommand {
+			// Default: capture running process list for post-isolation forensics.
+			// This is whitelisted in playbookAllowedCommands on the agent side.
+			cmd.Parameters["cmd"] = `powershell -Command "Get-Process | Select-Object Id,ProcessName,CPU,WorkingSet | Sort-Object CPU -Descending | ConvertTo-Json"`
+		} else if hasCommand && !hasCmd {
+			// Normalise: agent always reads "cmd"
+			cmd.Parameters["cmd"] = cmd.Parameters["command"]
+			delete(cmd.Parameters, "command")
 		}
 	}
 

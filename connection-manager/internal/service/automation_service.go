@@ -392,8 +392,14 @@ func (s *AutomationService) ExecutePlaybookForAlert(ctx context.Context, playboo
 		return nil, err
 	}
 
+	// Fetch agentID from alert (manual execute path — alertID is always a real DB record)
+	agentID := uuid.Nil
+	if alert, err := s.alertRepo.GetByID(ctx, alertID); err == nil {
+		agentID = alert.AgentID
+	}
+
 	// Execute asynchronously
-	go s.executePlaybookAsync(ctx, playbookID, alertID, uuid.New())
+	go s.executePlaybookAsync(ctx, playbookID, alertID, agentID, uuid.New())
 
 	return execution, nil
 }

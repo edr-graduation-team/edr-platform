@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 
 	"github.com/google/uuid"
@@ -9,7 +10,14 @@ import (
 
 	"github.com/edr-platform/connection-manager/internal/repository"
 	"github.com/edr-platform/connection-manager/pkg/models"
+	edrv1 "github.com/edr-platform/connection-manager/proto/v1"
 )
+
+// CommandRegistry is the minimal interface the CommandService needs from AgentRegistry.
+type CommandRegistry interface {
+	Send(agentID string, cmd *edrv1.Command) error
+	IsOnline(agentID string) bool
+}
 
 // CommandService handles command execution for playbooks
 type CommandService struct {
@@ -17,6 +25,7 @@ type CommandService struct {
 	commandRepo   repository.CommandRepository
 	executionRepo repository.PlaybookExecutionRepository
 	metricsRepo   repository.AutomationMetricsRepository
+	registry      CommandRegistry
 }
 
 // NewCommandService creates a new command service instance
@@ -32,6 +41,12 @@ func NewCommandService(
 		executionRepo: executionRepo,
 		metricsRepo:   metricsRepo,
 	}
+}
+
+// SetRegistry injects the AgentRegistry so commands are pushed
+// directly to online agents over their live gRPC stream.
+func (s *CommandService) SetRegistry(r CommandRegistry) {
+	s.registry = r
 }
 
 // ExecutePlaybookCommand executes a command from a playbook
@@ -71,6 +86,8 @@ func (s *CommandService) ExecutePlaybookCommand(ctx context.Context, executionID
 		Metadata: map[string]interface{}{
 			"playbook_execution_id": executionID,
 			"description":           cmd.Description,
+			"trigger":               "auto_response",   // shown in Dashboard Response tab
+			"source":                "automation_rule", // identifies auto vs manual
 		},
 	}
 
@@ -88,11 +105,39 @@ func (s *CommandService) ExecutePlaybookCommand(ctx context.Context, executionID
 
 	s.logger.Infof("[playbook] Queued command %s for agent %s (cmd_id: %s)", cmd.Type, agentID, command.ID)
 
-	// Return success immediately — the command is in the queue
+	// Push the command to the agent's live gRPC stream immediately
+	if s.registry != nil {
+		protoCmd := &edrv1.Command{
+			CommandId:      command.ID.String(),
+			Type:           string(command.CommandType),
+			ParametersJson: mustMarshalJSON(command.Parameters),
+			TimeoutSeconds: int32(command.TimeoutSeconds),
+			Priority:       int32(command.Priority),
+		}
+		if err := s.registry.Send(agentID.String(), protoCmd); err != nil {
+			s.logger.WithError(err).Warnf("[playbook] Agent %s not online — command %s will be delivered on reconnect", agentID, command.ID)
+		} else {
+			s.logger.Infof("[playbook] Command %s pushed to agent %s live stream ✅", command.ID, agentID)
+		}
+	}
+
+	// Return success immediately — command is queued and (if online) pushed
 	return &CommandResult{
 		Status:      "queued",
 		CompletedAt: time.Now(),
 	}
+}
+
+// mustMarshalJSON marshals v to JSON, returning "{}" on error
+func mustMarshalJSON(v interface{}) string {
+	if v == nil {
+		return "{}"
+	}
+	b, err := json.Marshal(v)
+	if err != nil {
+		return "{}"
+	}
+	return string(b)
 }
 
 // WaitForCommandResult waits for command execution result

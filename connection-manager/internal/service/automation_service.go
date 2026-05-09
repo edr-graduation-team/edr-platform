@@ -78,16 +78,20 @@ func (s *AutomationService) ProcessAlert(ctx context.Context, alert *models.Aler
 	// 2. Optimize rule priorities using ML
 	optimizedRules := s.mlOptimizer.OptimizeRulePriority(rules, alert)
 
-	// 3. Execute automatic rules in parallel
-	var wg sync.WaitGroup
+	// 3. Execute only the SINGLE highest-priority matching auto-rule.
+	//    Executing all 10 rules simultaneously would flood the agent with
+	//    redundant commands. The optimizer already sorted by priority.
+	var executedRule *models.AutomationRule
 	for _, rule := range optimizedRules {
 		if rule.AutoExecute && s.shouldExecute(rule, alert) {
-			wg.Add(1)
-			go func(r *models.AutomationRule) {
-				defer wg.Done()
-				s.executePlaybookAsync(ctx, r.PlaybookID, alert.ID, alert.AgentID, r.ID)
-			}(rule)
+			executedRule = rule
+			break // take only the top rule
 		}
+	}
+	if executedRule != nil {
+		s.logger.Infof("[automation] Auto-executing rule: %s (playbook: %s)", executedRule.Name, executedRule.PlaybookID)
+		go s.executePlaybookAsync(ctx, executedRule.PlaybookID, alert.ID, alert.AgentID, executedRule.ID)
+		s.setCooldown(executedRule.ID)
 	}
 
 	// 4. Generate intelligent playbook suggestions

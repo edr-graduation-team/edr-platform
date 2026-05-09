@@ -481,6 +481,9 @@ func main() {
 		notificationService := service.NewNotificationService(logger)
 		automationService := service.NewAutomationService(logger, alertRepo, playbookRepo, automationRuleRepo, executionRepo, commandService, notificationService, metricsService, mlOptimizer)
 		automationHandlers = api.NewAutomationHandlers(logger, automationService, metricsService)
+		// Wire the AgentRegistry so playbook commands reach online agents immediately
+		// via their live gRPC stream (not just queued in DB for next reconnect).
+		commandService.SetRegistry(grpcServer.GetRegistry())
 	}
 
 	apiHandlers := api.NewHandlers(logger, jwtManager, redisClient, rateLimiter, agentSvc, authSvc, cfg.Server.CACertPath, enrollmentTokenRepo, automationHandlers)

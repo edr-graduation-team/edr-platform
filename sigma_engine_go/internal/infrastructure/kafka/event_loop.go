@@ -565,7 +565,7 @@ func (el *EventLoop) alertPublisher(ctx context.Context) {
 			} else {
 				// Notify connection-manager to run automation rules (fire-and-forget)
 				if el.automationHTTP != nil || os.Getenv("CM_INTERNAL_URL") != "" {
-					go el.notifyAutomation(alert.ID.String())
+					go el.notifyAutomation(alert.ID)
 				}
 			}
 		}

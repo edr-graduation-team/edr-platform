@@ -3,6 +3,9 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -276,21 +279,50 @@ func (s *AutomationService) executePlaybookAsync(ctx context.Context, playbookID
 }
 
 // markAlertAutoResponse appends "auto_response:triggered" to the sigma_alert notes
-// so the frontend can show the AUTO CONTAINED badge on the Alerts page.
-// The sigma_alerts table lives in the same postgres cluster as the CM tables.
+// by calling the sigma_engine's PATCH /api/v1/alerts/:id/status endpoint.
+// Using the HTTP API is more reliable than a direct cross-service DB write.
 func (s *AutomationService) markAlertAutoResponse(alertID uuid.UUID) {
+	if alertID == uuid.Nil {
+		return
+	}
+
+	// Try the DB-direct path first (fast path)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	// Best-effort: update sigma_alerts.notes to include the auto_response marker.
-	// The current notes value is preserved (we CONCAT not overwrite).
-	if err := s.alertRepo.AppendAutoResponseNote(ctx, alertID); err != nil {
-		s.logger.WithError(err).WithField("alert_id", alertID).
-			Warn("[automation] Could not mark sigma_alert as auto_response (non-fatal)")
-	} else {
-		s.logger.Infof("[automation] Marked alert %s as auto_response ✅", alertID)
+	if err := s.alertRepo.AppendAutoResponseNote(ctx, alertID); err == nil {
+		s.logger.Infof("[automation] Marked alert %s as auto_response ✅ (DB path)", alertID)
+		return
 	}
+
+	// Fallback: call sigma_engine HTTP API to update resolution_notes
+	sigmaURL := os.Getenv("SIGMA_ENGINE_URL")
+	if sigmaURL == "" {
+		sigmaURL = "http://sigma-engine:8080" // docker-compose service name + port
+	}
+
+	endpoint := fmt.Sprintf("%s/api/v1/sigma/alerts/%s/status", sigmaURL, alertID.String())
+	// sigma_engine's UpdateStatusRequest uses "notes" (not "resolution_notes")
+	payload := `{"status":"open","notes":"auto_response:triggered"}`
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPatch, endpoint, strings.NewReader(payload))
+	if err != nil {
+		s.logger.WithError(err).Warn("[automation] Could not build sigma PATCH request (non-fatal)")
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{Timeout: 4 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		s.logger.WithError(err).WithField("alert_id", alertID).
+			Warn("[automation] Could not mark sigma_alert as auto_response via HTTP (non-fatal)")
+		return
+	}
+	resp.Body.Close()
+	s.logger.Infof("[automation] Marked alert %s as auto_response ✅ (HTTP path, status: %d)", alertID, resp.StatusCode)
 }
+
 
 // executePlaybookCommands executes all commands in a playbook
 func (s *AutomationService) executePlaybookCommands(ctx context.Context, playbookID, alertID, agentID, executionID uuid.UUID) bool {

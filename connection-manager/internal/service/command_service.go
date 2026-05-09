@@ -52,37 +52,47 @@ func (s *CommandService) ExecutePlaybookCommand(ctx context.Context, executionID
 		params["from_playbook"] = "true"
 	}
 
+	// Set a reasonable timeout default (30s) if not specified
+	timeout := cmd.Timeout
+	if timeout <= 0 {
+		timeout = 30
+	}
+
 	// Convert playbook command to system command
 	command := &models.Command{
 		AgentID:        agentID,
 		CommandType:    models.CommandType(cmd.Type),
 		Parameters:     params,
-		TimeoutSeconds: cmd.Timeout,
+		Priority:       10, // High priority for playbook commands
+		TimeoutSeconds: timeout,
 		Status:         models.CommandStatusPending,
 		IssuedAt:       time.Now(),
-		ExpiresAt:      time.Now().Add(time.Duration(cmd.Timeout) * time.Second),
+		ExpiresAt:      time.Now().Add(time.Duration(timeout) * time.Second),
 		Metadata: map[string]interface{}{
 			"playbook_execution_id": executionID,
 			"description":           cmd.Description,
 		},
 	}
-	
-	// Insert command into queue
+
+	// Insert command into queue — agent picks it up via gRPC stream.
+	// Fire-and-forget: we do NOT block waiting for the result here.
+	// Results come back asynchronously via SendCommandResult RPC.
 	if err := s.commandRepo.Create(ctx, command); err != nil {
+		s.logger.WithError(err).Errorf("[playbook] Failed to queue command %s for agent %s", cmd.Type, agentID)
 		return &CommandResult{
-			Status:    "failed",
-			Error:     err.Error(),
+			Status:      "failed",
+			Error:       err.Error(),
 			CompletedAt: time.Now(),
 		}
 	}
-	
-	// Wait for execution result
-	result := s.WaitForCommandResult(ctx, command.ID, time.Duration(cmd.Timeout)*time.Second)
-	
-	// Record metrics
-	// TODO: Implement metrics recording when repository method is available
-	
-	return result
+
+	s.logger.Infof("[playbook] Queued command %s for agent %s (cmd_id: %s)", cmd.Type, agentID, command.ID)
+
+	// Return success immediately — the command is in the queue
+	return &CommandResult{
+		Status:      "queued",
+		CompletedAt: time.Now(),
+	}
 }
 
 // WaitForCommandResult waits for command execution result

@@ -85,7 +85,7 @@ func (s *AutomationService) ProcessAlert(ctx context.Context, alert *models.Aler
 			wg.Add(1)
 			go func(r *models.AutomationRule) {
 				defer wg.Done()
-				s.executePlaybookAsync(ctx, r.PlaybookID, alert.ID, r.ID)
+				s.executePlaybookAsync(ctx, r.PlaybookID, alert.ID, alert.AgentID, r.ID)
 			}(rule)
 		}
 	}
@@ -221,7 +221,7 @@ func (s *AutomationService) generateIntelligentSuggestions(alert *models.Alert) 
 }
 
 // executePlaybookAsync executes a playbook asynchronously with monitoring
-func (s *AutomationService) executePlaybookAsync(ctx context.Context, playbookID, alertID, ruleID uuid.UUID) {
+func (s *AutomationService) executePlaybookAsync(ctx context.Context, playbookID, alertID, agentID, ruleID uuid.UUID) {
 	startTime := time.Now()
 
 	execution := &models.PlaybookExecution{
@@ -242,7 +242,7 @@ func (s *AutomationService) executePlaybookAsync(ctx context.Context, playbookID
 	}
 
 	// Execute commands — this is the critical path that actually runs on the agent
-	success := s.executePlaybookCommands(ctx, playbookID, alertID, execution.ID)
+	success := s.executePlaybookCommands(ctx, playbookID, alertID, agentID, execution.ID)
 
 	// Update tracking record only if it was created successfully
 	if trackingEnabled {
@@ -265,17 +265,21 @@ func (s *AutomationService) executePlaybookAsync(ctx context.Context, playbookID
 }
 
 // executePlaybookCommands executes all commands in a playbook
-func (s *AutomationService) executePlaybookCommands(ctx context.Context, playbookID, alertID, executionID uuid.UUID) bool {
+func (s *AutomationService) executePlaybookCommands(ctx context.Context, playbookID, alertID, agentID, executionID uuid.UUID) bool {
 	playbook, err := s.playbookRepo.GetByID(ctx, playbookID)
 	if err != nil {
 		s.logger.WithError(err).Error("Failed to get playbook")
 		return false
 	}
 
-	alert, err := s.alertRepo.GetByID(ctx, alertID)
-	if err != nil {
-		s.logger.WithError(err).Error("Failed to get alert")
-		return false
+	// If agentID is not provided directly, try fetching from alerts table
+	if agentID == uuid.Nil {
+		if alert, err := s.alertRepo.GetByID(ctx, alertID); err == nil {
+			agentID = alert.AgentID
+		} else {
+			s.logger.WithError(err).Error("Failed to get alert for agentID")
+			return false
+		}
 	}
 
 	success := true
@@ -288,7 +292,7 @@ func (s *AutomationService) executePlaybookCommands(ctx context.Context, playboo
 	for i, cmd := range commands {
 		s.logger.Infof("Executing command %d/%d: %s", i+1, len(commands), cmd.Type)
 
-		result := s.commandService.ExecutePlaybookCommand(ctx, executionID, cmd, alert.AgentID)
+		result := s.commandService.ExecutePlaybookCommand(ctx, executionID, cmd, agentID)
 
 		if result.Status == "failed" && cmd.OnFailure == "stop" {
 			s.logger.Errorf("Command %s failed, stopping playbook execution", cmd.Type)

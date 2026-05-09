@@ -232,32 +232,36 @@ func (s *AutomationService) executePlaybookAsync(ctx context.Context, playbookID
 		StartedAt:  time.Now(),
 	}
 
+	trackingEnabled := true
 	if err := s.executionRepo.Create(ctx, execution); err != nil {
-		s.logger.WithError(err).Error("Failed to create execution record")
-		return
+		// alert_id may be synthetic (auto-execute path) and not in the alerts table.
+		// Log the error but DO NOT return — the agent command must still execute.
+		s.logger.WithError(err).Warn("Could not create execution record (alert_id not in alerts table); proceeding with command execution anyway")
+		execution.ID = uuid.Nil
+		trackingEnabled = false
 	}
 
-	// Execute commands with monitoring
+	// Execute commands — this is the critical path that actually runs on the agent
 	success := s.executePlaybookCommands(ctx, playbookID, alertID, execution.ID)
 
-	// Update results
-	executionTime := time.Since(startTime)
-	execution.Status = "completed"
-	execution.CompletedAt = &time.Time{}
-	execution.ExecutionTimeMs = int(executionTime.Milliseconds())
-
-	if !success {
-		execution.Status = "failed"
-		execution.ErrorMessage = "One or more commands failed"
+	// Update tracking record only if it was created successfully
+	if trackingEnabled {
+		executionTime := time.Since(startTime)
+		execution.Status = "completed"
+		execution.CompletedAt = &time.Time{}
+		execution.ExecutionTimeMs = int(executionTime.Milliseconds())
+		if !success {
+			execution.Status = "failed"
+			execution.ErrorMessage = "One or more commands failed"
+		}
+		s.executionRepo.Update(ctx, execution)
+		s.notificationService.SendPlaybookCompleted(execution, success)
 	}
 
-	s.executionRepo.Update(ctx, execution)
+	// Always update rule metrics regardless of tracking
+	s.updateRuleMetrics(ruleID, success, time.Since(startTime))
 
-	// Update rule metrics
-	s.updateRuleMetrics(ruleID, success, executionTime)
-
-	// Send completion notification
-	s.notificationService.SendPlaybookCompleted(execution, success)
+	s.logger.Infof("[playbook] Execution finished — playbook: %s success: %v", playbookID, success)
 }
 
 // executePlaybookCommands executes all commands in a playbook

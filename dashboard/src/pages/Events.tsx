@@ -1,8 +1,8 @@
 import { useQuery } from '@tanstack/react-query';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { Activity, AlertTriangle, ChevronLeft, ChevronRight, Loader2, Search } from 'lucide-react';
-import { authApi, eventsApi, type CmEventSummary } from '../api/client';
+import { Activity, AlertTriangle, ChevronLeft, ChevronRight, Loader2 } from 'lucide-react';
+import { authApi, eventsApi, agentsApi, type CmEventSummary } from '../api/client';
 import { EventDetailModal } from '../components/EventDetailModal';
 import { useDebounce } from '../hooks/useDebounce';
 
@@ -11,9 +11,11 @@ const DEFAULT_LIMIT = 50;
 const EventRow = memo(function EventRow({
     e,
     onOpen,
+    hostname,
 }: {
     e: CmEventSummary;
     onOpen: (id: string) => void;
+    hostname: string;
 }) {
     return (
         <tr
@@ -39,6 +41,7 @@ const EventRow = memo(function EventRow({
                     {e.agent_id.slice(0, 8)}…
                 </Link>
             </td>
+            <td className="p-3 font-mono text-xs">{hostname}</td>
             <td className="p-3 font-mono text-xs">{e.event_type}</td>
             <td className="p-3">{e.summary}</td>
         </tr>
@@ -88,11 +91,91 @@ function Pagination({
     );
 }
 
+function ComboBox({
+    value,
+    onChange,
+    options,
+    placeholder
+}: {
+    value: string;
+    onChange: (val: string) => void;
+    options: string[];
+    placeholder?: string;
+}) {
+    const [open, setOpen] = useState(false);
+    
+    // Extract actual parsed parts for checkbox state
+    const parts = value.split(',').map(s => s.trim()).filter(Boolean);
+    const lastPart = value.split(',').pop()?.trim().toLowerCase() || '';
+    
+    // Determine the current search string to filter options by
+    const searchStr = open && !value.endsWith(',') && !value.endsWith(', ') ? lastPart : '';
+    const showOptions = options.filter(o => o.toLowerCase().includes(searchStr));
+
+    const toggleOption = (opt: string) => {
+        const isSelected = parts.includes(opt);
+        let newParts;
+        if (isSelected) {
+            newParts = parts.filter(p => p !== opt);
+        } else {
+            if (searchStr && opt.toLowerCase().includes(searchStr)) {
+                newParts = [...parts.slice(0, -1), opt];
+            } else {
+                newParts = [...parts, opt];
+            }
+        }
+        onChange(newParts.length > 0 ? newParts.join(', ') + ', ' : '');
+    };
+
+    return (
+        <div className="relative">
+            <input
+                className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500/50"
+                value={value}
+                onChange={(e) => { onChange(e.target.value); setOpen(true); }}
+                onFocus={() => setOpen(true)}
+                onBlur={() => setTimeout(() => setOpen(false), 200)}
+                placeholder={placeholder}
+            />
+            {open && options.length > 0 && (
+                <div className="absolute z-50 w-full mt-1 max-h-60 overflow-auto rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-xl py-1">
+                    {showOptions.length === 0 ? (
+                        <div className="px-3 py-2 text-sm text-slate-500">No matches found</div>
+                    ) : (
+                        showOptions.map(opt => {
+                            const isSelected = parts.includes(opt);
+                            return (
+                                <div
+                                    key={opt}
+                                    className="px-3 py-2 text-sm flex items-center gap-2 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200"
+                                    onMouseDown={(e) => {
+                                        e.preventDefault(); // Prevent blur
+                                        toggleOption(opt);
+                                    }}
+                                >
+                                    <input 
+                                        type="checkbox" 
+                                        className="rounded border-slate-300 dark:border-slate-600 text-cyan-600 focus:ring-cyan-500/50 bg-white dark:bg-slate-900 cursor-pointer pointer-events-none" 
+                                        checked={isSelected}
+                                        readOnly
+                                    />
+                                    <span>{opt}</span>
+                                </div>
+                            );
+                        })
+                    )}
+                </div>
+            )}
+        </div>
+    );
+}
+
 export default function Events() {
     const canView = authApi.canViewAlerts(); // server guards events/search with alerts:read
     const [sp, setSp] = useSearchParams();
 
-    const [agentId, setAgentId] = useState(() => sp.get('agent_id') || '');
+    const [hostnames, setHostnames] = useState(() => sp.get('hostnames') || sp.get('agent_id') || '');
+    const [eventId, setEventId] = useState(() => sp.get('event_id') || '');
     const [eventType, setEventType] = useState(() => sp.get('event_type') || '');
     // Default to last hour (security UIs should be time-bounded by default).
     const [from, setFrom] = useState(() => sp.get('from') || isoHoursAgo(1));
@@ -101,29 +184,81 @@ export default function Events() {
     const [detailId, setDetailId] = useState<string | null>(null);
     const openDetail = useCallback((id: string) => setDetailId(id), []);
 
+    // Fetch agents for hostname resolution and datalist
+    const agentsQ = useQuery({
+        queryKey: ['agents-list'],
+        queryFn: () => agentsApi.list({ limit: 1000 }),
+        enabled: canView,
+        staleTime: 60_000,
+    });
+    const agentsList = agentsQ.data?.data || [];
+
     useEffect(() => {
         // keep URL in sync (bookmarkable)
         setSp((prev) => {
             const n = new URLSearchParams(prev);
             const setOrDel = (k: string, v: string) => (v ? n.set(k, v) : n.delete(k));
-            setOrDel('agent_id', agentId.trim());
+            setOrDel('hostnames', hostnames.trim());
+            setOrDel('event_id', eventId.trim());
             setOrDel('event_type', eventType.trim());
             setOrDel('from', from);
             setOrDel('to', to);
             n.set('page', String(page));
+            // clean up legacy agent_id if present
+            if (n.has('agent_id')) n.delete('agent_id');
             return n;
         });
-    }, [agentId, eventType, from, to, page, setSp]);
+    }, [hostnames, eventId, eventType, from, to, page, setSp]);
 
-    const debouncedAgentId = useDebounce(agentId.trim(), 250);
+    const debouncedHostnames = useDebounce(hostnames.trim(), 250);
+    const debouncedEventId = useDebounce(eventId.trim(), 250);
     const debouncedEventType = useDebounce(eventType.trim(), 250);
 
     const offset = (page - 1) * DEFAULT_LIMIT;
 
     const queryBody = useMemo(() => {
         const filters: { field: string; operator: string; value: unknown }[] = [];
-        if (debouncedAgentId) filters.push({ field: 'agent_id', operator: 'equals', value: debouncedAgentId });
-        if (debouncedEventType) filters.push({ field: 'event_type', operator: 'equals', value: debouncedEventType });
+        
+        if (debouncedEventId) {
+            filters.push({ field: 'id', operator: 'equals', value: debouncedEventId });
+        }
+
+        if (debouncedHostnames) {
+            const parts = debouncedHostnames.split(',').map(s => s.trim()).filter(Boolean);
+            const agentIds: string[] = [];
+            for (const p of parts) {
+                // If it looks like a UUID, use it directly
+                if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(p)) {
+                    agentIds.push(p);
+                } else {
+                    // Try to resolve hostname to agent_id
+                    const matches = agentsList.filter(a => a.hostname.toLowerCase() === p.toLowerCase());
+                    if (matches.length > 0) {
+                        agentIds.push(...matches.map(m => m.id));
+                    }
+                }
+            }
+            if (agentIds.length > 0) {
+                if (agentIds.length === 1) {
+                    filters.push({ field: 'agent_id', operator: 'equals', value: agentIds[0] });
+                } else {
+                    filters.push({ field: 'agent_id', operator: 'in', value: agentIds });
+                }
+            } else {
+                // Force empty result if hostname is typed but not found
+                filters.push({ field: 'agent_id', operator: 'equals', value: '00000000-0000-0000-0000-000000000000' });
+            }
+        }
+
+        if (debouncedEventType) {
+            const types = debouncedEventType.split(',').map(s => s.trim()).filter(Boolean);
+            if (types.length === 1) {
+                filters.push({ field: 'event_type', operator: 'equals', value: types[0] });
+            } else if (types.length > 1) {
+                filters.push({ field: 'event_type', operator: 'in', value: types });
+            }
+        }
+
         return {
             filters,
             logic: 'AND' as const,
@@ -131,7 +266,7 @@ export default function Events() {
             limit: DEFAULT_LIMIT,
             offset,
         };
-    }, [debouncedAgentId, debouncedEventType, from, to, offset]);
+    }, [debouncedHostnames, debouncedEventId, debouncedEventType, from, to, offset, agentsList]);
 
     const q = useQuery({
         queryKey: ['events-search', queryBody],
@@ -144,6 +279,14 @@ export default function Events() {
     const rows: CmEventSummary[] = q.data?.data ?? [];
     const total = q.data?.pagination?.total ?? 0;
     const totalPages = Math.max(1, Math.ceil(total / DEFAULT_LIMIT));
+
+    const agentHostnameMap = useMemo(() => {
+        const m = new Map<string, string>();
+        for (const a of agentsList) {
+            m.set(a.id, a.hostname);
+        }
+        return m;
+    }, [agentsList]);
 
     useEffect(() => {
         if (page > totalPages) setPage(totalPages);
@@ -179,27 +322,33 @@ export default function Events() {
                     </Link>
                 </div>
 
-                <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white/70 dark:bg-slate-900/40 backdrop-blur p-4 sm:p-5 space-y-4">
+                <div className="relative z-10 rounded-xl border border-slate-200 dark:border-slate-700 bg-white/70 dark:bg-slate-900/40 backdrop-blur p-4 sm:p-5 space-y-4">
                     <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-                        <div className="md:col-span-2">
-                            <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Agent ID</label>
-                            <div className="relative">
-                                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                                <input
-                                    className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-9 py-2 text-sm"
-                                    value={agentId}
-                                    onChange={(e) => { setAgentId(e.target.value); setPage(1); }}
-                                    placeholder="UUID (optional)"
-                                />
-                            </div>
-                        </div>
-                        <div>
-                            <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Event type</label>
+                        <div className="md:col-span-1">
+                            <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Event ID</label>
                             <input
                                 className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm"
+                                value={eventId}
+                                onChange={(e) => { setEventId(e.target.value); setPage(1); }}
+                                placeholder="UUID"
+                            />
+                        </div>
+                        <div className="md:col-span-1">
+                            <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Hostname(s) / Agent ID</label>
+                            <ComboBox
+                                value={hostnames}
+                                onChange={(val) => { setHostnames(val); setPage(1); }}
+                                options={agentsList.map(a => a.hostname)}
+                                placeholder="HostA, HostB..."
+                            />
+                        </div>
+                        <div className="md:col-span-1">
+                            <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Event type</label>
+                            <ComboBox
                                 value={eventType}
-                                onChange={(e) => { setEventType(e.target.value); setPage(1); }}
-                                placeholder="e.g. network, process, file"
+                                onChange={(val) => { setEventType(val); setPage(1); }}
+                                options={['process', 'file', 'network', 'image_load', 'dns', 'registry', 'software_inventory', 'logon']}
+                                placeholder="e.g. process, network"
                             />
                         </div>
                         <div className="flex items-end">
@@ -207,7 +356,8 @@ export default function Events() {
                                 type="button"
                                 className="w-full px-3 py-2 text-sm font-semibold rounded-lg border border-slate-200 dark:border-slate-700 bg-white/70 dark:bg-slate-900/50 hover:bg-slate-100 dark:hover:bg-slate-800"
                                 onClick={() => {
-                                    setAgentId('');
+                                    setHostnames('');
+                                    setEventId('');
                                     setEventType('');
                                     setFrom(isoHoursAgo(1));
                                     setTo(new Date().toISOString());
@@ -272,14 +422,20 @@ export default function Events() {
                             <thead className="bg-slate-100 dark:bg-slate-800/80 text-slate-600 dark:text-slate-300 text-xs uppercase">
                                 <tr>
                                     <th className="p-3">Time</th>
-                                    <th className="p-3">Agent</th>
+                                    <th className="p-3">Agent ID</th>
+                                    <th className="p-3">Hostname</th>
                                     <th className="p-3">Type</th>
                                     <th className="p-3">Summary</th>
                                 </tr>
                             </thead>
                             <tbody style={{ contentVisibility: 'auto', containIntrinsicSize: '600px' } as any}>
                                 {rows.map((e) => (
-                                    <EventRow key={e.id} e={e} onOpen={openDetail} />
+                                    <EventRow 
+                                        key={e.id} 
+                                        e={e} 
+                                        onOpen={openDetail} 
+                                        hostname={agentHostnameMap.get(e.agent_id) || e.data?.hostname || 'Unknown'} 
+                                    />
                                 ))}
                             </tbody>
                         </table>

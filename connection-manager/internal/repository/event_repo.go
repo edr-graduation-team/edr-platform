@@ -181,7 +181,7 @@ func (r *PostgresEventRepository) Search(ctx context.Context, req EventSearchReq
 
 		switch field {
 		// ── Indexed top-level columns ─────────────────────────────────────
-		case "agent_id", "event_type", "severity":
+		case "agent_id", "event_type", "severity", "id":
 			switch op {
 			case "equals":
 				add(fmt.Sprintf("%s = $%d", field, argPos), f.Value)
@@ -189,6 +189,23 @@ func (r *PostgresEventRepository) Search(ctx context.Context, req EventSearchReq
 				add(fmt.Sprintf("%s ILIKE $%d", field, argPos), "%"+fmt.Sprint(f.Value)+"%")
 			case "regex":
 				add(fmt.Sprintf("%s ~* $%d", field, argPos), fmt.Sprint(f.Value))
+			case "in":
+				var vals []string
+				switch v := f.Value.(type) {
+				case []string:
+					vals = v
+				case []interface{}:
+					for _, vi := range v {
+						vals = append(vals, fmt.Sprint(vi))
+					}
+				}
+				if len(vals) > 0 {
+					if field == "agent_id" || field == "id" {
+						add(fmt.Sprintf("%s = ANY($%d::uuid[])", field, argPos), vals)
+					} else {
+						add(fmt.Sprintf("%s = ANY($%d::text[])", field, argPos), vals)
+					}
+				}
 			}
 
 		// ── JSONB raw fields (data.*) ─────────────────────────────────────

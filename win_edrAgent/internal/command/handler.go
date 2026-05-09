@@ -455,8 +455,24 @@ func truncateOutput(s string, maxLen int) string {
 // (children first) using the same safety checks.
 func (h *Handler) terminateProcess(_ context.Context, params map[string]string) (string, error) {
 	pidStr := params["pid"]
+
+	// Fallback: resolve PID from process_name when pid is not provided.
+	// This allows playbook auto-response to target a process by name
+	// (e.g. "mshta.exe") without knowing the PID in advance.
 	if pidStr == "" {
-		return "", fmt.Errorf("pid parameter is required")
+		processName := strings.TrimSpace(params["process_name"])
+		if processName == "" {
+			return "", fmt.Errorf("pid parameter is required")
+		}
+		// Strip .exe suffix for Get-Process compatibility
+		lookupName := strings.TrimSuffix(processName, ".exe")
+		cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command",
+			fmt.Sprintf("(Get-Process -Name '%s' -ErrorAction SilentlyContinue | Select-Object -First 1).Id", lookupName))
+		out, err := cmd.Output()
+		if err != nil || strings.TrimSpace(string(out)) == "" {
+			return "", fmt.Errorf("process '%s' not found (already terminated?)", processName)
+		}
+		pidStr = strings.TrimSpace(string(out))
 	}
 
 	pid, err := strconv.Atoi(pidStr)

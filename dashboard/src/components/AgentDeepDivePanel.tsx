@@ -10,6 +10,7 @@ import {
     Trash2,
     Wifi,
     WifiOff,
+    Zap,
 } from 'lucide-react';
 import React from 'react';
 import { agentsApi, authApi, type Agent, type FilterPolicy } from '../api/client';
@@ -448,19 +449,33 @@ export function AgentDeepDivePanel({ agent }: { agent: Agent }) {
                                 <tr className="border-b border-gray-200 dark:border-gray-700 text-gray-500 uppercase tracking-wider">
                                     <th className="py-2 px-2 font-semibold">ID</th>
                                     <th className="py-2 px-2 font-semibold">Type</th>
+                                    <th className="py-2 px-2 font-semibold">Source</th>
                                     <th className="py-2 px-2 font-semibold">Status</th>
                                     <th className="py-2 px-2 font-semibold">Issued</th>
                                 </tr>
                             </thead>
                             <tbody>
-                                {agentCmds!.data.map((c) => (
-                                    <tr key={c.id} className="border-b border-gray-100 dark:border-gray-800/80 last:border-0">
-                                        <td className="py-1.5 px-2 font-mono text-[10px] text-gray-500">{c.id.slice(0, 8)}…</td>
-                                        <td className="py-1.5 px-2">{c.command_type.replace(/_/g, ' ')}</td>
-                                        <td className="py-1.5 px-2">{c.status}</td>
-                                        <td className="py-1.5 px-2 whitespace-nowrap">{new Date(c.issued_at).toLocaleString()}</td>
-                                    </tr>
-                                ))}
+                                {agentCmds!.data.map((c) => {
+                                    const isAutoResponse = c.metadata?.trigger === 'auto_response';
+                                    return (
+                                        <tr key={c.id} className={`border-b border-gray-100 dark:border-gray-800/80 last:border-0 ${isAutoResponse ? 'bg-orange-50/40 dark:bg-orange-900/10' : ''}`}>
+                                            <td className="py-1.5 px-2 font-mono text-[10px] text-gray-500">{c.id.slice(0, 8)}…</td>
+                                            <td className="py-1.5 px-2">{c.command_type.replace(/_/g, ' ')}</td>
+                                            <td className="py-1.5 px-2">
+                                                {isAutoResponse ? (
+                                                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold bg-orange-500/15 text-orange-600 dark:text-orange-400 border border-orange-400/30" title="Triggered by Automation Rule">
+                                                        <Zap className="w-2.5 h-2.5" />
+                                                        AUTO RESPONSE
+                                                    </span>
+                                                ) : (
+                                                    <span className="text-[10px] text-gray-400">Manual</span>
+                                                )}
+                                            </td>
+                                            <td className="py-1.5 px-2">{c.status}</td>
+                                            <td className="py-1.5 px-2 whitespace-nowrap">{new Date(c.issued_at).toLocaleString()}</td>
+                                        </tr>
+                                    );
+                                })}
                             </tbody>
                         </table>
                     </div>

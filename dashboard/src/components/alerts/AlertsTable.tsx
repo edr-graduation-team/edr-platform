@@ -1,5 +1,5 @@
 import {
-    Check, Eye, ArrowUpDown, Zap, CheckCircle, GitBranch
+    Check, Eye, ArrowUpDown, Zap, CheckCircle, GitBranch, Shield
 } from 'lucide-react';
 import { RiskScoreBadge } from './RiskScoreBadge';
 import { severityColors, statusColors, severityStripe } from './alertsUtils';
@@ -160,7 +160,7 @@ export function AlertsTable({
                                     {new Date(alert.timestamp).toLocaleString()}
                                 </td>
                                 <td className="py-3 px-3">
-                                    <div className="max-w-[220px]">
+                                    <div className="max-w-[240px]">
                                         <div className="flex items-center gap-2">
                                             <p className="font-semibold text-slate-800 dark:text-slate-200 truncate text-sm">
                                                 {alert.rule_title}
@@ -172,6 +172,16 @@ export function AlertsTable({
                                             )}
                                         </div>
                                         <div className="flex flex-wrap items-center gap-1 mt-1">
+                                            {/* Auto-Response badge — shown when CM automation engine has acted */}
+                                            {(alert.resolution_notes?.includes('auto_response') || alert.notes?.includes('auto_response')) && (
+                                                <span
+                                                    className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold bg-orange-500/15 text-orange-600 dark:text-orange-400 border border-orange-400/30 shadow-[0_0_6px_rgba(249,115,22,0.3)]"
+                                                    title="Automated containment was triggered by an automation rule"
+                                                >
+                                                    <Shield className="w-2.5 h-2.5" />
+                                                    AUTO CONTAINED
+                                                </span>
+                                            )}
                                             {(alert.mitre_tactics || []).slice(0, 2).map(t => (
                                                 <span key={t} className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-purple-500/10 text-purple-600 dark:text-purple-300 border border-purple-500/20">
                                                     {t}

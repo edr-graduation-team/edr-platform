@@ -320,6 +320,8 @@ export interface Alert {
     event_data?: Record<string, unknown>;
     tags?: Record<string, string>;
     notes?: string;
+    /** Written by the CM automation engine after triggering a response. E.g. 'auto_response:triggered'. */
+    resolution_notes?: string;
     assigned_to?: string;
     acknowledged_at?: string;
     resolved_at?: string;
@@ -491,6 +493,8 @@ export interface Command {
     started_at?: string;
     completed_at?: string;
     timeout_seconds: number;
+    /** Populated by automation engine — e.g. { trigger: "auto_response", source: "automation_rule" } */
+    metadata?: Record<string, unknown>;
 }
 
 export interface CommandRequest {

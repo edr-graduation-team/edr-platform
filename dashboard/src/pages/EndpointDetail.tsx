@@ -3178,15 +3178,23 @@ function ResponseTab({
                                     {cmds.length === 0 ? (
                                         <tr><td colSpan={7} className="p-4 text-slate-500">No commands</td></tr>
                                     ) : (
-                                        cmds.slice((cmdPage - 1) * CMD_PAGE_SIZE, cmdPage * CMD_PAGE_SIZE).map((c) => (
-                                            <tr key={c.id} className="border-t border-slate-100 dark:border-slate-800 align-top">
+                                        cmds.slice((cmdPage - 1) * CMD_PAGE_SIZE, cmdPage * CMD_PAGE_SIZE).map((c) => {
+                                            const isAutoResponse = c.metadata?.trigger === 'auto_response';
+                                            return (
+                                            <tr key={c.id} className={`border-t border-slate-100 dark:border-slate-800 align-top ${isAutoResponse ? 'bg-orange-50/30 dark:bg-orange-900/5' : ''}`}>
                                                 <td className="p-2 whitespace-nowrap font-medium text-slate-700 dark:text-slate-200">{c.status}</td>
                                                 <td className="p-2">
                                                     <div className="font-mono text-cyan-600 dark:text-cyan-400 font-semibold">{c.command_type}</div>
-                                                    <div className="text-[10px] text-slate-500 mt-1 max-w-[200px] leading-tight">
-                                                        Reason: {c.parameters?.decision_reason || 'Manual execution'} <br />
-                                                        Confidence: {c.parameters?.decision_confidence || 'N/A'}
-                                                    </div>
+                                                    {isAutoResponse ? (
+                                                        <span className="inline-flex items-center gap-1 mt-1 px-1.5 py-0.5 rounded text-[9px] font-bold bg-orange-500/15 text-orange-600 dark:text-orange-400 border border-orange-400/30 shadow-[0_0_6px_rgba(249,115,22,0.25)]">
+                                                            ⚡ AUTO RESPONSE — Triggered by Automation Rule
+                                                        </span>
+                                                    ) : (
+                                                        <div className="text-[10px] text-slate-500 mt-1 max-w-[200px] leading-tight">
+                                                            Reason: {c.parameters?.decision_reason || 'Manual execution'} <br />
+                                                            Confidence: {c.parameters?.decision_confidence || 'N/A'}
+                                                        </div>
+                                                    )}
                                                 </td>
                                                 <td className="p-2">
                                                     <span className="bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400 px-1.5 py-0.5 rounded border border-indigo-200 dark:border-indigo-800/50 whitespace-nowrap">
@@ -3194,7 +3202,7 @@ function ResponseTab({
                                                     </span>
                                                 </td>
                                                 <td className="p-2 whitespace-nowrap text-slate-600 dark:text-slate-400">{new Date(c.issued_at).toLocaleString()}</td>
-                                                <td className="p-2 max-w-[140px] break-all">{c.issued_by_user || c.issued_by || '—'}</td>
+                                                <td className="p-2 max-w-[140px] break-all">{(c as any).issued_by_user || c.issued_by || '—'}</td>
                                                 <td className="p-2 max-w-md">
                                                     {c.error_message ? (
                                                         <span className="text-rose-600 dark:text-rose-400">{c.error_message}</span>
@@ -3212,7 +3220,8 @@ function ResponseTab({
                                                     )}
                                                 </td>
                                             </tr>
-                                        ))
+                                            );
+                                        })
                                     )}
                                 </tbody>
                             </table>

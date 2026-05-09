@@ -25,6 +25,10 @@ type AlertRepository interface {
 	// GetEndpointRiskSummary returns per-agent risk posture ordered by peak risk score DESC.
 	// Added for Phase 2 Endpoint Risk Intelligence page.
 	GetEndpointRiskSummary(ctx context.Context) ([]*models.EndpointRiskSummary, error)
+	// AppendAutoResponseNote marks the alert (both local and sigma_alerts) as
+	// having triggered an automated containment response. This feeds the
+	// "AUTO CONTAINED" badge on the Dashboard Alerts page.
+	AppendAutoResponseNote(ctx context.Context, alertID uuid.UUID) error
 }
 
 // AlertFilter for querying alerts.
@@ -390,4 +394,44 @@ func (r *PostgresAlertRepository) GetEndpointRiskSummary(ctx context.Context) ([
 		summaries = []*models.EndpointRiskSummary{}
 	}
 	return summaries, nil
+}
+// AppendAutoResponseNote marks the alert as auto-contained by appending
+// 'auto_response:triggered' to the resolution_notes column in sigma_alerts
+// (and notes in the CM-local alerts table). Both tables share the same postgres.
+func (r *PostgresAlertRepository) AppendAutoResponseNote(ctx context.Context, alertID uuid.UUID) error {
+	const marker = "auto_response:triggered"
+	anyUpdated := false
+
+	// Update sigma_alerts.resolution_notes (this is what the Dashboard reads via /api/v1/sigma/alerts)
+	sigmaQuery := `
+		UPDATE sigma_alerts
+		SET resolution_notes = CASE
+			WHEN resolution_notes IS NULL OR resolution_notes = '' THEN $2
+			WHEN resolution_notes NOT LIKE '%auto_response%' THEN resolution_notes || ' | ' || $2
+			ELSE resolution_notes
+		END,
+		updated_at = NOW()
+		WHERE id = $1`
+	if sigmaResult, err := r.db.Exec(ctx, sigmaQuery, alertID, marker); err == nil && sigmaResult.RowsAffected() > 0 {
+		anyUpdated = true
+	}
+
+	// Also update CM-local alerts.notes for consistency
+	localQuery := `
+		UPDATE alerts
+		SET notes = CASE
+			WHEN notes IS NULL OR notes = '' THEN $2
+			WHEN notes NOT LIKE '%auto_response%' THEN notes || ' | ' || $2
+			ELSE notes
+		END,
+		updated_at = NOW()
+		WHERE id = $1`
+	if localResult, err := r.db.Exec(ctx, localQuery, alertID, marker); err == nil && localResult.RowsAffected() > 0 {
+		anyUpdated = true
+	}
+
+	if !anyUpdated {
+		return fmt.Errorf("alert %s not found in sigma_alerts or alerts", alertID)
+	}
+	return nil
 }

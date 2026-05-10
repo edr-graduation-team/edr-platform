@@ -92,6 +92,13 @@ export function PlaybooksPage() {
   const [cmdParams, setCmdParams] = useState<Record<string, string>>({});
   const [newPlaybookCategory, setNewPlaybookCategory] = useState('investigation');
   const [agents, setAgents] = useState<{ id: string; hostname: string }[]>([]);
+  // Create Playbook Wizard
+  const [wizardStep, setWizardStep] = useState(1);
+  const [newPlaybookCommands, setNewPlaybookCommands] = useState<Array<{ type: string; description: string; timeout: number; params: Record<string, string> }>>([]);
+  const [newCmdType, setNewCmdType] = useState('isolate_network');
+  const [newCmdDesc, setNewCmdDesc] = useState('');
+  const [newCmdTimeout, setNewCmdTimeout] = useState(300);
+  const [newCmdParams, setNewCmdParams] = useState<Record<string, string>>({});
 
   useEffect(() => {
     const state = location.state as any;
@@ -105,6 +112,11 @@ export function PlaybooksPage() {
       if (state.alertDetails.agentId) {
         setAgentIdInput(state.alertDetails.agentId);
       }
+    }
+
+    // Auto-open the create wizard when navigated from dashboard
+    if (state?.openCreateWizard) {
+      openCreateWizard();
     }
 
     fetchPlaybooks();
@@ -136,7 +148,7 @@ export function PlaybooksPage() {
           type: cmd.type || cmd.command_type || 'unknown',
           description: cmd.description || 'Command',
           timeout: cmd.timeout || 300,
-          params: cmd.params || {},
+          params: cmd.parameters || cmd.params || {},
         })),
         mitreTechniques: p.mitre_techniques || [],
         enabled: p.enabled,
@@ -341,36 +353,55 @@ export function PlaybooksPage() {
     }, 3000);
   };
 
+  const openCreateWizard = () => {
+    setWizardStep(1);
+    setNewPlaybookName('');
+    setNewPlaybookDesc('');
+    setNewPlaybookCategory('investigation');
+    setNewPlaybookCommands([]);
+    setNewCmdType('isolate_network');
+    setNewCmdDesc('');
+    setNewCmdTimeout(300);
+    setNewCmdParams({});
+    setIsCreatingPlaybook(true);
+  };
+
+  const addCommandToPlaybook = () => {
+    if (!newCmdDesc.trim()) { alert('Please enter a command description.'); return; }
+    setNewPlaybookCommands(prev => [...prev, { type: newCmdType, description: newCmdDesc, timeout: newCmdTimeout, params: { ...newCmdParams } }]);
+    setNewCmdDesc('');
+    setNewCmdTimeout(300);
+    setNewCmdParams({});
+  };
+
+  const removeCommand = (idx: number) => setNewPlaybookCommands(prev => prev.filter((_, i) => i !== idx));
+
   const confirmCreatePlaybook = async () => {
-    if (!newPlaybookName || !newPlaybookDesc) {
-      alert("Please fill out required fields.");
-      return;
-    }
+    if (!newPlaybookName || !newPlaybookDesc) { alert('Please fill out required fields.'); return; }
+    if (newPlaybookCommands.length === 0) { alert('Add at least one command.'); return; }
     setIsSavingPlaybook(true);
     try {
-      const payload = {
+      await automationApi.createPlaybook({
         name: newPlaybookName,
         description: newPlaybookDesc,
         category: newPlaybookCategory,
-        commands: [{ type: 'isolate_network', description: 'Isolate machine from network', timeout: 300 }]
-      };
-
-      await automationApi.createPlaybook(payload);
-
+        commands: newPlaybookCommands.map(cmd => ({
+          type: cmd.type,
+          description: cmd.description,
+          timeout: cmd.timeout,
+          parameters: cmd.params,
+        })),
+      });
       setIsCreatingPlaybook(false);
-      setNewPlaybookName('');
-      setNewPlaybookDesc('');
-      alert(`Playbook "${newPlaybookName}" created successfully!`);
-
-      // Refresh list
       fetchPlaybooks();
     } catch (err) {
-      console.error("Failed to create playbook", err);
-      alert("Failed to create playbook. Check console for details.");
+      console.error('Failed to create playbook', err);
+      alert('Failed to create playbook.');
     } finally {
       setIsSavingPlaybook(false);
     }
   };
+
 
   const getCategoryColor = (category: string) => {
     switch (category) {
@@ -415,7 +446,7 @@ export function PlaybooksPage() {
             </div>
           )}
           <button
-            onClick={() => setIsCreatingPlaybook(true)}
+            onClick={openCreateWizard}
             className="btn btn-primary flex items-center gap-2"
           >
             <Plus className="w-4 h-4" />
@@ -887,84 +918,229 @@ export function PlaybooksPage() {
           </div>
         </div>
       )}
-      {/* Create Playbook Modal */}
+      {/* Create Playbook Wizard Modal */}
       {isCreatingPlaybook && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
           <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-2xl flex flex-col border border-slate-200 dark:border-slate-800" style={{ maxHeight: '92vh' }}>
+            {/* Header */}
             <div className="flex items-center justify-between p-6 border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/30 shrink-0">
               <div>
                 <h2 className="text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
                   <Terminal className="w-5 h-5 text-indigo-500" />
                   Create Response Playbook
                 </h2>
-                <p className="text-sm text-slate-500 mt-1">Design an autonomous command sequence.</p>
+                <p className="text-sm text-slate-500 mt-1">
+                  {wizardStep === 1 ? 'Step 1 of 2 — Basic details' : 'Step 2 of 2 — Build command sequence'}
+                </p>
               </div>
-              <button
-                onClick={() => setIsCreatingPlaybook(false)}
-                className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-800 transition-colors"
-              >
+              <button onClick={() => setIsCreatingPlaybook(false)} className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-800 transition-colors">
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <div className="p-6 space-y-5 overflow-y-auto flex-1">
-              <div>
-                <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">
-                  Playbook Name <span className="text-rose-500">*</span>
-                </label>
-                <input
-                  type="text"
-                  value={newPlaybookName}
-                  onChange={(e) => setNewPlaybookName(e.target.value)}
-                  placeholder="e.g., Critical Database Isolation"
-                  className="w-full bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-lg px-4 py-3 text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-shadow"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">
-                  Description <span className="text-rose-500">*</span>
-                </label>
-                <textarea
-                  value={newPlaybookDesc}
-                  onChange={(e) => setNewPlaybookDesc(e.target.value)}
-                  placeholder="Describe the purpose of this playbook..."
-                  className="w-full h-24 bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-lg px-4 py-3 text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">
-                  Category
-                </label>
-                <select
-                  value={newPlaybookCategory}
-                  onChange={e => setNewPlaybookCategory(e.target.value)}
-                  className="w-full bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-lg px-4 py-3 text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
-                >
-                  <option value="containment">Containment</option>
-                  <option value="investigation">Investigation</option>
-                  <option value="remediation">Remediation</option>
-                  <option value="validation">Validation</option>
-                </select>
-              </div>
+            {/* Step indicator */}
+            <div className="flex items-center gap-0 px-6 pt-5 shrink-0">
+              {[1, 2].map(s => (
+                <div key={s} className="flex items-center gap-2 flex-1">
+                  <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold border-2 transition-colors ${
+                    wizardStep >= s
+                      ? 'bg-indigo-600 border-indigo-600 text-white'
+                      : 'bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-700 text-slate-400'
+                  }`}>{s}</div>
+                  {s < 2 && <div className={`flex-1 h-0.5 mx-1 rounded ${ wizardStep > s ? 'bg-indigo-600' : 'bg-slate-200 dark:bg-slate-700' }`} />}
+                </div>
+              ))}
             </div>
 
-            <div className="flex items-center justify-end gap-3 p-6 border-t border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/30 shrink-0">
+            {/* Body */}
+            <div className="overflow-y-auto flex-1 p-6 space-y-5">
+              {wizardStep === 1 && (
+                <>
+                  <div>
+                    <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">Playbook Name <span className="text-rose-500">*</span></label>
+                    <input
+                      type="text"
+                      value={newPlaybookName}
+                      onChange={e => setNewPlaybookName(e.target.value)}
+                      placeholder="e.g., Critical Ransomware Containment"
+                      className="w-full bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-lg px-4 py-3 text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">Description <span className="text-rose-500">*</span></label>
+                    <textarea
+                      value={newPlaybookDesc}
+                      onChange={e => setNewPlaybookDesc(e.target.value)}
+                      placeholder="Describe the purpose and trigger conditions for this playbook..."
+                      className="w-full h-24 bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-lg px-4 py-3 text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none resize-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">Category</label>
+                    <div className="grid grid-cols-2 gap-3">
+                      {[
+                        { value: 'containment',   label: 'Containment',   color: 'rose',   desc: 'Isolate & stop threat spread' },
+                        { value: 'investigation', label: 'Investigation',  color: 'amber',  desc: 'Gather evidence & forensics' },
+                        { value: 'remediation',   label: 'Remediation',   color: 'emerald',desc: 'Clean & restore systems' },
+                        { value: 'validation',    label: 'Validation',    color: 'blue',   desc: 'Verify fix & system health' },
+                      ].map(cat => (
+                        <button
+                          key={cat.value}
+                          type="button"
+                          onClick={() => setNewPlaybookCategory(cat.value)}
+                          className={`flex flex-col items-start gap-0.5 p-3 rounded-xl border-2 text-left transition-all ${
+                            newPlaybookCategory === cat.value
+                              ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/20'
+                              : 'border-slate-200 dark:border-slate-700 hover:border-slate-300'
+                          }`}
+                        >
+                          <span className="font-bold text-sm text-slate-900 dark:text-white">{cat.label}</span>
+                          <span className="text-xs text-slate-500">{cat.desc}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </>
+              )}
+
+              {wizardStep === 2 && (
+                <>
+                  {/* Summary pill */}
+                  <div className="flex items-center gap-3 p-3 bg-indigo-50 dark:bg-indigo-900/10 border border-indigo-100 dark:border-indigo-800/50 rounded-xl">
+                    <Terminal className="w-4 h-4 text-indigo-500 shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <div className="font-bold text-sm text-indigo-900 dark:text-indigo-100 truncate">{newPlaybookName}</div>
+                      <div className="text-xs text-indigo-600/70 dark:text-indigo-400/70 capitalize">{newPlaybookCategory}</div>
+                    </div>
+                    <span className={`shrink-0 px-2.5 py-0.5 text-[10px] uppercase tracking-wider rounded-full font-bold ${getCategoryColor(newPlaybookCategory)}`}>
+                      {getCategoryLabel(newPlaybookCategory)}
+                    </span>
+                  </div>
+
+                  {/* Current sequence */}
+                  <div>
+                    <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">
+                      Command Sequence
+                      {newPlaybookCommands.length > 0 && <span className="ml-2 px-2 py-0.5 text-xs bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 rounded-full font-bold">{newPlaybookCommands.length}</span>}
+                    </label>
+                    {newPlaybookCommands.length === 0 ? (
+                      <div className="flex flex-col items-center justify-center gap-2 py-6 border-2 border-dashed border-slate-200 dark:border-slate-700 rounded-xl text-slate-400">
+                        <Terminal className="w-8 h-8 opacity-40" />
+                        <span className="text-sm">No commands yet — add one below</span>
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        {newPlaybookCommands.map((cmd, idx) => (
+                          <div key={idx} className="flex items-center gap-3 p-3 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-lg">
+                            <div className="w-6 h-6 rounded-full bg-indigo-100 dark:bg-indigo-900/40 text-indigo-600 dark:text-indigo-400 flex items-center justify-center text-xs font-bold shrink-0">{idx + 1}</div>
+                            <div className="flex-1 min-w-0">
+                              <div className="text-sm font-bold text-slate-800 dark:text-slate-200">{cmd.type}</div>
+                              <div className="text-xs text-slate-500 truncate">{cmd.description}</div>
+                            </div>
+                            <span className="text-xs text-slate-400 shrink-0">{cmd.timeout}s</span>
+                            <button onClick={() => removeCommand(idx)} className="p-1.5 text-rose-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/20 rounded-lg transition-colors shrink-0">
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Add command form */}
+                  <div className="border border-slate-200 dark:border-slate-700 rounded-xl p-4 space-y-3 bg-slate-50 dark:bg-slate-800/30">
+                    <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Add Command</p>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">Type</label>
+                        <select
+                          value={newCmdType}
+                          onChange={e => { setNewCmdType(e.target.value); setNewCmdParams({}); }}
+                          className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none"
+                        >
+                          {['isolate_network','unisolate_network','terminate_process','quarantine_file','run_cmd','collect_logs','scan_file','collect_forensics','filesystem_timeline','memory_dump','process_tree_snapshot','persistence_scan','agent_integrity_check','update_signatures'].map(t => (
+                            <option key={t} value={t}>{t}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">Timeout (s)</label>
+                        <input
+                          type="number"
+                          value={newCmdTimeout}
+                          onChange={e => setNewCmdTimeout(Number(e.target.value))}
+                          min={10} max={3600}
+                          className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none"
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">Description <span className="text-rose-500">*</span></label>
+                      <input
+                        type="text"
+                        value={newCmdDesc}
+                        onChange={e => setNewCmdDesc(e.target.value)}
+                        placeholder="What does this command do?"
+                        className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none"
+                      />
+                    </div>
+                    {/* Inline param fields for commands that need them */}
+                    {(COMMAND_PARAMS[newCmdType] || []).filter(p => p.type !== 'checklist').map(pd => (
+                      <div key={pd.key}>
+                        <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">{pd.label}{pd.required && <span className="text-rose-500 ml-1">*</span>}</label>
+                        <input
+                          type="text"
+                          value={newCmdParams[pd.key] || ''}
+                          onChange={e => setNewCmdParams(prev => ({ ...prev, [pd.key]: e.target.value }))}
+                          placeholder={pd.placeholder}
+                          className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none font-mono"
+                        />
+                      </div>
+                    ))}
+                    <button
+                      onClick={addCommandToPlaybook}
+                      className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold text-sm transition-colors"
+                    >
+                      <Plus className="w-4 h-4" />
+                      Add to Sequence
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="flex items-center justify-between gap-3 p-6 border-t border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/30 shrink-0">
               <button
-                onClick={() => setIsCreatingPlaybook(false)}
+                onClick={() => wizardStep === 1 ? setIsCreatingPlaybook(false) : setWizardStep(1)}
                 className="px-5 py-2.5 font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-800 rounded-lg transition-colors"
                 disabled={isSavingPlaybook}
               >
-                Cancel
+                {wizardStep === 1 ? 'Cancel' : '← Back'}
               </button>
-              <button
-                onClick={confirmCreatePlaybook}
-                disabled={isSavingPlaybook}
-                className="px-6 py-2.5 font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-md transition-all flex items-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed"
-              >
-                {isSavingPlaybook ? 'Saving...' : 'Create Playbook'}
-              </button>
+              {wizardStep === 1 ? (
+                <button
+                  onClick={() => {
+                    if (!newPlaybookName.trim() || !newPlaybookDesc.trim()) { alert('Please fill in Name and Description.'); return; }
+                    setWizardStep(2);
+                  }}
+                  className="px-6 py-2.5 font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-md transition-all"
+                >
+                  Next: Add Commands →
+                </button>
+              ) : (
+                <button
+                  onClick={confirmCreatePlaybook}
+                  disabled={isSavingPlaybook || newPlaybookCommands.length === 0}
+                  className="px-6 py-2.5 font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg shadow-md transition-all flex items-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
+                >
+                  {isSavingPlaybook ? (
+                    <><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Saving...</>
+                  ) : (
+                    <><CheckCircle className="w-4 h-4" /> Save Playbook ({newPlaybookCommands.length} cmd{newPlaybookCommands.length !== 1 ? 's' : ''})</>
+                  )}
+                </button>
+              )}
             </div>
           </div>
         </div>

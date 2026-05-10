@@ -1,6 +1,6 @@
 import { useNavigate, Link } from 'react-router-dom';
 import {
-    AlertTriangle, Monitor, Shield, Cpu, BarChart3
+    AlertTriangle, Monitor, Shield, Cpu, BarChart3, Plus, Terminal, Activity
 } from 'lucide-react';
 import { SkeletonKPICards } from '../components';
 import StatCard from '../components/StatCard';
@@ -116,6 +116,27 @@ export default function Dashboard() {
                     subtext={`Avg health ${Math.round(agentStats?.avg_health || 0)}%`}
                     onClick={() => navigate('/management/devices')}
                 />
+            </div>
+
+            {/* ── Quick Actions ── */}
+            <div className="flex items-center gap-3 flex-wrap p-4 bg-white dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700/60 rounded-xl animate-slide-up-fade">
+                <span className="text-xs font-bold text-slate-400 uppercase tracking-widest mr-1">Quick Actions</span>
+                <button
+                    onClick={() => navigate('/itsm/playbooks', { state: { openCreateWizard: true } })}
+                    className="flex items-center gap-2 px-4 py-2 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-700/60 rounded-lg text-sm font-semibold hover:bg-indigo-100 dark:hover:bg-indigo-900/40 transition-colors"
+                >
+                    <Terminal className="w-3.5 h-3.5" />
+                    <Plus className="w-3 h-3 -ml-1" />
+                    New Playbook
+                </button>
+                <button
+                    onClick={() => navigate('/itsm/automations', { state: { openCreateRule: true } })}
+                    className="flex items-center gap-2 px-4 py-2 bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-700/60 rounded-lg text-sm font-semibold hover:bg-blue-100 dark:hover:bg-blue-900/40 transition-colors"
+                >
+                    <Activity className="w-3.5 h-3.5" />
+                    <Plus className="w-3 h-3 -ml-1" />
+                    New Automation Rule
+                </button>
             </div>
 
             {/* ── Row 2: Threat Meter + MITRE Bar + OS Donut ── */}

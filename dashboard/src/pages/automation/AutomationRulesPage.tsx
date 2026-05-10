@@ -60,6 +60,11 @@ export function AutomationRulesPage() {
       });
     }
 
+    // Auto-open create rule modal when navigated from dashboard
+    if (state?.openCreateRule) {
+      openCreateModal();
+    }
+
     // Fetch automation rules and playbooks
     fetchRules();
     fetchPlaybooks();

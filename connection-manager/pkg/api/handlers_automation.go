@@ -81,6 +81,7 @@ func (h *AutomationHandlers) CreatePlaybook(c echo.Context) error {
 		Category:    req.Category,
 		Commands:    marshalCommands(req.Commands),
 		CreatedBy:   getCurrentUserID(c),
+		Enabled:     true,
 	}
 
 	if err := h.automationService.CreatePlaybook(c.Request().Context(), playbook); err != nil {

@@ -161,6 +161,12 @@ func (r *ReconnectManager) IsConnected() bool {
 	return r.connected.Load()
 }
 
+// ServerAddress satisfies GRPCHealthChecker. ReconnectManager does not track
+// the server address directly; return empty string.
+func (r *ReconnectManager) ServerAddress() string {
+	return ""
+}
+
 // IsReconnecting returns whether currently attempting reconnection.
 func (r *ReconnectManager) IsReconnecting() bool {
 	return r.reconnecting.Load()

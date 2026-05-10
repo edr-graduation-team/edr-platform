@@ -182,6 +182,11 @@ type Result struct {
 // Implemented by grpcclient.Client — injected to avoid circular imports.
 type GRPCHealthChecker interface {
 	IsConnected() bool
+	// ServerAddress returns the current C2 server address (host:port) that
+	// the gRPC client is actively connected to. Used by resolveC2IP as a
+	// DNS-independent fallback so isolation works even when the configured
+	// hostname (e.g. edr.local) is no longer resolvable.
+	ServerAddress() string
 }
 
 // QuarantineRestorer is an interface for allowlisting restored files.
@@ -655,17 +660,51 @@ func (h *Handler) resolveC2IP(hostOrIP string) (string, error) {
 	h.logger.Infof("[Isolate] Resolving hostname %q via DNS...", hostOrIP)
 	addrs, err := net.LookupHost(hostOrIP)
 	if err != nil {
-		// DNS failed — fall back to the IP the agent is currently connected to.
-		// This handles lab environments where the C2 hostname (e.g. "edr.local")
-		// is not registered in DNS but the agent already has a live connection.
+		// DNS failed — try fallbacks in priority order:
+
+		// Fallback 1: h.serverAddress is already a bare IP.
 		if h.serverAddress != "" {
 			fallbackHost, _, splitErr := splitHostPort(h.serverAddress)
 			if splitErr == nil && net.ParseIP(fallbackHost) != nil {
-				h.logger.Warnf("[Isolate] DNS failed for %q (%v) — using active connection IP %s as fallback",
-					hostOrIP, err, fallbackHost)
+				h.logger.Warnf("[Isolate] DNS failed for %q — using static serverAddress IP %s",
+					hostOrIP, fallbackHost)
 				return fallbackHost, nil
 			}
 		}
+
+		// Fallback 2: Use the live gRPC client address (updated on every reconnect).
+		// This handles the common case where the agent config stores a stale
+		// hostname (e.g. "edr.local") but is actively connected to a different
+		// address (e.g. the actual IP or "protosoft.cloud").
+		if h.grpcHealth != nil {
+			currentAddr := h.grpcHealth.ServerAddress()
+			if currentAddr != "" {
+				liveHost, _, splitErr := splitHostPort(currentAddr)
+				if splitErr == nil && liveHost != "" {
+					// Already a bare IP — use it directly.
+					if net.ParseIP(liveHost) != nil {
+						h.logger.Warnf("[Isolate] DNS failed for %q — using live gRPC peer IP %s",
+							hostOrIP, liveHost)
+						return liveHost, nil
+					}
+					// It's a resolvable hostname different from the failing one — try DNS.
+					if !strings.EqualFold(liveHost, hostOrIP) {
+						if liveAddrs, liveErr := net.LookupHost(liveHost); liveErr == nil && len(liveAddrs) > 0 {
+							for _, a := range liveAddrs {
+								if ip := net.ParseIP(a); ip != nil && ip.To4() != nil {
+									h.logger.Warnf("[Isolate] DNS failed for %q; resolved live host %q → %s",
+										hostOrIP, liveHost, a)
+									return a, nil
+								}
+							}
+							h.logger.Warnf("[Isolate] Resolved live host %q → %s (IPv6)", liveHost, liveAddrs[0])
+							return liveAddrs[0], nil
+						}
+					}
+				}
+			}
+		}
+
 		return "", fmt.Errorf("DNS resolution of %q failed: %w", hostOrIP, err)
 	}
 	if len(addrs) == 0 {

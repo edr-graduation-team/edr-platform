@@ -438,6 +438,19 @@ func (c *Client) Disconnect() error {
 	return nil
 }
 
+// ServerAddress returns the current C2 server address (host:port) as last
+// updated by Connect(). When the agent connects via a fallback IP, Connect()
+// updates cfg.Server.Address to that address, so this always reflects the
+// address the agent is actively using — not a stale config value.
+func (c *Client) ServerAddress() string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if c.cfg != nil {
+		return c.cfg.Server.Address
+	}
+	return ""
+}
+
 // IsConnected returns the TRUE transport-layer connectivity state.
 //
 // FIX — Blind Watchdog (connectivity.Ready check):

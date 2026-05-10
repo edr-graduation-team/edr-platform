@@ -474,12 +474,13 @@ func main() {
 	restAPIServer.Echo().GET(cfg.Monitoring.MetricsPath, echo.WrapHandler(promhttp.Handler()))
 
 	var automationHandlers *api.AutomationHandlers
+	var automationService *service.AutomationService
 	if dbPool != nil {
 		metricsService := service.NewMetricsService(logger, automationMetricsRepo)
 		commandService := service.NewCommandService(logger, commandRepo, executionRepo, automationMetricsRepo)
 		mlOptimizer := service.NewMLOptimizer(logger, automationMetricsRepo, automationRuleRepo)
 		notificationService := service.NewNotificationService(logger)
-		automationService := service.NewAutomationService(logger, alertRepo, playbookRepo, automationRuleRepo, executionRepo, commandService, notificationService, metricsService, mlOptimizer)
+		automationService = service.NewAutomationService(logger, alertRepo, playbookRepo, automationRuleRepo, executionRepo, commandService, notificationService, metricsService, mlOptimizer)
 		automationHandlers = api.NewAutomationHandlers(logger, automationService, metricsService)
 		// Wire the AgentRegistry so playbook commands reach online agents immediately
 		// via their live gRPC stream (not just queued in DB for next reconnect).
@@ -508,7 +509,10 @@ func main() {
 		c2GRPCAddress = fmt.Sprintf("localhost:%d", cfg.Server.GRPCPort)
 	}
 	apiHandlers.SetGRPCAddress(c2GRPCAddress)
-	logger.Infof("[C2] Isolation server_address configured as %s", c2GRPCAddress)
+	if automationService != nil {
+		automationService.SetC2Address(c2GRPCAddress)
+	}
+	logger.Infof("[C2] Isolation server_address configured as %s (REST + playbook paths)", c2GRPCAddress)
 
 	// Wire CommandRepository into REST handlers and gRPC server for C2 persistence.
 	// Also wire into EventHandler for pending command re-delivery on agent reconnect.

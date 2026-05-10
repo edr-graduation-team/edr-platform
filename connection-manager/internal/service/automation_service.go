@@ -30,6 +30,7 @@ type AutomationService struct {
 	mlOptimizer         *MLOptimizer
 	cooldownMap         map[uuid.UUID]time.Time
 	cooldownMutex       sync.RWMutex
+	c2Address           string // C2 gRPC address injected into isolate commands
 }
 
 // NewAutomationService creates a new automation service instance
@@ -56,6 +57,13 @@ func NewAutomationService(
 		mlOptimizer:         mlOptimizer,
 		cooldownMap:         make(map[uuid.UUID]time.Time),
 	}
+}
+
+// SetC2Address sets the C2 gRPC address that is automatically injected as
+// "server_address" into isolate_network playbook commands so the agent builds
+// correct firewall ALLOW rules without falling back to its config file.
+func (s *AutomationService) SetC2Address(addr string) {
+	s.c2Address = addr
 }
 
 // ProcessAlert handles the main alert processing workflow
@@ -354,7 +362,7 @@ func (s *AutomationService) executePlaybookCommands(ctx context.Context, playboo
 
 		// Enrich missing parameters with sensible defaults so the agent
 		// doesn't reject commands that require specific fields.
-		enrichPlaybookCommandParams(&cmd, alertID)
+		enrichPlaybookCommandParams(&cmd, alertID, s.c2Address)
 
 		result := s.commandService.ExecutePlaybookCommand(ctx, executionID, cmd, agentID)
 
@@ -374,7 +382,7 @@ func (s *AutomationService) executePlaybookCommands(ctx context.Context, playboo
 // enrichPlaybookCommandParams injects required parameters that may be missing
 // from the playbook definition in the DB. This ensures commands that need
 // specific fields (pid, log_types, file_path) work without manual input.
-func enrichPlaybookCommandParams(cmd *models.PlaybookCommand, alertID uuid.UUID) {
+func enrichPlaybookCommandParams(cmd *models.PlaybookCommand, alertID uuid.UUID, c2Address string) {
 	if cmd.Parameters == nil {
 		cmd.Parameters = make(map[string]interface{})
 	}
@@ -420,6 +428,16 @@ func enrichPlaybookCommandParams(cmd *models.PlaybookCommand, alertID uuid.UUID)
 			// Normalise: agent always reads "cmd"
 			cmd.Parameters["cmd"] = cmd.Parameters["command"]
 			delete(cmd.Parameters, "command")
+		}
+
+	case "isolate", "isolate_network", "unisolate", "unisolate_network", "restore_network":
+		// Inject C2 server_address so the agent builds correct ALLOW firewall rules.
+		// Without this, the agent falls back to its config file (e.g. edr.local)
+		// which may not resolve in the deployment environment.
+		if _, hasAddr := cmd.Parameters["server_address"]; !hasAddr {
+			if c2Address != "" {
+				cmd.Parameters["server_address"] = c2Address
+			}
 		}
 	}
 

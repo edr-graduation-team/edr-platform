@@ -129,12 +129,6 @@ func (s *AutomationService) shouldExecute(rule *models.AutomationRule, alert *mo
 		return false
 	}
 
-	// Check success rate
-	if rule.SuccessRate < 0.5 && rule.LastExecution != nil {
-		s.logger.Infof("Rule %s has low success rate (%.2f%%)", rule.Name, rule.SuccessRate*100)
-		return false
-	}
-
 	// Check advanced conditions
 	var conditions map[string]interface{}
 	if len(rule.TriggerConditions) > 0 {
@@ -479,11 +473,15 @@ func (s *AutomationService) updateRuleMetrics(ruleID uuid.UUID, success bool, ex
 		return
 	}
 
-	// Simple moving average for success rate
+	// Exponential weighted average. Initialise to 1.0 on first execution so a
+	// brand-new rule doesn't collapse to 0 after a single failure.
+	if rule.LastExecution == nil {
+		rule.SuccessRate = 1.0
+	}
 	if success {
-		rule.SuccessRate = (rule.SuccessRate*0.8 + 0.2) // 80% weight to old, 20% to new success
+		rule.SuccessRate = rule.SuccessRate*0.8 + 0.2
 	} else {
-		rule.SuccessRate = (rule.SuccessRate * 0.8) // 80% weight to old, 0% to new failure
+		rule.SuccessRate = rule.SuccessRate * 0.8
 	}
 
 	rule.LastExecution = &time.Time{}
